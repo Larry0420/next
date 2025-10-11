@@ -1,0 +1,17 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background -->
+    <rect width="192" height="192" fill="#F67C0F" rx="34"/>
+    
+    <!-- Tram body -->
+    <rect x="44" y="36" width="104" height="124" rx="16" stroke="white" stroke-width="5"/>
+    
+    <!-- Windshield -->
+    <rect x="60" y="48" width="72" height="52" rx="8" stroke="white" stroke-width="5"/>
+    
+    <!-- Headlights -->
+    <circle cx="68" cy="136" r="8" stroke="white" stroke-width="5"/>
+    <circle cx="124" cy="136" r="8" stroke="white" stroke-width="5"/>
+    
+    <!-- Pantograph on top -->
+    <path d="M 80 36 V 24 L 112 24 V 36" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

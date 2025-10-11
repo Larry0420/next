@@ -1,0 +1,71 @@
+name: lrt_next_train
+description: Hong Kong MTR Light Rail Next Train Flutter app with Material motion
+publish_to: "none"
+version: 1.4.2+7
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.5.0
+  intl: ^0.20.2
+  provider: ^6.1.2
+  animations: ^2.0.11
+  flutter_animate: ^4.5.2
+  flutter_staggered_animations: ^1.1.1
+  implicitly_animated_reorderable_list_2: ^0.6.0
+  connectivity_plus: ^7.0.0
+  shared_preferences: ^2.5.3
+  liquid_glass_renderer: ^0.1.1-dev.10
+  auto_size_text: ^3.0.0 # Or the latest version
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.2
+
+flutter:
+  uses-material-design: true
+
+# 圖示配置 - 平台優化配置，遵循各平台設計指南
+flutter_launcher_icons:
+  # Android 配置 - Material Design 3 適應性圖示
+  android: "launcher_icon"
+  image_path_android: "assets/icon/tram_icon_android.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#F67C0F" # Material Design 橙色背景
+  adaptive_icon_foreground: "assets/icon/tram_icon_foreground_android.png"
+  notification_icon_android: "assets/icon/tram_icon_minimal.png" # 通知圖示使用簡化版本
+  
+  # iOS 配置 - 符合 Apple Human Interface Guidelines
+  ios: true
+  image_path_ios: "assets/icon/tram_icon_high.png" # 使用高品質版本
+  remove_alpha_ios: true # iOS 要求移除透明背景
+  
+  # Web 配置 - PWA 優化，支援多種尺寸和遮罩圖示
+  web:
+    generate: true
+    image_path: "assets/icon/tram_icon_high.png" # 高品質基礎圖示
+    background_color: "#1976D2" # 主題背景色
+    theme_color: "#1976D2" # PWA 主題色彩
+    maskable: true # PWA 遮罩圖示支援
+    
+  # Windows 配置 - 高 DPI 支援和 Windows 11 設計
+  windows:
+    generate: true
+    image_path: "assets/icon/tram_icon_high.png"
+    icon_size: 256 # 高 DPI 顯示優化
+    
+  # macOS 配置 - macOS Big Sur+ 圓角方形設計
+  macos:
+    generate: true  
+    image_path: "assets/icon/tram_icon_high.png"
+    
+  # Linux 配置 - FreeDesktop 標準兼容
+  linux:
+    generate: true
+    image_path: "assets/icon/tram_icon_high.png"
