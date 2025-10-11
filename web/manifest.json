@@ -1,13 +1,17 @@
 {
-    "name": "LRT Next Train",
-    "short_name": "LRT Next",
+    "name": "輕鐵到站時間",
+    "short_name": "輕鐵到站",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#F67C0F",
     "theme_color": "#F67C0F",
-    "description": "Hong Kong Light Rail real-time arrival information",
+    "description": "香港輕鐵實時到站資訊查詢",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "lang": "zh-HK",
+    "dir": "ltr",
+    "scope": "/",
+    "categories": ["utilities", "travel", "productivity"],
     "icons": [
         {
             "src": "icons/Icon-192.svg",
