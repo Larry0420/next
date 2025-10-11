@@ -1,0 +1,20 @@
+<svg width="108" height="108" viewBox="0 0 108 108" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background 108x108 -->
+    <rect width="108" height="108" fill="#F67C0F"/>
+    
+    <!-- Safe zone boundary (66x66 centered) starts at (21, 21) -->
+    <!-- Icon content scaled to fit 66x66 safe zone -->
+    
+    <!-- Tram body (scaled and centered) -->
+    <rect x="28" y="27" width="52" height="62" rx="8" stroke="white" stroke-width="2.5" fill="none"/>
+    
+    <!-- Windshield -->
+    <rect x="36" y="33" width="36" height="26" rx="4" stroke="white" stroke-width="2.5" fill="none"/>
+    
+    <!-- Headlights -->
+    <circle cx="40" cy="77" r="4" stroke="white" stroke-width="2.5" fill="none"/>
+    <circle cx="68" cy="77" r="4" stroke="white" stroke-width="2.5" fill="none"/>
+    
+    <!-- Pantograph on top -->
+    <path d="M 44 27 V 19 L 64 19 V 27" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
