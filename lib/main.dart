@@ -18,6 +18,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'mtr_schedule_page.dart';
+
 // ========================= Station Grouping (Top-level) =========================
 class _StationGroupInfo {
   const _StationGroupInfo(this.name, this.nameEn, this.stationIds);
@@ -29,18 +31,18 @@ class _StationGroupInfo {
 // Single source of truth for all station groupings, based on the Light Rail map.
 const _stationGroups = [
   // Tin Shui Wai (Zone 4 & 5A)
-  _StationGroupInfo('天水圍北', 'Tin Shui Wai North', {490, 500, 510, 520, 530, 540, 550}),
-  _StationGroupInfo('天水圍南', 'Tin Shui Wai South', {430, 435, 445, 448, 450, 455, 460, 468, 480}),
+  _StationGroupInfo('天水圍北', 'Tin Shui Wai (N)', {490, 500, 510, 520, 530, 540, 550}),
+  _StationGroupInfo('天水圍南', 'Tin Shui Wai (S)', {430, 435, 445, 448, 450, 455, 460, 468, 480}),
 
   // Yuen Long (Zone 4 & 5)
-  _StationGroupInfo('元朗市中心', 'Yuen Long Central', {560, 570, 580, 590, 600}),
-  _StationGroupInfo('屏山段', 'Ping Shan Section', {400, 425}),
-  _StationGroupInfo('洪水橋段', 'Hung Shui Kiu Section', {370, 380, 390}),
+  _StationGroupInfo('元朗', 'Yuen Long', {560, 570, 580, 590, 600}),
+  _StationGroupInfo('屏山', 'Ping Shan', {400, 425}),
+  _StationGroupInfo('洪水橋', 'Hung Shui Kiu', {370, 380, 390}),
 
   // Tuen Mun (Zone 1, 2, & 3)
-  _StationGroupInfo('屯門碼頭區', 'Tuen Mun Ferry Pier', {1, 10, 15, 20, 30, 40, 50, 920}),
-  _StationGroupInfo('屯門市中心', 'Tuen Mun Central', {60, 70, 75, 80, 90, 212, 220, 230, 240, 250, 260, 265, 270, 275, 280, 295, 300, 310, 320, 330, 340, 350, 360}),
-  _StationGroupInfo('屯門北區', 'Tuen Mun North', {100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200}),
+  _StationGroupInfo('屯門(碼頭/南)', 'Tuen Mun (S)', {1, 10, 15, 20, 30, 40, 50, 920}),
+  _StationGroupInfo('屯門(市中心)', 'Tuen Mun Town', {60, 70, 75, 80, 90, 212, 220, 230, 240, 250, 260, 265, 270, 275, 280, 295, 300, 310, 320, 330, 340, 350, 360}),
+  _StationGroupInfo('屯門(兆康/北)', 'Tuen Mun (N)', {100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200}),
 ];
 
 // A lookup map for efficient retrieval of group info by station ID.
@@ -667,6 +669,8 @@ class LrtApp extends StatelessWidget {
           ChangeNotifierProvider(create: (_) => StationProvider()..initialize()),
           ChangeNotifierProvider(create: (_) => ScheduleProvider()..loadCacheAlertSetting()),
           ChangeNotifierProvider(create: (_) => RoutesCatalogProvider()..loadFromEmbeddedJson()),
+          ChangeNotifierProvider(create: (_) => MtrCatalogProvider()), // MTR catalog provider
+          ChangeNotifierProvider(create: (_) => MtrScheduleProvider()), // MTR schedule provider
       ],
       child: Builder(
         builder: (context) {
@@ -1776,21 +1780,25 @@ class ThemeProvider extends ChangeNotifier {
     static const String _hideStationIdKey = 'hide_station_id';
     static const String _showGridDebugKey = 'show_grid_debug';
     static const String _showCacheStatusKey = 'show_cache_status';
+    static const String _showMtrArrivalDetailsKey = 'show_mtr_arrival_details';
     
     bool _hideStationId = false;
     bool _showGridDebug = false;
     bool _showCacheStatus = false; // Default to hidden
+    bool _showMtrArrivalDetails = false; // Default to hidden for cleaner UI
     SharedPreferences? _prefs;
 
     bool get hideStationId => _hideStationId;
     bool get showGridDebug => _showGridDebug;
     bool get showCacheStatus => _showCacheStatus;
+    bool get showMtrArrivalDetails => _showMtrArrivalDetails;
 
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
       _hideStationId = _prefs!.getBool(_hideStationIdKey) ?? false;
       _showGridDebug = _prefs!.getBool(_showGridDebugKey) ?? false;
       _showCacheStatus = _prefs!.getBool(_showCacheStatusKey) ?? false;
+      _showMtrArrivalDetails = _prefs!.getBool(_showMtrArrivalDetailsKey) ?? false;
       notifyListeners();
     }
 
@@ -1812,6 +1820,13 @@ class ThemeProvider extends ChangeNotifier {
       _showCacheStatus = show;
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool(_showCacheStatusKey, show);
+      notifyListeners();
+    }
+    
+    Future<void> setShowMtrArrivalDetails(bool show) async {
+      _showMtrArrivalDetails = show;
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool(_showMtrArrivalDetailsKey, show);
       notifyListeners();
     }
   }
@@ -1969,6 +1984,7 @@ class LanguageProvider extends ChangeNotifier {
   // Labels
   String get appTitle => _isEnglish ? 'LRT Next Train' : '輕鐵班次';
   String get schedule => _isEnglish ? 'Schedule' : '班次表';
+  String get mtr => _isEnglish ? 'MTR' : '港鐵';
   String get routes => _isEnglish ? 'Routes' : '路綫';
   String get settings => _isEnglish ? 'Settings' : '設定';
   String get selectStation => _isEnglish ? 'Select Station' : '選擇車站';
@@ -3031,8 +3047,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _loadCachedPageIndex() async {
     _prefs ??= await SharedPreferences.getInstance();
     final cachedIndex = _prefs!.getInt(_pageIndexKey) ?? 0;
-    // 確保索引在有效範圍內 (0-2)
-    if (cachedIndex >= 0 && cachedIndex <= 2) {
+    // 確保索引在有效範圍內 (0-3 for Schedule, Routes, MTR, Settings)
+    if (cachedIndex >= 0 && cachedIndex <= 3) {
       setState(() {
         _pageIndex = cachedIndex;
       });
@@ -3128,6 +3144,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final pages = [
       _SchedulePage(stationProvider: station, scheduleProvider: sched, key: const ValueKey('schedule')),
       const _RoutesPage(key: ValueKey('routes')),
+      const MtrSchedulePage(key: ValueKey('mtr')),
       const _SettingsPage(key: ValueKey('settings')),
     ];
 
@@ -3264,6 +3281,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             builder: (context, accessibility, _) => NavigationDestination(
               icon: Icon(Icons.route, size: 24 * accessibility.iconScale), 
               label: lang.routes
+            ),
+          ),
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) => NavigationDestination(
+              icon: Icon(Icons.train, size: 24 * accessibility.iconScale), 
+              label: lang.mtr
             ),
           ),
           Consumer<AccessibilityProvider>(
@@ -7945,6 +7968,26 @@ class _SettingsPage extends StatelessWidget {
               value: devSettings.showCacheStatus,
               onChanged: (value) {
                 devSettings.setShowCacheStatus(value);
+              },
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: UIConstants.spacingXS),
+        
+        // Show MTR Arrival Details setting
+        Consumer<DeveloperSettingsProvider>(
+          builder: (context, devSettings, _) => _buildCompactCard(
+            context,
+            icon: Icons.train,
+            title: lang.isEnglish ? 'Show MTR Arrival Details' : '顯示港鐵到站詳情',
+            subtitle: devSettings.showMtrArrivalDetails 
+                ? (lang.isEnglish ? 'Platform and ETA details are visible' : '顯示月台及預計到站時間詳情')
+                : (lang.isEnglish ? 'Simplified arrival time display' : '簡化到站時間顯示'),
+            trailing: Switch(
+              value: devSettings.showMtrArrivalDetails,
+              onChanged: (value) {
+                devSettings.setShowMtrArrivalDetails(value);
               },
             ),
           ),

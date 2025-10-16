@@ -30,16 +30,18 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - lib/Route Station.json
 
 # 圖示配置 - 平台優化配置，遵循各平台設計指南
 flutter_launcher_icons:
   # Android 配置 - Material Design 3 適應性圖示
-  android: "launcher_icon"
-  image_path_android: "assets/icon/tram_icon_android.png"
-  min_sdk_android: 21
-  adaptive_icon_background: "#F67C0F" # Material Design 橙色背景
-  adaptive_icon_foreground: "assets/icon/tram_icon_foreground_android.png"
-  notification_icon_android: "assets/icon/tram_icon_minimal.png" # 通知圖示使用簡化版本
+  #/**android:
+  #image_path_android: "assets/icon/tram_icon_android.png"
+  #min_sdk_android: 21
+  #adaptive_icon_background: "#F67C0F" # Material Design 橙色背景
+  #adaptive_icon_foreground: "assets/icon/tram_icon_foreground_android.png"
+  #notification_icon_android: "assets/icon/tram_icon_minimal.png" # 通知圖示使用簡化版本
   
   # iOS 配置 - 符合 Apple Human Interface Guidelines
   ios: true

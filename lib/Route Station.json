@@ -1,0 +1,193 @@
+{
+  "line_groups": [
+    {
+      "line_code": "AEL",
+      "line_name": "Airport Express",
+      "stations": ["HOK", "KOW", "TSY", "AIR", "AWE"],
+      "directions": {
+        "UP": ["AIR", "AWE"],
+        "DOWN": ["HOK"]
+      }
+    },
+    {
+      "line_code": "TCL",
+      "line_name": "Tung Chung Line",
+      "stations": ["HOK", "KOW", "OLY", "NAC", "LAK", "TSY", "SUN", "TUC"],
+      "directions": {
+        "UP": ["TUC"],
+        "DOWN": ["HOK"]
+      }
+    },
+    {
+      "line_code": "TML",
+      "line_name": "Tuen Ma Line",
+      "stations": ["WKS", "MOS", "HEO", "TSH", "SHM", "CIO", "STW", "CKT", "TAW", "HIK", "DIH", "KAT", "SUW", "TKW", "HOM", "HUH", "ETS", "AUS", "NAC", "MEF", "TWW", "KSR", "YUL", "LOP", "TIS", "SIH", "TUM"],
+      "directions": {
+        "UP": ["TUM"],
+        "DOWN": ["WKS"]
+      }
+    },
+    {
+      "line_code": "TKL",
+      "line_name": "Tseung Kwan O Line",
+      "stations": ["NOP", "QUB", "YAT", "TIK", "TKO", "LHP", "HAH", "POA"],
+      "directions": {
+        "UP": ["POA", "LHP"],
+        "DOWN": ["TIK", "NOP"]
+      }
+    },
+    {
+      "line_code": "EAL",
+      "line_name": "East Rail Line",
+      "stations": ["ADM", "EXC", "HUH", "MKK", "KOT", "TAW", "SHT", "FOT", "RAC", "UNI", "TAP", "TWO", "FAN", "SHS", "LOW", "LMC"],
+      "directions": {
+        "UP": ["LMC", "LOW", "SHS", "TAP", "RAC", "FOT", "SHT"],
+        "DOWN": ["ADM", "HUH", "MKK"]
+      }
+    },
+    {
+      "line_code": "SIL",
+      "line_name": "South Island Line",
+      "stations": ["ADM", "OCP", "WCH", "LET", "SOH"],
+      "directions": {
+        "UP": ["SOH"],
+        "DOWN": ["ADM"]
+      }
+    },
+    {
+      "line_code": "TWL",
+      "line_name": "Tsuen Wan Line",
+      "stations": ["CEN", "ADM", "TST", "JOR", "YMT", "MOK", "PRE", "SSP", "CSW", "LCK", "MEF", "LAK", "KWF", "KWH", "TWH", "TSW"],
+      "directions": {
+        "UP": ["TSW"],
+        "DOWN": ["CEN"]
+      }
+    },
+    {
+      "line_code": "ISL",
+      "line_name": "Island Line",
+      "stations": ["KET", "HKU", "SYP", "SHW", "CEN", "ADM", "WAC", "CAB", "TIH", "FOH", "NOP", "QUB", "TAK", "SWH", "SKW", "HFC", "CHW"],
+      "directions": {
+        "UP": ["CHW"],
+        "DOWN": ["KET"]
+      }
+    },
+    {
+      "line_code": "KTL",
+      "line_name": "Kwun Tong Line",
+      "stations": ["WHA", "HOM", "YMT", "MOK", "PRE", "SKM", "KOT", "LOF", "WTS", "DIH", "CHH", "KOB", "NTK", "KWT", "LAT", "YAT", "TIK"],
+      "directions": {
+        "UP": ["TIK"],
+        "DOWN": ["WHA"]
+      }
+    },
+    {
+      "line_code": "DRL",
+      "line_name": "Disneyland Resort Line",
+      "stations": ["SUN", "DIS"],
+      "directions": {
+        "UP": ["SUN"],
+        "DOWN": ["DIS"]
+      }
+    }
+  ],
+  "station_groups": [
+    { "station_code": "ADM", "lines": ["EAL", "SIL", "TWL", "ISL"] },
+    { "station_code": "AIR", "lines": ["AEL"] },
+    { "station_code": "AUS", "lines": ["TML"] },
+    { "station_code": "AWE", "lines": ["AEL"] },
+    { "station_code": "CAB", "lines": ["ISL"] },
+    { "station_code": "CEN", "lines": ["TWL", "ISL"] },
+    { "station_code": "CHH", "lines": ["KTL"] },
+    { "station_code": "CHW", "lines": ["ISL"] },
+    { "station_code": "CKT", "lines": ["TML"] },
+    { "station_code": "CIO", "lines": ["TML"] },
+    { "station_code": "CSW", "lines": ["TWL"] },
+    { "station_code": "DIH", "lines": ["TML", "KTL"] },
+    { "station_code": "DIS", "lines": ["DRL"] },
+    { "station_code": "EAL", "lines": [] },
+    { "station_code": "ETS", "lines": ["TML"] },
+    { "station_code": "EXC", "lines": ["EAL"] },
+    { "station_code": "FAN", "lines": ["EAL"] },
+    { "station_code": "FOH", "lines": ["ISL"] },
+    { "station_code": "FOT", "lines": ["EAL"] },
+    { "station_code": "HAH", "lines": ["TKL"] },
+    { "station_code": "HEO", "lines": ["TML"] },
+    { "station_code": "HFC", "lines": ["ISL"] },
+    { "station_code": "HIK", "lines": ["TML"] },
+    { "station_code": "HKU", "lines": ["ISL"] },
+    { "station_code": "HOK", "lines": ["AEL", "TCL"] },
+    { "station_code": "HOM", "lines": ["TML", "KTL"] },
+    { "station_code": "HUH", "lines": ["TML", "EAL"] },
+    { "station_code": "JOR", "lines": ["TWL"] },
+    { "station_code": "KAT", "lines": ["TML"] },
+    { "station_code": "KET", "lines": ["ISL"] },
+    { "station_code": "KOB", "lines": ["KTL"] },
+    { "station_code": "KOT", "lines": ["EAL", "KTL"] },
+    { "station_code": "KOW", "lines": ["AEL", "TCL"] },
+    { "station_code": "KSR", "lines": ["TML"] },
+    { "station_code": "KWF", "lines": ["TWL"] },
+    { "station_code": "KWH", "lines": ["TWL"] },
+    { "station_code": "KWT", "lines": ["KTL"] },
+    { "station_code": "LAK", "lines": ["TCL", "TWL"] },
+    { "station_code": "LAT", "lines": ["KTL"] },
+    { "station_code": "LET", "lines": ["SIL"] },
+    { "station_code": "LHP", "lines": ["TKL"] },
+    { "station_code": "LMC", "lines": ["EAL"] },
+    { "station_code": "LOF", "lines": ["KTL"] },
+    { "station_code": "LOP", "lines": ["TML"] },
+    { "station_code": "LOW", "lines": ["EAL"] },
+    { "station_code": "MEF", "lines": ["TML", "TWL"] },
+    { "station_code": "MKK", "lines": ["EAL"] },
+    { "station_code": "MOK", "lines": ["TWL", "KTL"] },
+    { "station_code": "MOS", "lines": ["TML"] },
+    { "station_code": "NAC", "lines": ["TCL", "TML"] },
+    { "station_code": "NOP", "lines": ["TKL", "ISL"] },
+    { "station_code": "NTK", "lines": ["KTL"] },
+    { "station_code": "OCP", "lines": ["SIL"] },
+    { "station_code": "OLY", "lines": ["TCL"] },
+    { "station_code": "POA", "lines": ["TKL"] },
+    { "station_code": "PRE", "lines": ["TWL", "KTL"] },
+    { "station_code": "QUB", "lines": ["TKL", "ISL"] },
+    { "station_code": "RAC", "lines": ["EAL"] },
+    { "station_code": "SHM", "lines": ["TML"] },
+    { "station_code": "SHS", "lines": ["EAL"] },
+    { "station_code": "SHW", "lines": ["ISL"] },
+    { "station_code": "SIH", "lines": ["TML"] },
+    { "station_code": "SKM", "lines": ["KTL"] },
+    { "station_code": "SKW", "lines": ["ISL"] },
+    { "station_code": "SOH", "lines": ["SIL"] },
+    { "station_code": "SSP", "lines": ["TWL"] },
+    { "station_code": "STW", "lines": ["TML"] },
+    { "station_code": "SUW", "lines": ["TML"] },
+    { "station_code": "SUN", "lines": ["TCL", "DRL"] },
+    { "station_code": "SWH", "lines": ["ISL"] },
+    { "station_code": "SYP", "lines": ["ISL"] },
+    { "station_code": "TAK", "lines": ["ISL"] },
+    { "station_code": "TAP", "lines": ["EAL"] },
+    { "station_code": "TAW", "lines": ["TML", "EAL"] },
+    { "station_code": "TIH", "lines": ["ISL"] },
+    { "station_code": "TIK", "lines": ["TKL", "KTL"] },
+    { "station_code": "TIS", "lines": ["TML"] },
+    { "station_code": "TKO", "lines": ["TKL"] },
+    { "station_code": "TKW", "lines": ["TML"] },
+    { "station_code": "TSH", "lines": ["TML"] },
+    { "station_code": "TST", "lines": ["TWL"] },
+    { "station_code": "TSW", "lines": ["TWL"] },
+    { "station_code": "TSY", "lines": ["AEL", "TCL"] },
+    { "station_code": "TUC", "lines": ["TCL"] },
+    { "station_code": "TUM", "lines": ["TML"] },
+    { "station_code": "TWH", "lines": ["TWL"] },
+    { "station_code": "TWO", "lines": ["EAL"] },
+    { "station_code": "TWW", "lines": ["TML"] },
+    { "station_code": "UNI", "lines": ["EAL"] },
+    { "station_code": "WAC", "lines": ["ISL"] },
+    { "station_code": "WCH", "lines": ["SIL"] },
+    { "station_code": "WHA", "lines": ["KTL"] },
+    { "station_code": "WKS", "lines": ["TML"] },
+    { "station_code": "WTS", "lines": ["KTL"] },
+    { "station_code": "YAT", "lines": ["TKL", "KTL"] },
+    { "station_code": "YMT", "lines": ["TWL", "KTL"] },
+    { "station_code": "YUL", "lines": ["TML"] }
+  ]
+}
