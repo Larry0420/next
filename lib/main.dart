@@ -4883,15 +4883,17 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 更智能的響應式設計 - 多個斷點
+        // 更智能的響應式設計 - 多個斷點，針對 PC 瀏覽器優化
         final double availableWidth = constraints.maxWidth;
         final bool isNarrowScreen = availableWidth < 400;
         final bool isMediumScreen = availableWidth >= 400 && availableWidth < 700;
-        final bool isWideScreen = availableWidth >= 700;
+        final bool isWideScreen = availableWidth >= 700 && availableWidth < 1200;
+        final bool isVeryWideScreen = availableWidth >= 1200;
         
-        // 根據螢幕大小調整佈局 - 緊湊設計
-        final int districtFlex = isWideScreen ? 3 : (isMediumScreen ? 2 : 1);
-        final int routeFlex = isWideScreen ? 2 : 1;
+        // 根據螢幕大小調整佈局 - 地區選擇器始終較短或等寬
+        // 中等及更寬螢幕：地區選擇器保持較短，給予路線選擇器更多空間
+        final int districtFlex = isVeryWideScreen ? 2 : (isWideScreen ? 2 : (isMediumScreen ? 1 : 1));
+        final int routeFlex = isVeryWideScreen ? 3 : (isWideScreen ? 3 : (isMediumScreen ? 2 : 1));
         final double horizontalPadding = isNarrowScreen ? 8 : 10;
         final double verticalPadding = showDistricts || showRoutes ? 8 : 4;
         final double dividerMargin = 4;
@@ -5149,11 +5151,10 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
   }) {
     final lang = context.watch<LanguageProvider>();
     
-    return IntrinsicHeight(
+    return Row(
       key: key,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
           // 地區選擇列（左側）
           Expanded(
             flex: districtFlex,
@@ -5282,8 +5283,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
             ),
           ),
         ],
-      ),
-    );
+      );
   }
 
   // 構建選擇器卡片的輔助方法 - 優化視覺層次與互動反饋

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -17,24 +18,305 @@ class MtrApiService {
   // MTR Next Train API endpoint
   static const String _baseUrl = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php';
   
-  Future<MtrScheduleResponse> fetchSchedule(String lineCode, String stationCode) async {
-    try {
-      final url = Uri.parse('$_baseUrl?line=$lineCode&sta=$stationCode');
-      debugPrint('MTR API: Fetching schedule for line=$lineCode, station=$stationCode');
-      
-      final response = await http.get(url).timeout(const Duration(seconds: 15));
-      
-      if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
-        return MtrScheduleResponse.fromJson(json);
-      } else {
-        throw Exception('MTR API Error: ${response.statusCode}');
+  // ===== CACHING LAYER FOR POOR NETWORK CONDITIONS =====
+  
+  // In-memory cache with TTL
+  static final Map<String, _CachedSchedule> _memoryCache = {};
+  static const Duration _memoryCacheTTL = Duration(seconds: 45); // Stale after 45s
+  static const Duration _memoryCacheMaxAge = Duration(minutes: 5); // Expire after 5min
+  
+  // Persistent cache key prefix
+  static const String _persistentCachePrefix = 'mtr_schedule_cache_';
+  static const String _cacheVersionKey = 'mtr_cache_version';
+  static const int _currentCacheVersion = 1;
+  
+  // Request deduplication - prevent duplicate simultaneous requests
+  static final Map<String, Future<MtrScheduleResponse>> _inflightRequests = {};
+  
+  // Network retry configuration
+  static const int _maxRetries = 3;
+  static const Duration _baseRetryDelay = Duration(seconds: 2);
+  
+  /// Fetch schedule with intelligent caching and retry logic
+  /// - Uses in-memory cache if available and fresh
+  /// - Falls back to persistent cache if network fails
+  /// - Implements exponential backoff with jitter
+  /// - Deduplicates simultaneous requests
+  Future<MtrScheduleResponse> fetchSchedule(
+    String lineCode, 
+    String stationCode, {
+    bool forceRefresh = false,
+    bool allowStale = true, // Allow serving stale cache during network issues
+  }) async {
+    final cacheKey = _getCacheKey(lineCode, stationCode);
+    
+    // Check if request is already in-flight (deduplication)
+    if (!forceRefresh && _inflightRequests.containsKey(cacheKey)) {
+      debugPrint('MTR API: Reusing in-flight request for $cacheKey');
+      return _inflightRequests[cacheKey]!;
+    }
+    
+    // Check memory cache first (fast path)
+    if (!forceRefresh) {
+      final cached = _memoryCache[cacheKey];
+      if (cached != null && !cached.isExpired) {
+        if (cached.isFresh) {
+          debugPrint('MTR API: Serving fresh cache for $cacheKey');
+          return cached.response;
+        } else if (allowStale) {
+          // Stale-while-revalidate: serve stale, fetch in background
+          debugPrint('MTR API: Serving stale cache, revalidating in background for $cacheKey');
+          unawaited(_backgroundRefresh(lineCode, stationCode, cacheKey));
+          return cached.response;
+        }
       }
-    } catch (e) {
-      debugPrint('MTR API Error: $e');
-      rethrow;
+    }
+    
+    // Create and track the fetch future
+    final fetchFuture = _fetchWithRetryAndCache(lineCode, stationCode, cacheKey, forceRefresh, allowStale);
+    _inflightRequests[cacheKey] = fetchFuture;
+    
+    try {
+      return await fetchFuture;
+    } finally {
+      _inflightRequests.remove(cacheKey);
     }
   }
+  
+  /// Background refresh without blocking caller
+  Future<void> _backgroundRefresh(String lineCode, String stationCode, String cacheKey) async {
+    try {
+      await _fetchWithRetryAndCache(lineCode, stationCode, cacheKey, true, false);
+    } catch (e) {
+      debugPrint('MTR API: Background refresh failed for $cacheKey: $e');
+    }
+  }
+  
+  /// Core fetch logic with retry, caching, and fallback
+  Future<MtrScheduleResponse> _fetchWithRetryAndCache(
+    String lineCode,
+    String stationCode,
+    String cacheKey,
+    bool forceRefresh,
+    bool allowStale,
+  ) async {
+    Exception? lastError;
+    
+    // Try fetching with exponential backoff
+    for (int attempt = 0; attempt < _maxRetries; attempt++) {
+      try {
+        final response = await _fetchFromNetwork(lineCode, stationCode, attempt);
+        
+        // Success! Cache it
+        await _cacheResponse(cacheKey, response);
+        return response;
+        
+      } catch (e) {
+        lastError = e is Exception ? e : Exception(e.toString());
+        debugPrint('MTR API: Attempt ${attempt + 1}/$_maxRetries failed: $e');
+        
+        // Don't retry on last attempt
+        if (attempt < _maxRetries - 1) {
+          await _delayWithJitter(attempt);
+        }
+      }
+    }
+    
+    // All retries failed - try persistent cache
+    debugPrint('MTR API: All retries failed, checking persistent cache for $cacheKey');
+    final cachedResponse = await _loadFromPersistentCache(cacheKey);
+    if (cachedResponse != null) {
+      debugPrint('MTR API: Serving from persistent cache (network unavailable)');
+      // Update memory cache too
+      _memoryCache[cacheKey] = _CachedSchedule(
+        response: cachedResponse,
+        timestamp: DateTime.now(),
+        isFromPersistentCache: true,
+      );
+      return cachedResponse;
+    }
+    
+    // No cache available, throw the last error
+    throw lastError ?? Exception('MTR API: Failed to fetch schedule');
+  }
+  
+  /// Fetch from network with adaptive timeout
+  Future<MtrScheduleResponse> _fetchFromNetwork(String lineCode, String stationCode, int attemptNumber) async {
+    final url = Uri.parse('$_baseUrl?line=$lineCode&sta=$stationCode');
+    
+    // Adaptive timeout: increase on retries
+    final timeout = Duration(seconds: 10 + (attemptNumber * 5));
+    
+    debugPrint('MTR API: Fetching from network (attempt ${attemptNumber + 1}, timeout: ${timeout.inSeconds}s)');
+    
+    final response = await http.get(url).timeout(timeout);
+    
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body);
+      return MtrScheduleResponse.fromJson(json);
+    } else {
+      throw Exception('MTR API Error: HTTP ${response.statusCode}');
+    }
+  }
+  
+  /// Exponential backoff with jitter to avoid thundering herd
+  Future<void> _delayWithJitter(int attemptNumber) async {
+    final baseDelay = _baseRetryDelay.inMilliseconds;
+    final exponentialDelay = baseDelay * (1 << attemptNumber); // 2^attempt
+    final jitter = (exponentialDelay * 0.3 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).round();
+    final totalDelay = exponentialDelay + jitter;
+    
+    debugPrint('MTR API: Waiting ${totalDelay}ms before retry ${attemptNumber + 2}');
+    await Future.delayed(Duration(milliseconds: totalDelay));
+  }
+  
+  /// Cache response in both memory and persistent storage
+  Future<void> _cacheResponse(String cacheKey, MtrScheduleResponse response) async {
+    // Memory cache
+    _memoryCache[cacheKey] = _CachedSchedule(
+      response: response,
+      timestamp: DateTime.now(),
+    );
+    
+    // Persistent cache (async, don't wait)
+    unawaited(_saveToPersistentCache(cacheKey, response));
+  }
+  
+  /// Save to SharedPreferences for offline support
+  Future<void> _saveToPersistentCache(String cacheKey, MtrScheduleResponse response) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Ensure cache version is current
+      final version = prefs.getInt(_cacheVersionKey) ?? 0;
+      if (version != _currentCacheVersion) {
+        await _clearPersistentCache(prefs);
+        await prefs.setInt(_cacheVersionKey, _currentCacheVersion);
+      }
+      
+      // Save response as JSON
+      final json = _scheduleToJson(response);
+      await prefs.setString('$_persistentCachePrefix$cacheKey', jsonEncode(json));
+      await prefs.setInt('${_persistentCachePrefix}${cacheKey}_timestamp', DateTime.now().millisecondsSinceEpoch);
+      
+      debugPrint('MTR API: Cached to persistent storage: $cacheKey');
+    } catch (e) {
+      debugPrint('MTR API: Failed to save to persistent cache: $e');
+    }
+  }
+  
+  /// Load from SharedPreferences
+  Future<MtrScheduleResponse?> _loadFromPersistentCache(String cacheKey) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      final jsonStr = prefs.getString('$_persistentCachePrefix$cacheKey');
+      if (jsonStr == null) return null;
+      
+      final timestamp = prefs.getInt('${_persistentCachePrefix}${cacheKey}_timestamp');
+      if (timestamp != null) {
+        final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+        // Don't use cache older than 30 minutes
+        if (age > Duration(minutes: 30).inMilliseconds) {
+          debugPrint('MTR API: Persistent cache too old (${Duration(milliseconds: age).inMinutes}min)');
+          return null;
+        }
+      }
+      
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      return _scheduleFromJson(json);
+    } catch (e) {
+      debugPrint('MTR API: Failed to load from persistent cache: $e');
+      return null;
+    }
+  }
+  
+  /// Clear old persistent cache
+  Future<void> _clearPersistentCache(SharedPreferences prefs) async {
+    final keys = prefs.getKeys().where((k) => k.startsWith(_persistentCachePrefix));
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
+    debugPrint('MTR API: Cleared persistent cache');
+  }
+  
+  /// Clear all caches (memory + persistent)
+  Future<void> clearAllCaches() async {
+    _memoryCache.clear();
+    final prefs = await SharedPreferences.getInstance();
+    await _clearPersistentCache(prefs);
+    debugPrint('MTR API: Cleared all caches');
+  }
+  
+  String _getCacheKey(String lineCode, String stationCode) => '${lineCode}_$stationCode';
+  
+  /// Convert MtrScheduleResponse to JSON for persistent storage
+  Map<String, dynamic> _scheduleToJson(MtrScheduleResponse response) {
+    return {
+      'status': response.status,
+      'message': response.message,
+      'lineStationKey': response.lineStationKey,
+      'currentTime': response.currentTime?.toIso8601String(),
+      'systemTime': response.systemTime?.toIso8601String(),
+      'isDelay': response.isDelay,
+      'directionTrains': response.directionTrains.map((key, trains) => MapEntry(
+        key,
+        trains.map((train) => {
+          'dest': train.destination,
+          'plat': train.platform,
+          'time': train.time,
+          'ttnt': train.timeInMinutes,
+          'seq': train.sequence,
+        }).toList(),
+      )),
+    };
+  }
+  
+  /// Convert JSON back to MtrScheduleResponse
+  MtrScheduleResponse _scheduleFromJson(Map<String, dynamic> json) {
+    return MtrScheduleResponse(
+      status: json['status'] as int,
+      message: json['message'] as String,
+      lineStationKey: json['lineStationKey'] as String?,
+      currentTime: json['currentTime'] != null ? DateTime.parse(json['currentTime']) : null,
+      systemTime: json['systemTime'] != null ? DateTime.parse(json['systemTime']) : null,
+      isDelay: json['isDelay'] as bool? ?? false,
+      directionTrains: (json['directionTrains'] as Map<String, dynamic>).map((key, trains) => MapEntry(
+        key,
+        (trains as List).map((train) => MtrTrainInfo(
+          destination: train['dest'] as String,
+          platform: train['plat'] as String,
+          time: train['time'] as String,
+          timeInMinutes: train['ttnt'] as int?,
+          sequence: train['seq'] as int?,
+        )).toList(),
+      )),
+    );
+  }
+}
+
+/// Cached schedule with metadata
+class _CachedSchedule {
+  final MtrScheduleResponse response;
+  final DateTime timestamp;
+  final bool isFromPersistentCache;
+  
+  _CachedSchedule({
+    required this.response,
+    required this.timestamp,
+    this.isFromPersistentCache = false,
+  });
+  
+  /// Cache is fresh if within TTL
+  bool get isFresh => DateTime.now().difference(timestamp) < MtrApiService._memoryCacheTTL;
+  
+  /// Cache is expired if beyond max age
+  bool get isExpired => DateTime.now().difference(timestamp) > MtrApiService._memoryCacheMaxAge;
+}
+
+/// Helper to fire-and-forget futures
+void unawaited(Future<void> future) {
+  future.catchError((e) => debugPrint('Unawaited error: $e'));
 }
 
 // ========================= MTR Data Models =========================
@@ -66,6 +348,12 @@ class MtrLine {
     final codes = directionCodes(directionKey);
     if (codes.isEmpty) return const [];
     return codes.map(resolver.combinedName).toList();
+  }
+
+  List<String> directionDisplayNamesLocalized(String directionKey, StationNameResolver resolver, bool isEnglish) {
+    final codes = directionCodes(directionKey);
+    if (codes.isEmpty) return const [];
+    return codes.map((code) => isEnglish ? resolver.nameEn(code) : resolver.nameZh(code)).toList();
   }
 }
 
@@ -396,14 +684,14 @@ const StationNameResolver stationNameResolver = StationNameResolver();
 const Map<String, _LineMetadata> _lineMetadata = {
   'AEL': _LineMetadata('Airport Express', '機場快綫', Color(0xFF00888D)),
   'TCL': _LineMetadata('Tung Chung Line', '東涌綫', Color(0xFFF7943E)),
-  'TML': _LineMetadata('Tuen Ma Line', '屯馬綫', Color.fromRGBO(255, 51, 173, 0.644)),
+  'TML': _LineMetadata('Tuen Ma Line', '屯馬綫', Color.fromRGBO(255, 51, 173, 1)),
   'TKL': _LineMetadata('Tseung Kwan O Line', '將軍澳綫', Color(0xFF92278F)),
-  'EAL': _LineMetadata('East Rail Line', '東鐵綫', Color(0xFF0055B8)),
-  'SIL': _LineMetadata('South Island Line', '南港島綫', Color.fromRGBO(186, 196, 4, 0.75)),
+  'EAL': _LineMetadata('East Rail Line', '東鐵綫', Color(0xFF0075C2)),
+  'SIL': _LineMetadata('South Island Line', '南港島綫', Color.fromRGBO(156, 164, 0, 1)),
   'TWL': _LineMetadata('Tsuen Wan Line', '荃灣綫', Color(0xFFE60012)),
-  'ISL': _LineMetadata('Island Line', '港島綫', Color(0xFF0075C2)),
+  'ISL': _LineMetadata('Island Line', '港島綫', Color(0xFF0055B8)),
   'KTL': _LineMetadata('Kwun Tong Line', '觀塘綫', Color(0xFF00A040)),
-  'DRL': _LineMetadata('Disneyland Resort Line', '迪士尼綫', Color(0xFFE45DBF)),
+  'DRL': _LineMetadata('Disneyland Resort Line', '迪士尼綫', Color.fromRGBO(241, 115, 172, 1)),
 };
 
 // ========================= MTR Catalog Provider =========================
@@ -620,75 +908,253 @@ class MtrScheduleProvider extends ChangeNotifier {
       await prefs.setBool(_autoRefreshPrefKey, enabled);
     } catch (_) {}
   }
+  
   final MtrApiService _api = MtrApiService();
   
   MtrScheduleResponse? _data;
   bool _loading = false;
   String? _error;
-  // === Auto-refresh state ===
+  
+  // ===== ADAPTIVE REFRESH FOR POOR NETWORK CONDITIONS =====
+  
   Timer? _autoRefreshTimer;
   Duration? _currentRefreshInterval;
   static const Duration _defaultRefreshInterval = Duration(seconds: 30);
+  static const Duration _slowNetworkInterval = Duration(seconds: 60); // Slower on poor network
+  static const Duration _offlineInterval = Duration(seconds: 120); // Very slow when offline
+  
   DateTime? _lastRefreshTime;
   int _consecutiveErrors = 0;
-  static const int _maxConsecutiveErrors = 3;
+  static const int _maxConsecutiveErrors = 5; // Increased tolerance
+  
+  // Circuit breaker state
+  bool _circuitBreakerOpen = false;
+  DateTime? _circuitBreakerOpenedAt;
+  static const Duration _circuitBreakerResetDuration = Duration(minutes: 2);
+  
+  // Network quality tracking
+  bool _isNetworkSlow = false;
+  final List<Duration> _recentFetchDurations = [];
+  static const int _maxFetchDurationSamples = 5;
+  static const Duration _slowNetworkThreshold = Duration(seconds: 5);
   
   MtrScheduleResponse? get data => _data;
   bool get loading => _loading;
   String? get error => _error;
   bool get hasData => _data != null;
   bool get isAutoRefreshActive => _autoRefreshTimer != null && _autoRefreshTimer!.isActive;
+  bool get isNetworkSlow => _isNetworkSlow;
+  bool get isCircuitBreakerOpen => _circuitBreakerOpen;
   String get currentRefreshIntervalDescription => _currentRefreshInterval != null ? '${_currentRefreshInterval!.inSeconds}s' : '';
   
-  Future<void> loadSchedule(String lineCode, String stationCode, {bool forceRefresh = false}) async {
-    if (_loading) return;
+  /// Load schedule with network-aware optimizations
+  Future<void> loadSchedule(
+    String lineCode, 
+    String stationCode, {
+    bool forceRefresh = false,
+    bool allowStaleCache = true,
+  }) async {
+    // Prevent concurrent loads
+    if (_loading) {
+      debugPrint('MTR Schedule: Already loading, skipping');
+      return;
+    }
+    
+    // Check circuit breaker
+    if (_circuitBreakerOpen) {
+      if (DateTime.now().difference(_circuitBreakerOpenedAt!) < _circuitBreakerResetDuration) {
+        debugPrint('MTR Schedule: Circuit breaker open, using cached data');
+        // Try to serve from cache without network call
+        if (_data != null) return;
+        _error = 'Network temporarily unavailable, please try again later';
+        notifyListeners();
+        return;
+      } else {
+        // Reset circuit breaker
+        _closeCircuitBreaker();
+      }
+    }
     
     _loading = true;
     _error = null;
     if (forceRefresh) _data = null;
     notifyListeners();
     
+    final fetchStart = DateTime.now();
+    
     try {
-      final schedule = await _api.fetchSchedule(lineCode, stationCode);
+      final schedule = await _api.fetchSchedule(
+        lineCode, 
+        stationCode,
+        forceRefresh: forceRefresh,
+        allowStale: allowStaleCache && !forceRefresh,
+      );
+      
+      final fetchDuration = DateTime.now().difference(fetchStart);
+      _trackFetchDuration(fetchDuration);
+      
       if (schedule.status != 1) {
         _data = null;
         _error = schedule.message.isNotEmpty ? schedule.message : 'Unable to load schedule';
+        _consecutiveErrors++;
       } else {
         _data = schedule;
         _error = null;
         _lastRefreshTime = DateTime.now();
-        _consecutiveErrors = 0;
+        _consecutiveErrors = 0; // Reset on success
       }
     } catch (e) {
-      _error = e.toString();
+      _error = _formatError(e.toString());
       debugPrint('MTR Schedule Error: $e');
       _consecutiveErrors++;
+      
+      // Open circuit breaker if too many errors
+      if (_consecutiveErrors >= _maxConsecutiveErrors) {
+        _openCircuitBreaker();
+      }
     } finally {
       _loading = false;
       notifyListeners();
     }
   }
+  
+  /// Track fetch duration to detect slow network
+  void _trackFetchDuration(Duration duration) {
+    _recentFetchDurations.add(duration);
+    if (_recentFetchDurations.length > _maxFetchDurationSamples) {
+      _recentFetchDurations.removeAt(0);
+    }
+    
+    // Calculate average
+    if (_recentFetchDurations.length >= 3) {
+      final avgDuration = _recentFetchDurations.reduce((a, b) => a + b) ~/ _recentFetchDurations.length;
+      final wasNetworkSlow = _isNetworkSlow;
+      _isNetworkSlow = avgDuration > _slowNetworkThreshold;
+      
+      if (_isNetworkSlow != wasNetworkSlow) {
+        debugPrint('MTR Schedule: Network speed changed - slow: $_isNetworkSlow (avg: ${avgDuration.inSeconds}s)');
+        // Adjust refresh interval if auto-refresh is active
+        if (isAutoRefreshActive) {
+          _adjustRefreshInterval();
+        }
+      }
+    }
+  }
+  
+  /// Adjust refresh interval based on network conditions
+  void _adjustRefreshInterval() {
+    final newInterval = _isNetworkSlow 
+      ? _slowNetworkInterval 
+      : (_circuitBreakerOpen ? _offlineInterval : _defaultRefreshInterval);
+    
+    if (newInterval != _currentRefreshInterval) {
+      debugPrint('MTR Schedule: Adjusting refresh interval to ${newInterval.inSeconds}s');
+      _currentRefreshInterval = newInterval;
+      // Note: Timer will use new interval on next tick
+    }
+  }
+  
+  /// Open circuit breaker to stop hammering the API
+  void _openCircuitBreaker() {
+    if (!_circuitBreakerOpen) {
+      _circuitBreakerOpen = true;
+      _circuitBreakerOpenedAt = DateTime.now();
+      debugPrint('MTR Schedule: Circuit breaker OPENED (${_consecutiveErrors} consecutive errors)');
+      stopAutoRefresh(); // Stop refreshing
+      notifyListeners();
+    }
+  }
+  
+  /// Close circuit breaker
+  void _closeCircuitBreaker() {
+    if (_circuitBreakerOpen) {
+      _circuitBreakerOpen = false;
+      _circuitBreakerOpenedAt = null;
+      _consecutiveErrors = 0;
+      debugPrint('MTR Schedule: Circuit breaker CLOSED (reset after timeout)');
+      notifyListeners();
+    }
+  }
+  
+  /// Format error message for better UX
+  String _formatError(String error) {
+    if (error.contains('SocketException') || error.contains('NetworkException')) {
+      return 'No internet connection. Showing cached data if available.';
+    } else if (error.contains('TimeoutException')) {
+      return 'Request timed out. Network may be slow.';
+    } else if (error.contains('FormatException')) {
+      return 'Received invalid data from server.';
+    }
+    return 'Unable to fetch schedule: ${error.replaceAll('Exception: ', '')}';
+  }
+  
+  /// Start auto-refresh with adaptive intervals
   void startAutoRefresh(String lineCode, String stationCode, {Duration? interval}) {
     stopAutoRefresh();
-    final refreshInterval = interval ?? _defaultRefreshInterval;
+    
+    // Use adaptive interval if not specified
+    final refreshInterval = interval ?? _getAdaptiveInterval();
     _currentRefreshInterval = refreshInterval;
+    
+    debugPrint('MTR Auto-refresh: Starting with interval ${refreshInterval.inSeconds}s');
+    
     _autoRefreshTimer = Timer.periodic(refreshInterval, (_) async {
-      debugPrint('MTR Auto-refresh: refreshing $lineCode/$stationCode');
-      await loadSchedule(lineCode, stationCode, forceRefresh: true);
-      if (_consecutiveErrors >= _maxConsecutiveErrors) {
-        debugPrint('MTR Auto-refresh: too many errors, stopping');
-        stopAutoRefresh();
+      // Check if we should adjust interval
+      final adaptiveInterval = _getAdaptiveInterval();
+      if (adaptiveInterval != _currentRefreshInterval) {
+        debugPrint('MTR Auto-refresh: Restarting with new interval ${adaptiveInterval.inSeconds}s');
+        startAutoRefresh(lineCode, stationCode, interval: adaptiveInterval);
+        return;
       }
+      
+      debugPrint('MTR Auto-refresh: Refreshing $lineCode/$stationCode');
+      await loadSchedule(
+        lineCode, 
+        stationCode, 
+        forceRefresh: false, // Allow stale-while-revalidate
+        allowStaleCache: true,
+      );
     });
-    // Immediate refresh
-    loadSchedule(lineCode, stationCode, forceRefresh: true);
+    
+    // Immediate refresh (allow cache to serve stale data quickly)
+    loadSchedule(lineCode, stationCode, forceRefresh: false, allowStaleCache: true);
     notifyListeners();
+  }
+  
+  /// Get adaptive refresh interval based on network conditions
+  Duration _getAdaptiveInterval() {
+    if (_circuitBreakerOpen) return _offlineInterval;
+    if (_isNetworkSlow) return _slowNetworkInterval;
+    if (_consecutiveErrors > 0) {
+      // Gradual backoff: 30s -> 45s -> 60s
+      final backoffMultiplier = 1 + (_consecutiveErrors * 0.5);
+      return Duration(seconds: (_defaultRefreshInterval.inSeconds * backoffMultiplier).round().clamp(30, 120));
+    }
+    return _defaultRefreshInterval;
   }
 
   void stopAutoRefresh() {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = null;
+    _currentRefreshInterval = null;
+    debugPrint('MTR Auto-refresh: Stopped');
     notifyListeners();
+  }
+  
+  /// Manual refresh - forces network call and resets circuit breaker
+  Future<void> manualRefresh(String lineCode, String stationCode) async {
+    _closeCircuitBreaker(); // Allow manual refresh to try
+    await loadSchedule(lineCode, stationCode, forceRefresh: true, allowStaleCache: false);
+  }
+  
+  /// Clear all caches and reset state
+  Future<void> clearAllCaches() async {
+    await _api.clearAllCaches();
+    clearData();
+    _consecutiveErrors = 0;
+    _recentFetchDurations.clear();
+    _isNetworkSlow = false;
+    _closeCircuitBreaker();
   }
 
   @override
@@ -769,17 +1235,19 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     final catalog = context.read<MtrCatalogProvider>();
     final schedule = context.read<MtrScheduleProvider>();
     if (state == AppLifecycleState.resumed) {
-      // Resume auto-refresh if selection exists
-      if (catalog.hasSelection) {
+      // Resume auto-refresh if selection exists AND auto-refresh was enabled
+      if (catalog.hasSelection && schedule.autoRefreshEnabled) {
         schedule.loadSchedule(
           catalog.selectedLine!.lineCode,
           catalog.selectedStation!.stationCode,
           forceRefresh: true,
         );
-        schedule.startAutoRefresh(
-          catalog.selectedLine!.lineCode,
-          catalog.selectedStation!.stationCode,
-        );
+        if (!schedule.isAutoRefreshActive) {
+          schedule.startAutoRefresh(
+            catalog.selectedLine!.lineCode,
+            catalog.selectedStation!.stationCode,
+          );
+        }
       }
     } else if (state == AppLifecycleState.paused) {
       schedule.stopAutoRefresh();
@@ -857,20 +1325,32 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
             }
           },
         ),
-        // Auto-refresh control bar
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        // Auto-refresh control bar with integrated status
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: colorScheme.outline.withOpacity(0.1),
+              width: 0.5,
+            ),
+          ),
           child: Row(
             children: [
+              // Auto-refresh toggle
               IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 icon: Stack(
                   children: [
                     AnimatedBuilder(
                       animation: _refreshAnimController,
                       builder: (context, child) {
                         return Transform.rotate(
-                          angle: schedule.isAutoRefreshActive ? _refreshAnimController.value * 6.28319 : 0, // 2*pi
-                          child: Icon(Icons.refresh, color: colorScheme.primary),
+                          angle: schedule.isAutoRefreshActive ? _refreshAnimController.value * 6.28319 : 0,
+                          child: Icon(Icons.refresh, size: 20, color: colorScheme.primary),
                         );
                       },
                     ),
@@ -879,9 +1359,9 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                         right: 0,
                         top: 0,
                         child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
                             color: Colors.green,
                             shape: BoxShape.circle,
                           ),
@@ -889,8 +1369,9 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                       ),
                   ],
                 ),
+                iconSize: 18,
                 tooltip: schedule.isAutoRefreshActive
-                    ? (lang.isEnglish ? 'Auto-refresh ON (${schedule.currentRefreshIntervalDescription})' : '自動刷新已啟用 (${schedule.currentRefreshIntervalDescription})')
+                    ? (lang.isEnglish ? 'Auto-refresh ON' : '自動刷新已啟用')
                     : lang.refresh,
                 onPressed: catalog.hasSelection
                     ? () async {
@@ -907,22 +1388,59 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                       }
                     : null,
               ),
-              const SizedBox(width: 8),
-              Text(
-                schedule.isAutoRefreshActive
-                    ? (lang.isEnglish ? 'Auto-refresh enabled' : '自動刷新中')
-                    : (lang.isEnglish ? 'Manual refresh' : '手動刷新'),
-                style: TextStyle(
-                  color: schedule.isAutoRefreshActive ? Colors.green : colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w500,
+              const SizedBox(width: 2),
+              // Status indicator
+              if (schedule.hasData) ...[
+                Icon(
+                  schedule.data!.status != 1
+                      ? Icons.error_outline
+                      : schedule.data!.isDelay
+                          ? Icons.schedule
+                          : Icons.check_circle_outline,
+                  size: 14,
+                  color: schedule.data!.status != 1
+                      ? Colors.red
+                      : schedule.data!.isDelay
+                          ? Colors.orange
+                          : Colors.green,
                 ),
-              ),
-              const Spacer(),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    schedule.data!.status != 1
+                        ? (lang.isEnglish ? 'Service Alert' : '服務提示')
+                        : schedule.data!.isDelay
+                            ? (lang.isEnglish ? 'Delays' : '延誤')
+                            : (lang.isEnglish ? 'Normal' : '正常'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: schedule.data!.status != 1
+                          ? Colors.red[800]
+                          : schedule.data!.isDelay
+                              ? Colors.orange[800]
+                              : colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              // Last update time
               if (schedule._lastRefreshTime != null)
-                Text(
-                  '${lang.isEnglish ? 'Last updated' : '最後更新'}: '
-                  '${TimeOfDay.fromDateTime(schedule._lastRefreshTime!).format(context)}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.access_time, size: 11, color: colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 3),
+                    Text(
+                      TimeOfDay.fromDateTime(schedule._lastRefreshTime!).format(context),
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -1094,7 +1612,7 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
               showToggle: true,
               onToggle: () async => await _saveStationExpandPref(!_showStations),
               trailing: widget.selectedStation != null && widget.selectedStation!.isInterchange
-                  ? const Icon(Icons.compare_arrows, size: 16)
+                  ? _buildCompactInterchangeIndicator(context, widget.selectedStation!)
                   : null,
               content: _showStations ? Wrap(
                 spacing: 6,
@@ -1111,7 +1629,7 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
                       widget.onStationChanged(station);
                     },
                     trailing: station.isInterchange 
-                        ? const Icon(Icons.compare_arrows, size: 12)
+                        ? _buildInterchangeIndicator(context, station)
                         : null,
                   );
                 }).toList(),
@@ -1306,6 +1824,129 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
       },
     );
   }
+
+  Widget _buildInterchangeIndicator(BuildContext context, MtrStation station) {
+    if (!station.isInterchange || station.interchangeLines.isEmpty) {
+      return const Icon(Icons.compare_arrows, size: 12);
+    }
+
+    // Build color indicators for interchange lines
+    final lineColors = station.interchangeLines
+        .map((lineCode) => _lineMetadata[lineCode]?.color)
+        .where((color) => color != null)
+        .cast<Color>()
+        .toList();
+
+    if (lineColors.isEmpty) {
+      return const Icon(Icons.compare_arrows, size: 12);
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.compare_arrows, size: 12),
+        const SizedBox(width: 4),
+        ...lineColors.take(3).map((color) => Container(
+          width: 8,
+          height: 8,
+          margin: const EdgeInsets.only(left: 2),
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        )),
+        if (lineColors.length > 3)
+          Padding(
+            padding: const EdgeInsets.only(left: 2),
+            child: Text(
+              '+${lineColors.length - 3}',
+              style: TextStyle(
+                fontSize: 9,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // Compact interchange indicator for selector card header (like in the image)
+  Widget _buildCompactInterchangeIndicator(BuildContext context, MtrStation station) {
+    if (!station.isInterchange || station.interchangeLines.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final catalog = context.read<MtrCatalogProvider>();
+
+    // Build clickable line badges for interchange lines
+    final interchangeLineCodes = station.interchangeLines;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...interchangeLineCodes.map((lineCode) {
+          final lineColor = _lineMetadata[lineCode]?.color;
+          if (lineColor == null) return const SizedBox.shrink();
+          
+          return InkWell(
+            onTap: () async {
+              // Find the line with this code
+              final targetLine = widget.lines.firstWhere(
+                (line) => line.lineCode == lineCode,
+                orElse: () => widget.lines.first,
+              );
+              
+              // Switch to the interchange line while keeping the same station
+              HapticFeedback.selectionClick();
+              await catalog.selectLine(targetLine);
+              
+              // The station will be auto-selected to the first station of the new line
+              // So we need to manually select the current station on the new line
+              final stationOnNewLine = targetLine.stations.firstWhere(
+                (s) => s.stationCode == station.stationCode,
+                orElse: () => targetLine.stations.first,
+              );
+              
+              await catalog.selectStation(stationOnNewLine);
+              widget.onLineChanged(targetLine);
+              widget.onStationChanged(stationOnNewLine);
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              width: 24,
+              height: 24,
+              margin: const EdgeInsets.only(left: 4),
+              decoration: BoxDecoration(
+                color: lineColor,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.3),
+                  width: 0.5,
+                ),
+              ),
+            ),
+          );
+        }),
+        if (interchangeLineCodes.length > 4)
+          Container(
+            margin: const EdgeInsets.only(left: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '+${interchangeLineCodes.length - 4}',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 // MTR Schedule Body Widget
@@ -1376,82 +2017,16 @@ class _MtrScheduleBody extends StatelessWidget {
       );
     } else {
       final directionEntries = data!.directionTrains.entries.toList();
-  // Unified status header is always shown as index 0
+      
       content = ListView.builder(
         padding: const EdgeInsets.all(8),
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: directionEntries.length + 1, // One unified status header card
+        itemCount: directionEntries.length,
         itemBuilder: (context, index) {
-          // Unified Train Services Status header card
-          if (index == 0) {
-            final isError = data!.status != 1;
-            final hasDelay = data!.isDelay;
-            final colorScheme = Theme.of(context).colorScheme;
-            Color bg;
-            Color? fg;
-            IconData icon;
-            String title;
-            if (isError) {
-              bg = Colors.red.withOpacity(0.1);
-              fg = Colors.red[800];
-              icon = Icons.error_outline;
-              title = lang.isEnglish ? 'Train Services Status' : '列車服務狀態';
-            } else if (hasDelay) {
-              bg = Colors.orange.withOpacity(0.12);
-              fg = Colors.orange[800];
-              icon = Icons.schedule;
-              title = lang.isEnglish ? 'Train Services Status' : '列車服務狀態';
-            } else {
-              bg = colorScheme.surface;
-              fg = colorScheme.onSurface;
-              icon = Icons.check_circle_outline;
-              title = lang.isEnglish ? 'Train Services Status' : '列車服務狀態';
-            }
-
-            final ts = data!.systemTime ?? data!.currentTime;
-            final timeText = ts != null ? TimeOfDay.fromDateTime(ts).format(context) : '-';
-            final suffix = lang.isEnglish ? 'HKT' : '';
-            final message = data!.message.isNotEmpty
-                ? data!.message
-                : (isError
-                    ? (lang.isEnglish ? 'Service alert issued.' : '服務提示已發出。')
-                    : (hasDelay
-                        ? (lang.isEnglish ? 'Possible delays reported.' : '可能出現延誤。')
-                        : (lang.isEnglish ? 'Services normal.' : '服務正常。')));
-
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              color: bg,
-              child: ListTile(
-                leading: Icon(icon, color: fg),
-                title: Text(title, style: TextStyle(color: fg, fontWeight: FontWeight.w700)),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(message, style: TextStyle(color: fg)),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.access_time, size: 14),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${lang.isEnglish ? 'Last updated' : '最後更新'}: ${timeText} ${suffix}'.trim(),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: fg),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          final entryIndex = index - 1;
-          final entry = directionEntries.elementAt(entryIndex);
+          final entry = directionEntries.elementAt(index);
           final directionKey = entry.key;
           final trains = entry.value;
-          final termini = line?.directionDisplayNames(directionKey, stationNameResolver) ?? const <String>[];
+          final termini = line?.directionDisplayNamesLocalized(directionKey, stationNameResolver, lang.isEnglish) ?? const <String>[];
 
           String directionLabel(String key) {
             final upper = key.toUpperCase();
@@ -1485,166 +2060,238 @@ class _MtrScheduleBody extends StatelessWidget {
           }
           final terminusLabel = termini.isNotEmpty ? termini.join(' / ') : null;
           
-          return Container(
-            margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(UIConstants.cardRadius),
+              // Liquid glass effect with gradient and blur
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Theme.of(context).colorScheme.surface.withOpacity(0.9),
+                  Theme.of(context).colorScheme.surface.withOpacity(0.7),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: Theme.of(context).colorScheme.outline.withOpacity(0.12),
-                width: 1,
+                color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                width: 0.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.shadow.withOpacity(0.12),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                  spreadRadius: 0,
+                ),
+                BoxShadow(
+                  color: Theme.of(context).colorScheme.shadow.withOpacity(0.02),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.train, size: 24),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${directionLabel(directionKey)} ${lang.isEnglish ? 'departures' : '開出'}',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            if (terminusLabel != null)
-                              Text(
-                                '${lang.isEnglish ? 'Terminus' : '終點站'}: $terminusLabel',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Theme.of(context).colorScheme.surface.withOpacity(0.3),
+                        Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.2),
+                      ],
+                    ),
                   ),
-                  const Divider(height: 24),
-                  if (trains.isEmpty)
-                    Text(lang.isEnglish ? 'No trains scheduled' : '暫無班次')
-                  else
-                    ...trains.map((train) => ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
-                      leading: Icon(
-                        train.isDueSoon ? Icons.circle : Icons.schedule,
-                        size: 20,
-                        color: train.isDueSoon ? Colors.green : Theme.of(context).colorScheme.primary,
-                      ),
-                      title: Text(
-                        train.displayDestination(stationNameResolver, isEnglish: lang.isEnglish),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                      subtitle: Builder(
-                        builder: (context) {
-                          final colorScheme = Theme.of(context).colorScheme;
-                          final minutesVal = train.timeInMinutes;
-                          final minutesLabel = () {
-                            if (minutesVal == null) return '-';
-                            if (lang.isEnglish) {
-                              if (minutesVal <= 0) return '0 min';
-                              if (minutesVal == 1) return '1 min';
-                              return '$minutesVal mins';
-                            } else {
-                              // Chinese: always use 分鐘, no singular form
-                              final v = minutesVal < 0 ? 0 : minutesVal;
-                              return '$v 分鐘';
-                            }
-                          }();
-
-                          final timeUpper = train.time.toUpperCase();
-                          String statusLabel = '';
-                          // Determine status with thresholds:
-                          // - Departing: <= 0 min or explicit DEP
-                          // - Arriving: <= 2 mins or explicit ARR
-                          if ((minutesVal != null && minutesVal <= 0) || timeUpper == 'DEP') {
-                            statusLabel = lang.isEnglish ? 'Departing' : '即將開出';
-                          } else if ((minutesVal != null && minutesVal <= 2) || timeUpper == 'ARR' || train.isArriving) {
-                            statusLabel = lang.isEnglish ? 'Arriving' : '即將到站';
-                          }
-
-                          final List<Widget> parts = [];
-
-                          // Platform chip (emphasized)
-                          if (devSettings.showMtrArrivalDetails && train.platform.isNotEmpty) {
-                            parts.add(Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: colorScheme.primary.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: colorScheme.primary.withOpacity(0.3), width: 1),
-                              ),
-                              child: Text(
-                                '${lang.platform} ${train.platform}',
-                                style: TextStyle(
-                                  color: colorScheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: Theme.of(context).textTheme.bodySmall?.fontSize,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Direction header with improved layout
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                              width: 0.5,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.train,
+                                  size: 16,
+                                  color: Theme.of(context).colorScheme.primary,
                                 ),
                               ),
-                            ));
-                          }
-
-                          Widget sep() => Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
-                                child: Text(
-                                  '|',
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: colorScheme.onSurfaceVariant,
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${directionLabel(directionKey)} ${lang.isEnglish ? 'departures' : '開出'}',
+                                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                        letterSpacing: 0.2,
                                       ),
+                                    ),
+                                    if (terminusLabel != null) ...[
+                                      const SizedBox(height: 1),
+                                      Text(
+                                        '${lang.isEnglish ? 'To' : '往'} $terminusLabel',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          fontSize: 10,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.8),
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                              );
-
-                          // Minutes
-                          if (minutesLabel.isNotEmpty) {
-                            if (parts.isNotEmpty) parts.add(sep());
-                            parts.add(Text(
-                              minutesLabel,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // Train list
+                        if (trains.isEmpty)
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                lang.isEnglish ? 'No trains scheduled' : '暫無班次',
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6),
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          ...trains.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final train = entry.value;
+                            final isLast = idx == trains.length - 1;
+                            
+                            return Container(
+                              margin: EdgeInsets.only(bottom: isLast ? 0 : 6),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface.withOpacity(0.5),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(context).colorScheme.outline.withOpacity(0.08),
+                                  width: 0.5,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  // Status indicator dot with color coding
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: () {
+                                        final minutesVal = train.timeInMinutes;
+                                        final timeUpper = train.time.toUpperCase();
+                                        // Departing: Deep Orange
+                                        if (timeUpper == 'DEP' || (minutesVal != null && minutesVal <= 0)) {
+                                          return Colors.deepOrange;
+                                        }
+                                        // Arriving: Green
+                                        if (timeUpper == 'ARR' || train.isArriving || (minutesVal != null && minutesVal == 1)) {
+                                          return Colors.green;
+                                        }
+                                        // Approaching: Amber
+                                        if (minutesVal != null && minutesVal == 2) {
+                                          return Colors.amber;
+                                        }
+                                        // Default: Primary color
+                                        return Theme.of(context).colorScheme.primary;
+                                      }(),
+                                      shape: BoxShape.circle,
+                                      boxShadow: () {
+                                        final minutesVal = train.timeInMinutes;
+                                        final timeUpper = train.time.toUpperCase();
+                                        // Pulse effect for departing
+                                        if (timeUpper == 'DEP' || (minutesVal != null && minutesVal <= 0)) {
+                                          return [
+                                            BoxShadow(
+                                              color: Colors.deepOrange.withOpacity(0.5),
+                                              blurRadius: 8,
+                                              spreadRadius: 1,
+                                            ),
+                                          ];
+                                        }
+                                        // Pulse effect for arriving
+                                        if (timeUpper == 'ARR' || train.isArriving || (minutesVal != null && minutesVal == 1)) {
+                                          return [
+                                            BoxShadow(
+                                              color: Colors.green.withOpacity(0.4),
+                                              blurRadius: 6,
+                                              spreadRadius: 1,
+                                            ),
+                                          ];
+                                        }
+                                        // Subtle glow for approaching
+                                        if (minutesVal != null && minutesVal == 2) {
+                                          return [
+                                            BoxShadow(
+                                              color: Colors.amber.withOpacity(0.3),
+                                              blurRadius: 5,
+                                              spreadRadius: 1,
+                                            ),
+                                          ];
+                                        }
+                                        return null;
+                                      }(),
+                                    ),
                                   ),
-                            ));
-                          }
-
-                          // Status
-                          if (statusLabel.isNotEmpty) {
-                            if (parts.isNotEmpty) parts.add(sep());
-                            final isArriving = statusLabel == (lang.isEnglish ? 'Arriving' : '即將到站');
-                            final isDeparting = statusLabel == (lang.isEnglish ? 'Departing' : '即將開出');
-                            parts.add(Text(
-                              statusLabel,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: isArriving
-                                        ? Colors.green
-                                        : isDeparting
-                                            ? Colors.orange
-                                            : colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
+                                  const SizedBox(width: 10),
+                                  // Destination
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          train.displayDestination(stationNameResolver, isEnglish: lang.isEnglish),
+                                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13,
+                                            letterSpacing: 0.1,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                        const SizedBox(height: 3),
+                                        _buildTrainSubtitle(context, train, lang, devSettings),
+                                      ],
+                                    ),
                                   ),
-                            ));
-                          }
-
-                          return Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: parts,
-                          );
-                        },
-                      ),
-                    )),
-                ],
+                                ],
+                              ),
+                            );
+                          }),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           );
@@ -1660,5 +2307,153 @@ class _MtrScheduleBody extends StatelessWidget {
     }
     
     return content;
+  }
+
+  Widget _buildTrainSubtitle(
+    BuildContext context,
+    MtrTrainInfo train,
+    LanguageProvider lang,
+    DeveloperSettingsProvider devSettings,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final minutesVal = train.timeInMinutes;
+    final minutesLabel = () {
+      if (minutesVal == null) return '-';
+      if (lang.isEnglish) {
+        if (minutesVal <= 0) return '0 min';
+        if (minutesVal == 1) return '1 min';
+        return '$minutesVal mins';
+      } else {
+        // Chinese: always use 分鐘, no singular form
+        final v = minutesVal < 0 ? 0 : minutesVal;
+        return '$v 分鐘';
+      }
+    }();
+
+    final timeUpper = train.time.toUpperCase();
+    String statusLabel = '';
+    Color? statusColor;
+    IconData? statusIcon;
+    
+    // Determine status with refined thresholds
+    if (timeUpper == 'DEP' || (minutesVal != null && minutesVal <= 0)) {
+      // Train is departing or already at platform
+      statusLabel = lang.isEnglish ? 'Departing' : '即將開出';
+      statusColor = Colors.deepOrange;
+      statusIcon = Icons.near_me;
+    } else if (timeUpper == 'ARR' || train.isArriving || (minutesVal != null && minutesVal == 1)) {
+      // Train is arriving (1 minute or marked as arriving)
+      statusLabel = lang.isEnglish ? 'Arriving' : '即將到站';
+      statusColor = Colors.green;
+      statusIcon = Icons.adjust;
+    } else if (minutesVal != null && minutesVal == 2) {
+      // Train is approaching (2 minutes)
+      statusLabel = lang.isEnglish ? 'Approaching' : '接近中';
+      statusColor = Colors.amber;
+      statusIcon = Icons.directions_transit;
+    }
+
+    return Wrap(
+      spacing: 4,
+      runSpacing: 3,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        // Platform chip (if enabled)
+        if (devSettings.showMtrArrivalDetails && train.platform.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: colorScheme.primary.withOpacity(0.3),
+                width: 0.5,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.stairs, size: 9, color: colorScheme.primary),
+                const SizedBox(width: 3),
+                Text(
+                  '${lang.isEnglish ? 'Platform' : '月台'} ${train.platform}',
+                  style: TextStyle(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 10,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        // Minutes
+        if (minutesLabel.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: colorScheme.secondaryContainer.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.schedule, size: 9, color: colorScheme.onSurfaceVariant),
+                const SizedBox(width: 3),
+                Text(
+                  minutesLabel,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        // Status badge
+        if (statusLabel.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: statusColor?.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: statusColor?.withOpacity(0.4) ?? Colors.transparent,
+                width: 0.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: statusColor?.withOpacity(0.2) ?? Colors.transparent,
+                  blurRadius: 3,
+                  spreadRadius: 0,
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (statusIcon != null) ...[
+                  Icon(
+                    statusIcon,
+                    size: 9,
+                    color: statusColor,
+                  ),
+                  const SizedBox(width: 3),
+                ],
+                Text(
+                  statusLabel,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 10,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
   }
 }
