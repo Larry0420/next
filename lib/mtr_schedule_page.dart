@@ -355,6 +355,32 @@ class MtrLine {
     if (codes.isEmpty) return const [];
     return codes.map((code) => isEnglish ? resolver.nameEn(code) : resolver.nameZh(code)).toList();
   }
+  
+  /// Check if a station is a TRUE terminus station (first or last station on the line)
+  /// This is different from a terminus CODE in the API which may represent services
+  /// that terminate at intermediate stations (like Racecourse, Fo Tan, etc.)
+  /// Only actual end-of-line terminus stations should return true
+  bool isTerminusStation(String stationCode) {
+    if (stations.isEmpty) return false;
+    
+    // A station is a true terminus only if it's the first or last station on the line
+    final firstStation = stations.first.stationCode;
+    final lastStation = stations.last.stationCode;
+    
+    return stationCode == firstStation || stationCode == lastStation;
+  }
+  
+  /// Check if a station appears as a terminus code in the API data
+  /// This may include intermediate stations where some services terminate
+  /// (e.g., Racecourse on EAL, LOHAS Park on TKL)
+  bool isTerminusCode(String stationCode) {
+    for (final terminusList in directionTermini.values) {
+      if (terminusList.contains(stationCode)) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 class MtrStation {
@@ -987,6 +1013,8 @@ class MtrCatalogProvider extends ChangeNotifier {
   Future<void> selectLine(MtrLine line) async {
     _selectedLine = line;
     _selectedStation = line.stations.isNotEmpty ? line.stations.first : null;
+    // Reset direction when changing line
+    _selectedDirection = null;
     notifyListeners();
     
     // Save selection
@@ -996,12 +1024,12 @@ class MtrCatalogProvider extends ChangeNotifier {
       if (_selectedStation != null) {
         await prefs.setString('mtr_selected_station', _selectedStation!.stationCode);
       }
+      // Clear saved direction when changing line
+      await prefs.remove('mtr_selected_direction');
     } catch (e) {
       debugPrint('Failed to save MTR line selection: $e');
     }
   }
-  
-
   
   Future<void> selectStation(MtrStation station) async {
     _selectedStation = station;
@@ -1011,8 +1039,70 @@ class MtrCatalogProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mtr_selected_station', station.stationCode);
+      // Also save line code to ensure consistency
+      if (_selectedLine != null) {
+        await prefs.setString('mtr_selected_line', _selectedLine!.lineCode);
+      }
+      // Keep current direction when changing station on same line
+      if (_selectedDirection != null) {
+        await prefs.setString('mtr_selected_direction', _selectedDirection!);
+      }
     } catch (e) {
       debugPrint('Failed to save MTR station selection: $e');
+    }
+  }
+  
+  Future<void> selectDirection(String direction) async {
+    _selectedDirection = direction;
+    notifyListeners();
+    
+    // Save selection
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mtr_selected_direction', direction);
+      // Also ensure line and station are saved
+      if (_selectedLine != null) {
+        await prefs.setString('mtr_selected_line', _selectedLine!.lineCode);
+      }
+      if (_selectedStation != null) {
+        await prefs.setString('mtr_selected_station', _selectedStation!.stationCode);
+      }
+    } catch (e) {
+      debugPrint('Failed to save MTR direction selection: $e');
+    }
+  }
+  
+  /// Atomically select both line and station (used for interchange switching)
+  /// This prevents intermediate UI updates that would show the wrong station
+  Future<void> selectLineAndStation(MtrLine line, MtrStation station) async {
+    // Validate station belongs to line
+    final stationExists = line.stations.any((s) => s.stationCode == station.stationCode);
+    if (!stationExists) {
+      debugPrint('MTR Catalog: Station ${station.stationCode} not found on line ${line.lineCode}');
+      // Fallback to regular selectLine if station doesn't exist on target line
+      await selectLine(line);
+      return;
+    }
+    
+    // Atomically update both line and station (single notifyListeners call)
+    _selectedLine = line;
+    _selectedStation = station;
+    // Reset direction when changing line
+    _selectedDirection = null;
+    
+    // Single notification prevents intermediate UI state
+    notifyListeners();
+    
+    // Save selection
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mtr_selected_line', line.lineCode);
+      await prefs.setString('mtr_selected_station', station.stationCode);
+      // Clear saved direction when changing line
+      await prefs.remove('mtr_selected_direction');
+      debugPrint('MTR Catalog: Atomically switched to ${line.lineCode} / ${station.stationCode}');
+    } catch (e) {
+      debugPrint('Failed to save MTR line and station selection: $e');
     }
   }
   
@@ -1462,12 +1552,21 @@ class MtrSchedulePage extends StatefulWidget {
   State<MtrSchedulePage> createState() => _MtrSchedulePageState();
 }
 
-class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingObserver, SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   bool _autoRefreshInitialized = false;
+  bool _isPageVisible = false; // Track if this page is currently visible to the user
+
+  @override
+  bool get wantKeepAlive => true; // Keep page state alive when switching tabs
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    
+    // Detect if this page is currently visible in the PageView
+    // This will be true when user is on the MTR tab
+    _checkPageVisibility();
+    
     // Load auto-refresh preference once when widget is inserted
     if (!_autoRefreshInitialized) {
       _autoRefreshInitialized = true;
@@ -1476,12 +1575,13 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
       final devSettings = context.read<DeveloperSettingsProvider>();
       
       schedule.loadAutoRefreshPref().then((_) {
-        // Only start auto-refresh if auto-load is enabled AND we have a selection
+        // Only start auto-refresh if auto-load is enabled AND we have a selection AND page is visible
         final shouldAutoLoad = devSettings.mtrAutoLoadCachedSelection && catalog.hasSelection;
         
-        if (shouldAutoLoad) {
+        if (shouldAutoLoad && _isPageVisible) {
           if (schedule.autoRefreshEnabled) {
             if (!schedule.isAutoRefreshActive) {
+              debugPrint('MTR Page: Starting auto-refresh (page is visible)');
               schedule.startAutoRefresh(
                 catalog.selectedLine!.lineCode,
                 catalog.selectedStation!.stationCode,
@@ -1496,6 +1596,42 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
       });
     }
   }
+  
+  /// Check if this page is currently visible to the user
+  /// This prevents auto-refresh from running when user is on a different tab
+  void _checkPageVisibility() {
+    final route = ModalRoute.of(context);
+    final isCurrentRoute = route?.isCurrent ?? false;
+    
+    if (isCurrentRoute != _isPageVisible) {
+      _isPageVisible = isCurrentRoute;
+      _handleVisibilityChanged();
+    }
+  }
+  
+  /// Handle page visibility changes - start/stop auto-refresh accordingly
+  void _handleVisibilityChanged() {
+    final schedule = context.read<MtrScheduleProvider>();
+    final catalog = context.read<MtrCatalogProvider>();
+    
+    if (_isPageVisible) {
+      // Page became visible - resume auto-refresh if enabled and we have selection
+      if (schedule.autoRefreshEnabled && catalog.hasSelection && !schedule.isAutoRefreshActive) {
+        debugPrint('MTR Page: Resuming auto-refresh (page became visible)');
+        schedule.startAutoRefresh(
+          catalog.selectedLine!.lineCode,
+          catalog.selectedStation!.stationCode,
+        );
+      }
+    } else {
+      // Page became hidden - stop auto-refresh to save resources
+      if (schedule.isAutoRefreshActive) {
+        debugPrint('MTR Page: Pausing auto-refresh (page is hidden)');
+        schedule.stopAutoRefresh();
+      }
+    }
+  }
+  
   late final AnimationController _refreshAnimController;
   late final Animation<double> _refreshRotation;
 
@@ -1545,8 +1681,9 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     final catalog = context.read<MtrCatalogProvider>();
     final schedule = context.read<MtrScheduleProvider>();
     if (state == AppLifecycleState.resumed) {
-      // Resume auto-refresh if selection exists AND auto-refresh was enabled
-      if (catalog.hasSelection && schedule.autoRefreshEnabled) {
+      // Resume auto-refresh only if page is visible AND auto-refresh is enabled
+      if (_isPageVisible && catalog.hasSelection && schedule.autoRefreshEnabled) {
+        debugPrint('MTR Page: App resumed, page is visible - refreshing data');
         // App resumed - use user action priority
         schedule.loadSchedule(
           catalog.selectedLine!.lineCode,
@@ -1560,9 +1697,15 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
             catalog.selectedStation!.stationCode,
           );
         }
+      } else if (!_isPageVisible) {
+        debugPrint('MTR Page: App resumed, but page is hidden - skipping refresh');
       }
     } else if (state == AppLifecycleState.paused) {
-      schedule.stopAutoRefresh();
+      // Always stop auto-refresh when app goes to background
+      if (schedule.isAutoRefreshActive) {
+        debugPrint('MTR Page: App paused - stopping auto-refresh');
+        schedule.stopAutoRefresh();
+      }
     }
   }
 
@@ -1582,10 +1725,12 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
         priority: _PendingOperation.priorityUserAction,
       );
     }
-    // Start/stop auto-refresh based on cached preference (only if auto-load is enabled)
-    if (shouldAutoLoad) {
+    // Start/stop auto-refresh based on cached preference and page visibility
+    // IMPORTANT: Only start auto-refresh if the MTR page is currently visible
+    if (shouldAutoLoad && _isPageVisible) {
       if (schedule.autoRefreshEnabled) {
         if (!schedule.isAutoRefreshActive) {
+          debugPrint('MTR Page: Starting auto-refresh (page is visible)');
           schedule.startAutoRefresh(
             catalog.selectedLine!.lineCode,
             catalog.selectedStation!.stationCode,
@@ -1596,26 +1741,256 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
           schedule.stopAutoRefresh();
         }
       }
+    } else if (!_isPageVisible && schedule.isAutoRefreshActive) {
+      // Stop auto-refresh if page is not visible
+      debugPrint('MTR Page: Stopping auto-refresh (page is hidden)');
+      schedule.stopAutoRefresh();
     }
   }
 
-  /// Format last update time with relative time for recent updates
-  String _formatLastUpdateTime(DateTime lastUpdate, bool isEnglish) {
-    final now = DateTime.now();
-    final difference = now.difference(lastUpdate);
+  /// Build compact, informative, full-bleed status banner
+  Widget _buildStatusBanner(
+    BuildContext context,
+    MtrCatalogProvider catalog,
+    MtrScheduleProvider schedule,
+    LanguageProvider lang,
+    ColorScheme colorScheme,
+  ) {
+    // Determine status
+    final hasData = schedule.hasData;
+    final isError = schedule.data?.status != 1;
+    final isDelay = schedule.data?.isDelay ?? false;
+    final isRefreshing = schedule.backgroundRefreshing;
     
-    if (difference.inSeconds < 60) {
-      return isEnglish ? 'Just now' : '剛剛';
-    } else if (difference.inMinutes < 60) {
-      final mins = difference.inMinutes;
-      return isEnglish ? '${mins}m ago' : '$mins 分鐘前';
+    // Status colors and icons
+    Color statusColor;
+    Color bgColor;
+    IconData statusIcon;
+    String statusText;
+    
+    if (!hasData) {
+      statusColor = colorScheme.onSurfaceVariant;
+      bgColor = colorScheme.surfaceContainerHighest;
+      statusIcon = Icons.info_outline;
+      statusText = lang.isEnglish ? 'Select a station' : '選擇車站';
+    } else if (isError) {
+      statusColor = const Color(0xFFD32F2F); // Red
+      bgColor = const Color(0xFFFFEBEE); // Light red
+      statusIcon = Icons.error_outline;
+      statusText = lang.isEnglish ? 'Service Alert' : '服務異常';
+    } else if (isDelay) {
+      statusColor = const Color(0xFFF57C00); // Orange
+      bgColor = const Color(0xFFFFF3E0); // Light orange
+      statusIcon = Icons.warning_amber_rounded;
+      statusText = lang.isEnglish ? 'Delays Reported' : '服務延誤';
+    } else if (isRefreshing) {
+      statusColor = colorScheme.primary;
+      bgColor = colorScheme.primaryContainer.withOpacity(0.3);
+      statusIcon = Icons.refresh_rounded;
+      statusText = lang.isEnglish ? 'Updating...' : '更新中';
     } else {
-      return TimeOfDay.fromDateTime(lastUpdate).format(context);
+      statusColor = const Color(0xFF2E7D32); // Green
+      bgColor = const Color(0xFFE8F5E9); // Light green
+      statusIcon = Icons.check_circle_outline;
+      statusText = lang.isEnglish ? 'Normal Service' : '服務正常';
     }
+    
+    // Display current date and time from API response
+    String? updateTime;
+    String? updateTimeDetail; // Full date/time for tooltip
+    String? timeSource; // Indicator of data source
+    DateTime? sourceTime;
+    bool isSystemTime = false;
+    
+    // Prefer system time from API response (more accurate than local refresh time)
+    if (hasData && schedule.data?.systemTime != null) {
+      sourceTime = schedule.data!.systemTime;
+      isSystemTime = true;
+      timeSource = lang.isEnglish ? 'MTR System Time' : 'MTR系統時間';
+    } else if (hasData && schedule.data?.currentTime != null) {
+      sourceTime = schedule.data!.currentTime;
+      isSystemTime = true;
+      timeSource = lang.isEnglish ? 'Station Time' : '車站時間';
+    } else if (schedule.lastRefreshTime != null) {
+      sourceTime = schedule.lastRefreshTime;
+      isSystemTime = false;
+      timeSource = lang.isEnglish ? 'Last Refresh' : '上次更新';
+    }
+    
+    if (sourceTime != null) {
+      // Format current date and time (not relative time)
+      // Show time in HH:MM format for compact display
+      updateTime = '${sourceTime.hour.toString().padLeft(2, '0')}:${sourceTime.minute.toString().padLeft(2, '0')}';
+      
+      // Format full date/time for tooltip with source
+      final dateTimeStr = lang.isEnglish
+          ? '${sourceTime.year}-${sourceTime.month.toString().padLeft(2, '0')}-${sourceTime.day.toString().padLeft(2, '0')} '
+            '${sourceTime.hour.toString().padLeft(2, '0')}:${sourceTime.minute.toString().padLeft(2, '0')}:${sourceTime.second.toString().padLeft(2, '0')}'
+          : '${sourceTime.year}年${sourceTime.month}月${sourceTime.day}日 '
+            '${sourceTime.hour.toString().padLeft(2, '0')}:${sourceTime.minute.toString().padLeft(2, '0')}:${sourceTime.second.toString().padLeft(2, '0')}';
+      
+      updateTimeDetail = lang.isEnglish
+          ? '$timeSource\n$dateTimeStr'
+          : '$timeSource\n$dateTimeStr';
+    }
+    
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: bgColor,
+        border: Border(
+          bottom: BorderSide(
+            color: statusColor.withOpacity(0.2),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Status icon
+          Icon(
+            statusIcon,
+            size: 18,
+            color: statusColor,
+          ),
+          const SizedBox(width: 8),
+          
+          // Status text
+          Expanded(
+            child: Text(
+              statusText,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: statusColor,
+                letterSpacing: 0.1,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          
+          // Update time with tooltip showing full date/time and source
+          if (updateTime != null) ...[
+            Tooltip(
+              message: updateTimeDetail ?? updateTime,
+              preferBelow: true,
+              verticalOffset: 8,
+              textStyle: const TextStyle(
+                fontSize: 11,
+                color: Colors.white,
+              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: statusColor.withOpacity(0.2),
+                    width: 0.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Icon varies based on data source
+                    Icon(
+                      isSystemTime ? Icons.cloud_sync_rounded : Icons.schedule_rounded,
+                      size: 12,
+                      color: statusColor.withOpacity(0.85),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      updateTime,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: statusColor.withOpacity(0.95),
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          
+          // Auto-refresh toggle button
+          InkWell(
+            onTap: catalog.hasSelection
+                ? () async {
+                    if (schedule.isAutoRefreshActive) {
+                      schedule.stopAutoRefresh();
+                      await schedule.saveAutoRefreshPref(false);
+                    } else {
+                      schedule.startAutoRefresh(
+                        catalog.selectedLine!.lineCode,
+                        catalog.selectedStation!.stationCode,
+                      );
+                      await schedule.saveAutoRefreshPref(true);
+                    }
+                  }
+                : null,
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: schedule.isAutoRefreshActive
+                    ? statusColor.withOpacity(0.15)
+                    : statusColor.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: schedule.isAutoRefreshActive
+                      ? statusColor.withOpacity(0.4)
+                      : statusColor.withOpacity(0.2),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Animated refresh icon
+                  RotationTransition(
+                    turns: _refreshRotation,
+                    child: Icon(
+                      Icons.refresh_rounded,
+                      size: 14,
+                      color: schedule.isAutoRefreshActive
+                          ? statusColor
+                          : statusColor.withOpacity(0.6),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    schedule.isAutoRefreshActive
+                        ? (lang.isEnglish ? 'ON' : '開')
+                        : (lang.isEnglish ? 'OFF' : '關'),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: schedule.isAutoRefreshActive
+                          ? statusColor
+                          : statusColor.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    
+    // Check page visibility on every rebuild
+    _checkPageVisibility();
+    
     final catalog = context.watch<MtrCatalogProvider>();
     final schedule = context.watch<MtrScheduleProvider>();
     final lang = context.watch<LanguageProvider>();
@@ -1671,141 +2046,8 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
             }
           },
         ),
-        // Auto-refresh control bar with integrated status
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: colorScheme.outline.withOpacity(0.1),
-              width: 0.5,
-            ),
-          ),
-          child: Row(
-            children: [
-              // Auto-refresh toggle
-              IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: Stack(
-                  children: [
-                    // Optimized rotation with cached animation
-                    RotationTransition(
-                      turns: _refreshRotation,
-                      child: Icon(Icons.refresh, size: 20, color: colorScheme.primary),
-                    ),
-                    if (schedule.isAutoRefreshActive)
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        child: Container(
-                          width: 6,
-                          height: 6,
-                          decoration: const BoxDecoration(
-                            color: Colors.green,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                iconSize: 18,
-                tooltip: schedule.isAutoRefreshActive
-                    ? (lang.isEnglish ? 'Auto-refresh ON' : '自動刷新已啟用')
-                    : lang.refresh,
-                onPressed: catalog.hasSelection
-                    ? () async {
-                        if (schedule.isAutoRefreshActive) {
-                          schedule.stopAutoRefresh();
-                          await schedule.saveAutoRefreshPref(false);
-                        } else {
-                          schedule.startAutoRefresh(
-                            catalog.selectedLine!.lineCode,
-                            catalog.selectedStation!.stationCode,
-                          );
-                          await schedule.saveAutoRefreshPref(true);
-                        }
-                      }
-                    : null,
-              ),
-              const SizedBox(width: 2),
-              // Status indicator with background refresh pulse
-              if (schedule.hasData) ...[
-                // Background refresh indicator (subtle pulse)
-                if (schedule.backgroundRefreshing)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: SizedBox(
-                      width: 12,
-                      height: 12,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          colorScheme.primary.withOpacity(0.6),
-                        ),
-                      ),
-                    ),
-                  ),
-                Icon(
-                  schedule.data!.status != 1
-                      ? Icons.error_outline
-                      : schedule.data!.isDelay
-                          ? Icons.schedule
-                          : Icons.check_circle_outline,
-                  size: 14,
-                  color: schedule.data!.status != 1
-                      ? Colors.red
-                      : schedule.data!.isDelay
-                          ? Colors.orange
-                          : Colors.green,
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    schedule.data!.status != 1
-                        ? (lang.isEnglish ? 'Service Alert' : '服務提示')
-                        : schedule.data!.isDelay
-                            ? (lang.isEnglish ? 'Delays' : '延誤')
-                            : schedule.backgroundRefreshing
-                                ? (lang.isEnglish ? 'Updating...' : '更新中...')
-                                : (lang.isEnglish ? 'Normal' : '正常'),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: schedule.data!.status != 1
-                          ? Colors.red[800]
-                          : schedule.data!.isDelay
-                              ? Colors.orange[800]
-                              : schedule.backgroundRefreshing
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 6),
-              ],
-              // Last update time with relative time if recent
-              if (schedule.lastRefreshTime != null)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.access_time, size: 11, color: colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 3),
-                    Text(
-                      _formatLastUpdateTime(schedule.lastRefreshTime!, lang.isEnglish),
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-        ),
+        // Optimized full-bleed status banner with compact, informative design
+        _buildStatusBanner(context, catalog, schedule, lang, colorScheme),
         // Schedule Display
         Expanded(
           child: _MtrScheduleBody(
@@ -1847,12 +2089,16 @@ class _MtrSelector extends StatefulWidget {
   State<_MtrSelector> createState() => _MtrSelectorState();
 }
 
-class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderStateMixin {
+class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixin {
   static const String _stationExpandPrefKey = 'mtr_station_dropdown_expanded';
   static const String _lineExpandPrefKey = 'mtr_line_dropdown_expanded';
   bool _showStations = true;
   bool _showLines = true;
   late AnimationController _animController;
+  late AnimationController _lineExpandController;
+  late AnimationController _stationExpandController;
+  late Animation<double> _lineExpandAnimation;
+  late Animation<double> _stationExpandAnimation;
 
   @override
   void initState() {
@@ -1862,22 +2108,63 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
       duration: const Duration(milliseconds: 300),
     );
     _animController.forward();
+    
+    // Line dropdown expand/collapse animation
+    _lineExpandController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _lineExpandAnimation = CurvedAnimation(
+      parent: _lineExpandController,
+      curve: Curves.easeInOut,
+    );
+    
+    // Station dropdown expand/collapse animation
+    _stationExpandController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _stationExpandAnimation = CurvedAnimation(
+      parent: _stationExpandController,
+      curve: Curves.easeInOut,
+    );
+    
     _loadExpandPrefs();
   }
 
   Future<void> _loadExpandPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final stationExpanded = prefs.getBool(_stationExpandPrefKey) ?? true;
+      final lineExpanded = prefs.getBool(_lineExpandPrefKey) ?? true;
+      
       setState(() {
-        _showStations = prefs.getBool(_stationExpandPrefKey) ?? true;
-        _showLines = prefs.getBool(_lineExpandPrefKey) ?? true;
+        _showStations = stationExpanded;
+        _showLines = lineExpanded;
       });
+      
+      // Initialize animation controllers to match saved state
+      if (_showStations) {
+        _stationExpandController.value = 1.0;
+      }
+      if (_showLines) {
+        _lineExpandController.value = 1.0;
+      }
     } catch (_) {}
   }
 
   Future<void> _saveStationExpandPref(bool expanded) async {
-    _showStations = expanded;
-    setState(() {});
+    setState(() {
+      _showStations = expanded;
+    });
+    
+    // Animate expand/collapse
+    if (expanded) {
+      _stationExpandController.forward();
+    } else {
+      _stationExpandController.reverse();
+    }
+    
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_stationExpandPrefKey, expanded);
@@ -1885,8 +2172,17 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
   }
 
   Future<void> _saveLineExpandPref(bool expanded) async {
-    _showLines = expanded;
-    setState(() {});
+    setState(() {
+      _showLines = expanded;
+    });
+    
+    // Animate expand/collapse
+    if (expanded) {
+      _lineExpandController.forward();
+    } else {
+      _lineExpandController.reverse();
+    }
+    
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_lineExpandPrefKey, expanded);
@@ -1896,6 +2192,8 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
   @override
   void dispose() {
     _animController.dispose();
+    _lineExpandController.dispose();
+    _stationExpandController.dispose();
     super.dispose();
   }
 
@@ -1931,75 +2229,380 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
             isExpanded: _showLines,
             showToggle: true,
             onToggle: () async => await _saveLineExpandPref(!_showLines),
-            content: _showLines ? Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: widget.lines.map((line) {
-                final isSelected = line == widget.selectedLine;
-                return _buildChip(
-                  context: context,
-                  label: line.displayName(lang.isEnglish),
-                  isSelected: isSelected,
-                  color: line.lineColor,
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    widget.onLineChanged(line);
-                    _animController.forward(from: 0);
-                  },
-                  leadingWidget: Container(
-                    width: 3,
-                    height: 16,
-                    decoration: BoxDecoration(
-                      color: line.lineColor,
-                      borderRadius: BorderRadius.circular(1.5),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ) : null,
+            content: SizeTransition(
+              sizeFactor: _lineExpandAnimation,
+              axisAlignment: -1.0,
+              child: FadeTransition(
+                opacity: _lineExpandAnimation,
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: widget.lines.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final line = entry.value;
+                    final isSelected = line == widget.selectedLine;
+                    
+                    // Staggered fade-in when expanding
+                    return AnimatedOpacity(
+                      opacity: _showLines ? 1.0 : 0.0,
+                      duration: Duration(milliseconds: 100 + (idx * 20)),
+                      curve: Curves.easeOut,
+                      child: _buildChip(
+                        context: context,
+                        label: line.displayName(lang.isEnglish),
+                        isSelected: isSelected,
+                        color: line.lineColor,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          widget.onLineChanged(line);
+                          _animController.forward(from: 0);
+                        },
+                        leadingWidget: Container(
+                          width: 3,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: line.lineColor,
+                            borderRadius: BorderRadius.circular(1.5),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
           ),
 
-          // Station Selector Card (cached drop-down style)
+          // Station Selector Card
           if (widget.selectedLine != null && filteredStations.isNotEmpty) ...[
             const SizedBox(height: 8),
-            _buildSelectorCard(
+            _buildStationSelectorWithDirections(
               context: context,
-              icon: Icons.location_on_outlined,
-              title: widget.selectedStation != null
-                  ? widget.selectedStation!.displayName(lang.isEnglish)
-                  : lang.isEnglish ? 'Select Station' : '選擇車站',
-              color: widget.selectedLine!.lineColor,
-              isExpanded: _showStations,
-              showToggle: true,
-              onToggle: () async => await _saveStationExpandPref(!_showStations),
-              trailing: widget.selectedStation != null && widget.selectedStation!.isInterchange
-                  ? _buildCompactInterchangeIndicator(context, widget.selectedStation!)
-                  : null,
-              content: _showStations ? Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: filteredStations.map((station) {
-                  final isSelected = station == widget.selectedStation;
-                  return _buildChip(
-                    context: context,
-                    label: station.displayName(lang.isEnglish),
-                    isSelected: isSelected,
-                    color: widget.selectedLine!.lineColor,
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      widget.onStationChanged(station);
-                    },
-                    trailing: station.isInterchange 
-                        ? _buildInterchangeIndicator(context, station)
-                        : null,
-                  );
-                }).toList(),
-              ) : null,
+              catalog: catalog,
+              lang: lang,
+              filteredStations: filteredStations,
+              colorScheme: colorScheme,
+            ),
+          ],
+          
+          // Direction Filter Card (separate container) - Only for through trains
+          if (widget.selectedLine != null && widget.selectedStation != null) ...[
+            const SizedBox(height: 8),
+            _buildDirectionFilter(
+              context: context,
+              catalog: catalog,
+              lang: lang,
+              colorScheme: colorScheme,
             ),
           ],
         ],
       ),
     );
+  }
+  
+  /// Build station selector
+  Widget _buildStationSelectorWithDirections({
+    required BuildContext context,
+    required MtrCatalogProvider catalog,
+    required LanguageProvider lang,
+    required List<MtrStation> filteredStations,
+    required ColorScheme colorScheme,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(UIConstants.cardRadius),
+        border: Border.all(
+          color: widget.selectedLine!.lineColor.withOpacity(UIConstants.cardBorderOpacity),
+          width: UIConstants.cardBorderWidth,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.05),
+            blurRadius: UIConstants.cardElevation,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Station header with direction filter
+          InkWell(
+            onTap: () => _saveStationExpandPref(!_showStations),
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(UIConstants.cardRadius),
+              bottom: _showStations ? Radius.zero : Radius.circular(UIConstants.cardRadius),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: UIConstants.cardPadding, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Station title row
+                  Row(
+                    children: [
+                      Icon(Icons.location_on_outlined, size: 20, color: widget.selectedLine!.lineColor),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          widget.selectedStation != null
+                              ? widget.selectedStation!.displayName(lang.isEnglish)
+                              : lang.isEnglish ? 'Select Station' : '選擇車站',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: colorScheme.onSurface,
+                            fontSize: UIConstants.cardTitleFontSize,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // Interchange indicator
+                      if (widget.selectedStation != null && widget.selectedStation!.isInterchange)
+                        _buildCompactInterchangeIndicator(context, widget.selectedStation!),
+                      const SizedBox(width: 4),
+                      // Expand/collapse icon
+                      AnimatedRotation(
+                        turns: _showStations ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 250),
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 20,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          // Station list (collapsible with smooth animation)
+          SizeTransition(
+            sizeFactor: _stationExpandAnimation,
+            axisAlignment: -1.0,
+            child: FadeTransition(
+              opacity: _stationExpandAnimation,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  UIConstants.cardPadding,
+                  0,
+                  UIConstants.cardPadding,
+                  UIConstants.cardPadding,
+                ),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: filteredStations.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final station = entry.value;
+                    final isSelected = station == widget.selectedStation;
+                    
+                    // Staggered fade-in when expanding
+                    return AnimatedOpacity(
+                      opacity: _showStations ? 1.0 : 0.0,
+                      duration: Duration(milliseconds: 100 + (idx * 20)),
+                      curve: Curves.easeOut,
+                      child: _buildChip(
+                        context: context,
+                        label: station.displayName(lang.isEnglish),
+                        isSelected: isSelected,
+                        color: widget.selectedLine!.lineColor,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          widget.onStationChanged(station);
+                        },
+                        trailing: station.isInterchange 
+                            ? _buildInterchangeIndicator(context, station)
+                            : null,
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  /// Build direction filter as separate container
+  Widget _buildDirectionFilter({
+    required BuildContext context,
+    required MtrCatalogProvider catalog,
+    required LanguageProvider lang,
+    required ColorScheme colorScheme,
+  }) {
+    final directions = catalog.availableDirections;
+    final selectedDirection = catalog.selectedDirection;
+    final hasDirections = directions.isNotEmpty;
+    
+    // Check if selected station is a terminus station
+    final isTerminus = widget.selectedStation != null && 
+                       widget.selectedLine != null &&
+                       widget.selectedLine!.isTerminusStation(widget.selectedStation!.stationCode);
+    
+    // Only show direction filter for through trains (non-terminus stations)
+    if (!hasDirections || widget.selectedStation == null || isTerminus) {
+      return const SizedBox.shrink();
+    }
+    
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(UIConstants.cardRadius),
+        border: Border.all(
+          color: widget.selectedLine!.lineColor.withOpacity(UIConstants.cardBorderOpacity),
+          width: UIConstants.cardBorderWidth,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.05),
+            blurRadius: UIConstants.cardElevation,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UIConstants.cardPadding,
+          vertical: 10,
+        ),
+        child: Row(
+          children: [
+            // Direction icon
+            Icon(
+              Icons.swap_vert_rounded,
+              size: 18,
+              color: widget.selectedLine!.lineColor,
+            ),
+            const SizedBox(width: 10),
+            // Direction label
+            Text(
+              lang.isEnglish ? 'Direction' : '方向',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
+                fontSize: UIConstants.cardTitleFontSize,
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Direction buttons
+            Expanded(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                alignment: WrapAlignment.end,
+                children: [
+                  // "All" button
+                  _buildCompactDirectionButton(
+                    context: context,
+                    label: lang.isEnglish ? 'All' : '全部',
+                    isSelected: selectedDirection == null || selectedDirection.isEmpty,
+                    color: widget.selectedLine!.lineColor,
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      catalog.selectDirection('');
+                      SharedPreferences.getInstance().then((prefs) {
+                        prefs.remove('mtr_selected_direction');
+                      });
+                    },
+                  ),
+                  // Direction-specific buttons
+                  ...directions.map((dir) {
+                    return _buildCompactDirectionButton(
+                      context: context,
+                      label: _formatDirectionLabel(dir, lang.isEnglish),
+                      isSelected: selectedDirection == dir,
+                      color: widget.selectedLine!.lineColor,
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        catalog.selectDirection(dir);
+                      },
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  /// Build compact direction button for inline display
+  Widget _buildCompactDirectionButton({
+    required BuildContext context,
+    required String label,
+    required bool isSelected,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      splashColor: color.withOpacity(0.15),
+      highlightColor: color.withOpacity(0.08),
+      hoverColor: color.withOpacity(0.05),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withOpacity(0.15) : colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? color : colorScheme.outline.withOpacity(0.3),
+            width: isSelected ? 1.5 : 1,
+          ),
+          // Subtle shadow for selected state
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: color.withOpacity(0.1),
+              blurRadius: 3,
+              offset: const Offset(0, 1),
+            ),
+          ] : null,
+        ),
+        child: AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+            color: isSelected ? color : colorScheme.onSurfaceVariant,
+          ),
+          child: Text(label),
+        ),
+      ),
+    );
+  }
+  
+  /// Format direction label for display
+  String _formatDirectionLabel(String direction, bool isEnglish) {
+    // Map common direction codes to user-friendly labels
+    switch (direction.toUpperCase()) {
+      case 'UP':
+        return isEnglish ? 'Up' : '上行';
+      case 'DOWN':
+        return isEnglish ? 'Down' : '下行';
+      case 'IN':
+        return isEnglish ? 'Inbound' : '入站';
+      case 'OUT':
+        return isEnglish ? 'Outbound' : '出站';
+      default:
+        return direction; // Return as-is if not a known code
+    }
   }
 
   Widget _buildSelectorCard({
@@ -2151,110 +2754,122 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
         ? _getContrastTextColor(color.withOpacity(0.2), context)
         : colorScheme.onSurface;
     
-    return AnimatedBuilder(
-      animation: _animController,
-      builder: (context, child) {
-        // Staggered fade-in animation for smooth appearance
-        final scale = Tween<double>(begin: 0.95, end: 1.0).animate(
-          CurvedAnimation(
-            parent: _animController,
-            curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic),
-          ),
-        );
-        final opacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-          CurvedAnimation(
-            parent: _animController,
-            curve: const Interval(0.0, 0.5, curve: Curves.easeIn),
-          ),
-        );
-        
-        return FadeTransition(
-          opacity: opacity,
-          child: ScaleTransition(
-            scale: scale,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onTap,
-                  borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeInOut,
-                    padding: const EdgeInsets.symmetric(horizontal: UIConstants.chipPaddingH, vertical: UIConstants.chipPaddingV),
-                    decoration: BoxDecoration(
-                      color: isSelected 
-                          ? color.withOpacity(0.2) 
-                          : colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-                      border: Border.all(
-                        color: isSelected
-                            ? color.withOpacity(UIConstants.selectedChipBorderOpacity) 
-                            : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
-                        width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
+    // Simple fade-in animation
+    return AnimatedOpacity(
+      opacity: 1.0,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(UIConstants.chipRadius),
+          splashColor: color.withOpacity(0.15),
+          highlightColor: color.withOpacity(0.08),
+          hoverColor: color.withOpacity(0.05),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+            padding: const EdgeInsets.symmetric(
+              horizontal: UIConstants.chipPaddingH, 
+              vertical: UIConstants.chipPaddingV,
+            ),
+            decoration: BoxDecoration(
+              color: isSelected 
+                  ? color.withOpacity(0.2) 
+                  : colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(UIConstants.chipRadius),
+              border: Border.all(
+                color: isSelected
+                    ? color.withOpacity(UIConstants.selectedChipBorderOpacity) 
+                    : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
+                width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
+              ),
+              // Subtle shadow for selected chips
+              boxShadow: isSelected ? [
+                BoxShadow(
+                  color: color.withOpacity(0.15),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ] : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (leadingWidget != null) ...[
+                  leadingWidget,
+                  const SizedBox(width: UIConstants.selectorSpacing),
+                ],
+                // Animated check icon
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  transitionBuilder: (child, animation) {
+                    return ScaleTransition(
+                      scale: animation,
+                      child: FadeTransition(
+                        opacity: animation,
+                        child: child,
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (leadingWidget != null) ...[
-                          leadingWidget,
-                          const SizedBox(width: UIConstants.selectorSpacing),
-                        ],
-                        if (isSelected)
-                          Icon(
+                    );
+                  },
+                  child: isSelected
+                      ? Padding(
+                          key: const ValueKey('check'),
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Icon(
                             Icons.check_circle,
                             size: UIConstants.checkIconSize,
                             color: color,
                           ),
-                        if (isSelected) const SizedBox(width: 4),
-                        Flexible(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                label,
-                                style: TextStyle(
-                                  fontSize: UIConstants.chipFontSize,
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                                  color: textColor,
-                                ),
-                              ),
-                              if (subtitle != null)
-                                Text(
-                                  subtitle,
-                                  style: TextStyle(
-                                    fontSize: UIConstants.chipSubtitleFontSize,
-                                    color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                            ],
-                          ),
+                        )
+                      : const SizedBox.shrink(key: ValueKey('no-check')),
+                ),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Animated text properties
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeInOut,
+                        style: TextStyle(
+                          fontSize: UIConstants.chipFontSize,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                          color: textColor,
                         ),
-                        if (trailing != null) ...[
-                          const SizedBox(width: 4),
-                          trailing,
-                        ],
-                      ],
-                    ),
+                        child: Text(label),
+                      ),
+                      if (subtitle != null)
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: UIConstants.chipSubtitleFontSize,
+                            color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
                   ),
                 ),
-              ),
+                if (trailing != null) ...[
+                  const SizedBox(width: 4),
+                  trailing,
+                ],
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
   Widget _buildInterchangeIndicator(BuildContext context, MtrStation station) {
     if (!station.isInterchange || station.interchangeLines.isEmpty) {
-      return const Icon(Icons.compare_arrows, size: 12);
+      // Return SizedBox with consistent height to maintain layout consistency
+      return const SizedBox(width: 0, height: 20);
     }
 
     final lang = context.watch<LanguageProvider>();
@@ -2268,7 +2883,7 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
         .toList();
 
     if (lineColors.isEmpty) {
-      return const Icon(Icons.compare_arrows, size: 12);
+      return const SizedBox(width: 0, height: 20);
     }
 
     return Tooltip(
@@ -2276,6 +2891,8 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
           ? 'Interchange station'
           : '轉車站',
       child: Container(
+        // Fixed height to match non-interchange stations
+        height: 20,
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
@@ -2385,18 +3002,20 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
                       orElse: () => widget.lines.first,
                     );
                     
-                    // Switch to the interchange line while keeping the same station
-                    HapticFeedback.selectionClick();
-                    await catalog.selectLine(targetLine);
-                    
-                    // The station will be auto-selected to the first station of the new line
-                    // So we need to manually select the current station on the new line
+                    // Find the same station on the target line (interchange station)
                     final stationOnNewLine = targetLine.stations.firstWhere(
                       (s) => s.stationCode == station.stationCode,
                       orElse: () => targetLine.stations.first,
                     );
                     
-                    await catalog.selectStation(stationOnNewLine);
+                    // Provide haptic feedback
+                    HapticFeedback.selectionClick();
+                    
+                    // Atomically switch to interchange line with the same station
+                    // This prevents intermediate UI state showing wrong station name
+                    await catalog.selectLineAndStation(targetLine, stationOnNewLine);
+                    
+                    // Trigger callbacks to update schedule
                     widget.onLineChanged(targetLine);
                     widget.onStationChanged(stationOnNewLine);
                   },
@@ -2480,6 +3099,7 @@ class _MtrScheduleBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
     final devSettings = context.watch<DeveloperSettingsProvider>();
+    final catalog = context.watch<MtrCatalogProvider>();
     Widget content;
     
     if (loading) {
@@ -2528,9 +3148,34 @@ class _MtrScheduleBody extends StatelessWidget {
         ],
       );
     } else {
-      final directionEntries = data!.directionTrains.entries.toList();
+      // Filter directions based on selected direction
+      final selectedDirection = catalog.selectedDirection;
+      var directionEntries = data!.directionTrains.entries.toList();
       
-      content = ListView.builder(
+      // Apply direction filter if a specific direction is selected
+      if (selectedDirection != null && selectedDirection.isNotEmpty) {
+        directionEntries = directionEntries.where((entry) {
+          return entry.key.toUpperCase() == selectedDirection.toUpperCase();
+        }).toList();
+      }
+      
+      // Handle case where filtering results in no trains
+      if (directionEntries.isEmpty) {
+        content = ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            const SizedBox(height: 160),
+            Center(
+              child: Text(
+                lang.isEnglish 
+                  ? 'No trains for this direction' 
+                  : '此方向沒有列車',
+              ),
+            ),
+          ],
+        );
+      } else {
+        content = ListView.builder(
         padding: const EdgeInsets.all(8),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: directionEntries.length,
@@ -2701,21 +3346,12 @@ class _MtrScheduleBody extends StatelessWidget {
                             final train = entry.value;
                             final isLast = idx == trains.length - 1;
                             
-                            // Staggered fade-in animation for smoother list appearance
-                            return TweenAnimationBuilder<double>(
+                            // Simple fade-in animation from top to bottom
+                            return AnimatedOpacity(
                               key: ValueKey(train.hashCode),
-                              duration: Duration(milliseconds: 200 + (idx * 50).clamp(0, 400)),
-                              tween: Tween(begin: 0.0, end: 1.0),
-                              curve: Curves.easeOutCubic,
-                              builder: (context, value, child) {
-                                return Opacity(
-                                  opacity: value,
-                                  child: Transform.translate(
-                                    offset: Offset(0, 8 * (1 - value)),
-                                    child: child,
-                                  ),
-                                );
-                              },
+                              opacity: 1.0,
+                              duration: Duration(milliseconds: 150 + (idx * 30)),
+                              curve: Curves.easeOut,
                               child: _TrainListItem(
                                 train: train,
                                 isLast: isLast,
@@ -2732,7 +3368,8 @@ class _MtrScheduleBody extends StatelessWidget {
             ),
           );
         },
-      );
+        );
+      }
     }
     
     if (onRefresh != null) {
