@@ -1781,17 +1781,20 @@ class ThemeProvider extends ChangeNotifier {
     static const String _showGridDebugKey = 'show_grid_debug';
     static const String _showCacheStatusKey = 'show_cache_status';
     static const String _showMtrArrivalDetailsKey = 'show_mtr_arrival_details';
+    static const String _mtrAutoLoadCachedSelectionKey = 'mtr_auto_load_cached_selection';
     
     bool _hideStationId = false;
     bool _showGridDebug = false;
     bool _showCacheStatus = false; // Default to hidden
     bool _showMtrArrivalDetails = false; // Default to hidden for cleaner UI
+    bool _mtrAutoLoadCachedSelection = true; // Default to true for convenience
     SharedPreferences? _prefs;
 
     bool get hideStationId => _hideStationId;
     bool get showGridDebug => _showGridDebug;
     bool get showCacheStatus => _showCacheStatus;
     bool get showMtrArrivalDetails => _showMtrArrivalDetails;
+    bool get mtrAutoLoadCachedSelection => _mtrAutoLoadCachedSelection;
 
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
@@ -1799,6 +1802,7 @@ class ThemeProvider extends ChangeNotifier {
       _showGridDebug = _prefs!.getBool(_showGridDebugKey) ?? false;
       _showCacheStatus = _prefs!.getBool(_showCacheStatusKey) ?? false;
       _showMtrArrivalDetails = _prefs!.getBool(_showMtrArrivalDetailsKey) ?? false;
+      _mtrAutoLoadCachedSelection = _prefs!.getBool(_mtrAutoLoadCachedSelectionKey) ?? true;
       notifyListeners();
     }
 
@@ -1827,6 +1831,13 @@ class ThemeProvider extends ChangeNotifier {
       _showMtrArrivalDetails = show;
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool(_showMtrArrivalDetailsKey, show);
+      notifyListeners();
+    }
+    
+    Future<void> setMtrAutoLoadCachedSelection(bool autoLoad) async {
+      _mtrAutoLoadCachedSelection = autoLoad;
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool(_mtrAutoLoadCachedSelectionKey, autoLoad);
       notifyListeners();
     }
   }
@@ -2741,6 +2752,27 @@ class StationProvider extends ChangeNotifier {
 }
 /* ========================= 優化的 Schedule Provider ========================= */
 
+/// Pending operation for sequential execution
+class _LrtPendingOperation {
+  final int stationId;
+  final bool forceRefresh;
+  final BuildContext? context;
+  final int priority;
+  
+  _LrtPendingOperation({
+    required this.stationId,
+    required this.forceRefresh,
+    this.context,
+    required this.priority,
+  });
+  
+  // Priority levels for different operation types
+  static const int priorityAutoRefresh = 0;      // Lowest - background timer
+  static const int priorityRouteSwitch = 10;     // Medium - route selection
+  static const int priorityStationSwitch = 15;   // High - station selection
+  static const int priorityManualRefresh = 20;   // Highest - pull-to-refresh
+}
+
 class ScheduleProvider extends ChangeNotifier {
   final LrtApiService _api = LrtApiService();
   LrtScheduleResponse? _data;
@@ -2752,6 +2784,14 @@ class ScheduleProvider extends ChangeNotifier {
   int? _currentStationId;
   Duration? _currentRefreshInterval;
   int _adjustmentCheckCounter = 0; // 用於控制間隔調整的頻率
+  
+  // ===== OPERATION QUEUE FOR O(1) COMPLEXITY =====
+  
+  // Single operation lock to prevent parallel execution
+  bool _isOperationInProgress = false;
+  
+  // Pending operation (only store the most recent highest-priority request)
+  _LrtPendingOperation? _pendingOperation;
 
   LrtScheduleResponse? get data => _data;
   String? get error => _error;
@@ -2759,7 +2799,78 @@ class ScheduleProvider extends ChangeNotifier {
   bool get isUsingCachedData => _isUsingCachedData;
   bool get showCacheAlert => _showCacheAlert;
 
-  Future<void> load(int stationId, {bool forceRefresh = false, BuildContext? context}) async {
+  /// Load schedule with sequential execution (O(1) complexity, no parallel operations)
+  /// 
+  /// Priority levels (higher replaces lower in pending queue):
+  /// - Auto-refresh (0): Background timer updates
+  /// - District switch (5): User changed district
+  /// - Route switch (10): User changed route  
+  /// - Station switch (15): User changed station
+  /// - Manual refresh (20): Pull-to-refresh gesture
+  Future<void> load(
+    int stationId, {
+    bool forceRefresh = false,
+    BuildContext? context,
+    int priority = 0, // Operation priority
+  }) async {
+    // ===== SEQUENTIAL EXECUTION GUARD (O(1)) =====
+    // If an operation is already in progress, store this as pending and return
+    if (_isOperationInProgress) {
+      debugPrint('LRT Schedule: Operation in progress, queuing request (priority: $priority)');
+      
+      // Only replace pending operation if new one has higher or equal priority
+      if (_pendingOperation == null || priority >= _pendingOperation!.priority) {
+        if (_pendingOperation != null) {
+          debugPrint('LRT Schedule: Replacing pending operation (old priority: ${_pendingOperation!.priority}, new priority: $priority)');
+        }
+        
+        _pendingOperation = _LrtPendingOperation(
+          stationId: stationId,
+          forceRefresh: forceRefresh,
+          context: context,
+          priority: priority,
+        );
+      } else {
+        debugPrint('LRT Schedule: Ignoring lower priority request (pending priority: ${_pendingOperation!.priority})');
+      }
+      return;
+    }
+    
+    // Mark operation as in progress
+    _isOperationInProgress = true;
+    debugPrint('LRT Schedule: Starting operation (priority: $priority, station: $stationId)');
+    
+    try {
+      // Execute the actual load operation
+      await _executeLoad(stationId, forceRefresh: forceRefresh, context: context);
+    } finally {
+      // Mark operation as complete
+      _isOperationInProgress = false;
+      
+      // Process pending operation if exists (O(1) - only one pending operation)
+      if (_pendingOperation != null) {
+        final pending = _pendingOperation!;
+        _pendingOperation = null; // Clear pending before executing
+        
+        debugPrint('LRT Schedule: Processing pending operation (priority: ${pending.priority}, station: ${pending.stationId})');
+        // Execute pending operation asynchronously (don't await to avoid recursion)
+        unawaited(load(
+          pending.stationId,
+          forceRefresh: pending.forceRefresh,
+          context: pending.context,
+          priority: pending.priority,
+        ));
+      }
+    }
+  }
+  
+  /// Internal method that executes the actual load logic
+  /// Separated from load() for sequential execution control
+  Future<void> _executeLoad(
+    int stationId, {
+    required bool forceRefresh,
+    BuildContext? context,
+  }) async {
     final httpError = context?.read<HttpErrorProvider>();
     
     // 檢查是否因 API 錯誤而停止請求
@@ -2851,6 +2962,8 @@ class ScheduleProvider extends ChangeNotifier {
     return _currentRefreshInterval ?? const Duration(seconds: 5); // 基於API測試結果優化
   }
 
+  /// Start auto-refresh with adaptive intervals
+  /// OPTIMIZED: Uses priority-based sequential execution (no parallel operations)
   void startAutoRefresh(int stationId, {Duration? interval}) {
     debugPrint('=== startAutoRefresh called for station $stationId ===');
     
@@ -2862,7 +2975,7 @@ class ScheduleProvider extends ChangeNotifier {
 
     // 使用自適應間隔或默認間隔
     final refreshInterval = interval ?? LrtApiService.suggestedRefreshInterval;
-    debugPrint('Using refresh interval: ${refreshInterval.inSeconds}s');
+    debugPrint('Using refresh interval: ${refreshInterval.inSeconds}s (priority: auto-refresh)');
     
     // 確保清理舊的timer和重置計數器
     _timer?.cancel();
@@ -2874,11 +2987,19 @@ class ScheduleProvider extends ChangeNotifier {
     
     _timer = Timer.periodic(refreshInterval, (_) {
       debugPrint('Auto-refresh timer triggered for station $stationId');
-      load(stationId, forceRefresh: true); // 強制刷新以獲取最新數據
+      // Use lowest priority for auto-refresh (won't interrupt user actions)
+      load(
+        stationId,
+        forceRefresh: true,
+        priority: _LrtPendingOperation.priorityAutoRefresh,
+      );
     });
     
-    // 立即加載一次數據
-    load(stationId);
+    // 立即加載一次數據 (medium priority for initial load)
+    load(
+      stationId,
+      priority: _LrtPendingOperation.priorityRouteSwitch,
+    );
     debugPrint('Auto-refresh started for station $stationId with interval: ${refreshInterval.inSeconds}s');
   }
 
@@ -3077,7 +3198,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       debugPrint('Conditions met, checking if auto-refresh is not active');
       if (!sched.isAutoRefreshActive) {
         debugPrint('Starting auto-refresh for station ${station.selectedStationId}');
-        sched.load(station.selectedStationId, forceRefresh: true);
+        // User selection trigger - use station switch priority
+        sched.load(
+          station.selectedStationId,
+          forceRefresh: true,
+          priority: _LrtPendingOperation.priorityStationSwitch,
+        );
         sched.startAutoRefresh(station.selectedStationId);
       } else {
         debugPrint('Auto-refresh already active, skipping');
@@ -3096,7 +3222,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       // Only resume auto-refresh if user has previously selected a station
       if (connectivity.isOnline && station.userHasSelected) {
-        sched.load(station.selectedStationId, forceRefresh: true);
+        // App resumed - use station switch priority
+        sched.load(
+          station.selectedStationId,
+          forceRefresh: true,
+          priority: _LrtPendingOperation.priorityStationSwitch,
+        );
         sched.startAutoRefresh(station.selectedStationId);
       }
     } else if (state == AppLifecycleState.paused) {
@@ -3390,7 +3521,11 @@ class _SchedulePage extends StatelessWidget {
             error: scheduleProvider.error,
             data: scheduleProvider.data,
             onRefresh: connectivity.isOnline
-                ? () => scheduleProvider.load(stationProvider.selectedStationId, forceRefresh: true)
+                ? () => scheduleProvider.load(
+                    stationProvider.selectedStationId,
+                    forceRefresh: true,
+                    priority: _LrtPendingOperation.priorityManualRefresh, // Highest priority
+                  )
                 : null,
           ),
         ),
@@ -7995,6 +8130,26 @@ class _SettingsPage extends StatelessWidget {
         
         const SizedBox(height: UIConstants.spacingXS),
         
+        // MTR Auto-load Cached Selection setting
+        Consumer<DeveloperSettingsProvider>(
+          builder: (context, devSettings, _) => _buildCompactCard(
+            context,
+            icon: Icons.bookmark,
+            title: lang.isEnglish ? 'Auto-load Last MTR Station' : '自動載入上次港鐵站',
+            subtitle: devSettings.mtrAutoLoadCachedSelection 
+                ? (lang.isEnglish ? 'Automatically load your last selected station' : '自動載入您上次選擇的車站')
+                : (lang.isEnglish ? 'Start with station list (manual selection)' : '從車站列表開始（手動選擇）'),
+            trailing: Switch(
+              value: devSettings.mtrAutoLoadCachedSelection,
+              onChanged: (value) {
+                devSettings.setMtrAutoLoadCachedSelection(value);
+              },
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: UIConstants.spacingXS),
+        
         // 快取警告設定
         Consumer<ScheduleProvider>(
           builder: (context, scheduleProvider, _) => _buildCompactCard(
@@ -9687,8 +9842,12 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       
       if (connectivity.isOnline) {
         // Load data in background - don't block UI
+        // Use station switch priority (high priority for user action)
         debugPrint('Loading data and starting auto-refresh for station ${station.id}');
-        unawaited(widget.scheduleProvider.load(station.id).then((_) {
+        unawaited(widget.scheduleProvider.load(
+          station.id,
+          priority: _LrtPendingOperation.priorityStationSwitch,
+        ).then((_) {
           widget.scheduleProvider.startAutoRefresh(station.id);
         }));
       } else {

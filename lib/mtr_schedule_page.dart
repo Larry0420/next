@@ -791,6 +791,7 @@ class MtrCatalogProvider extends ChangeNotifier {
   MtrStation? _selectedStation;
   String? _selectedDirection; // UP, DOWN, IN, OUT, etc.
   bool _isInitialized = false;
+  bool _hasAppliedUserPreference = false; // Track if we've applied the auto-load preference
   static const String _catalogAssetPath = 'lib/Route Station.json';
   
   List<MtrLine> get lines => _lines;
@@ -813,10 +814,36 @@ class MtrCatalogProvider extends ChangeNotifier {
   }
   
   MtrCatalogProvider() {
-    _loadMtrData();
+    // Load data without applying cached selection initially
+    // The page will call initializeWithSettings() to apply user preference
+    _loadMtrData(loadCachedSelection: false);
   }
   
-  Future<void> _loadMtrData() async {
+  /// Initialize with user settings - call this after DeveloperSettingsProvider is ready
+  Future<void> initializeWithSettings(bool shouldLoadCachedSelection) async {
+    if (_hasAppliedUserPreference) {
+      debugPrint('MTR Catalog: User preference already applied, skipping');
+      return;
+    }
+    
+    _hasAppliedUserPreference = true;
+    
+    if (shouldLoadCachedSelection) {
+      debugPrint('MTR Catalog: Applying cached selection (user preference: enabled)');
+      await _loadSavedSelection();
+      notifyListeners();
+    } else {
+      debugPrint('MTR Catalog: Skipping cached selection (user preference: disabled)');
+      // Reset to first line/station for manual selection
+      if (_lines.isNotEmpty) {
+        _selectedLine = _lines.first;
+        _selectedStation = _selectedLine!.stations.isNotEmpty ? _selectedLine!.stations.first : null;
+        notifyListeners();
+      }
+    }
+  }
+  
+  Future<void> _loadMtrData({bool loadCachedSelection = true}) async {
     try {
       final raw = await rootBundle.loadString(_catalogAssetPath);
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
@@ -827,7 +854,13 @@ class MtrCatalogProvider extends ChangeNotifier {
     }
 
     _isInitialized = true;
-    await _loadSavedSelection();
+    
+    // Only load saved selection if enabled in settings
+    if (loadCachedSelection) {
+      await _loadSavedSelection();
+    }
+    
+    // If no selection after loading (either disabled or no cache), default to first line/station
     if (_selectedLine == null && _lines.isNotEmpty) {
       _selectedLine = _lines.first;
       _selectedStation = _selectedLine!.stations.isNotEmpty ? _selectedLine!.stations.first : null;
@@ -937,6 +970,20 @@ class MtrCatalogProvider extends ChangeNotifier {
     }
   }
   
+  /// Reload MTR data with option to apply cached selection
+  /// Call this when the auto-load setting changes
+  Future<void> reloadWithSettings(bool loadCachedSelection) async {
+    _isInitialized = false;
+    notifyListeners();
+    await _loadMtrData(loadCachedSelection: loadCachedSelection);
+  }
+  
+  /// Apply cached selection if available (call this when auto-load setting is enabled)
+  Future<void> applyCachedSelection() async {
+    await _loadSavedSelection();
+    notifyListeners();
+  }
+  
   Future<void> selectLine(MtrLine line) async {
     _selectedLine = line;
     _selectedStation = line.stations.isNotEmpty ? line.stations.first : null;
@@ -973,6 +1020,30 @@ class MtrCatalogProvider extends ChangeNotifier {
 
 // ========================= MTR Schedule Provider =========================
 
+/// Pending operation for sequential execution
+class _PendingOperation {
+  final String lineCode;
+  final String stationCode;
+  final bool forceRefresh;
+  final bool allowStaleCache;
+  final bool silentRefresh;
+  final int priority; // Higher priority operations replace lower priority pending operations
+  
+  _PendingOperation({
+    required this.lineCode,
+    required this.stationCode,
+    required this.forceRefresh,
+    required this.allowStaleCache,
+    required this.silentRefresh,
+    this.priority = 0,
+  });
+  
+  // Priority levels for different operation types
+  static const int priorityAutoRefresh = 0;   // Lowest - background auto-refresh
+  static const int priorityUserAction = 10;   // Medium - user changed station/line
+  static const int priorityManualRefresh = 20; // Highest - user pulled to refresh
+}
+
 class MtrScheduleProvider extends ChangeNotifier {
   // Persisted auto-refresh preference
   static const String _autoRefreshPrefKey = 'mtr_auto_refresh_enabled';
@@ -1004,6 +1075,14 @@ class MtrScheduleProvider extends ChangeNotifier {
   bool _loading = false;
   bool _backgroundRefreshing = false; // Silent background refresh flag
   String? _error;
+  
+  // ===== OPERATION QUEUE FOR O(1) COMPLEXITY =====
+  
+  // Single operation lock to prevent parallel execution
+  bool _isOperationInProgress = false;
+  
+  // Pending operation (only store the most recent request)
+  _PendingOperation? _pendingOperation;
   
   // ===== ADAPTIVE REFRESH FOR POOR NETWORK CONDITIONS =====
   
@@ -1041,18 +1120,91 @@ class MtrScheduleProvider extends ChangeNotifier {
   
   /// Load schedule with network-aware optimizations and seamless UI updates
   /// Uses background refresh to avoid jarring loading states
+  /// OPTIMIZED: O(1) complexity with sequential execution (no parallel operations)
+  /// 
+  /// Priority levels (higher replaces lower in pending queue):
+  /// - Auto-refresh (0): Background periodic updates
+  /// - User action (10): Station/line selection changes
+  /// - Manual refresh (20): Pull-to-refresh gesture
   Future<void> loadSchedule(
     String lineCode, 
     String stationCode, {
     bool forceRefresh = false,
     bool allowStaleCache = true,
     bool silentRefresh = false, // Don't show loading spinner if we have data
+    int priority = 0, // Operation priority (0=auto-refresh, 10=user action, 20=manual refresh)
   }) async {
-    // Prevent concurrent loads
-    if (_loading && !silentRefresh) {
-      debugPrint('MTR Schedule: Already loading, skipping');
+    // ===== SEQUENTIAL EXECUTION GUARD (O(1)) =====
+    // If an operation is already in progress, store this as pending and return
+    if (_isOperationInProgress) {
+      debugPrint('MTR Schedule: Operation in progress, queuing request (priority: $priority)');
+      
+      // Only replace pending operation if new one has higher or equal priority
+      if (_pendingOperation == null || priority >= _pendingOperation!.priority) {
+        if (_pendingOperation != null) {
+          debugPrint('MTR Schedule: Replacing pending operation (old priority: ${_pendingOperation!.priority}, new priority: $priority)');
+        }
+        
+        // Store only the most recent highest-priority request
+        _pendingOperation = _PendingOperation(
+          lineCode: lineCode,
+          stationCode: stationCode,
+          forceRefresh: forceRefresh,
+          allowStaleCache: allowStaleCache,
+          silentRefresh: silentRefresh,
+          priority: priority,
+        );
+      } else {
+        debugPrint('MTR Schedule: Ignoring lower priority request (pending priority: ${_pendingOperation!.priority})');
+      }
       return;
     }
+    
+    // Mark operation as in progress
+    _isOperationInProgress = true;
+    debugPrint('MTR Schedule: Starting operation (priority: $priority)');
+    
+    try {
+      // Execute the actual load operation
+      await _executeLoadSchedule(
+        lineCode,
+        stationCode,
+        forceRefresh: forceRefresh,
+        allowStaleCache: allowStaleCache,
+        silentRefresh: silentRefresh,
+      );
+    } finally {
+      // Mark operation as complete
+      _isOperationInProgress = false;
+      
+      // Process pending operation if exists (O(1) - only one pending operation)
+      if (_pendingOperation != null) {
+        final pending = _pendingOperation!;
+        _pendingOperation = null; // Clear pending before executing
+        
+        debugPrint('MTR Schedule: Processing pending operation (priority: ${pending.priority})');
+        // Execute pending operation asynchronously (don't await to avoid recursion)
+        unawaited(loadSchedule(
+          pending.lineCode,
+          pending.stationCode,
+          forceRefresh: pending.forceRefresh,
+          allowStaleCache: pending.allowStaleCache,
+          silentRefresh: pending.silentRefresh,
+          priority: pending.priority,
+        ));
+      }
+    }
+  }
+  
+  /// Internal method that executes the actual load logic
+  /// Separated from loadSchedule() for sequential execution control
+  Future<void> _executeLoadSchedule(
+    String lineCode, 
+    String stationCode, {
+    required bool forceRefresh,
+    required bool allowStaleCache,
+    required bool silentRefresh,
+  }) async {
     
     // Check circuit breaker
     if (_circuitBreakerOpen) {
@@ -1200,6 +1352,7 @@ class MtrScheduleProvider extends ChangeNotifier {
   }
   
   /// Start auto-refresh with adaptive intervals and seamless updates
+  /// OPTIMIZED: Uses priority-based sequential execution (no parallel operations)
   void startAutoRefresh(String lineCode, String stationCode, {Duration? interval}) {
     stopAutoRefresh();
     
@@ -1207,7 +1360,7 @@ class MtrScheduleProvider extends ChangeNotifier {
     final refreshInterval = interval ?? _getAdaptiveInterval();
     _currentRefreshInterval = refreshInterval;
     
-    debugPrint('MTR Auto-refresh: Starting with interval ${refreshInterval.inSeconds}s');
+    debugPrint('MTR Auto-refresh: Starting with interval ${refreshInterval.inSeconds}s (priority: auto-refresh)');
     
     _autoRefreshTimer = Timer.periodic(refreshInterval, (_) async {
       // Check if we should adjust interval
@@ -1219,23 +1372,25 @@ class MtrScheduleProvider extends ChangeNotifier {
       }
       
       debugPrint('MTR Auto-refresh: Background refresh $lineCode/$stationCode');
-      // Use silent refresh to avoid jarring UI updates
+      // Use silent refresh with lowest priority (won't interrupt user actions)
       await loadSchedule(
         lineCode, 
         stationCode, 
         forceRefresh: false, // Allow stale-while-revalidate
         allowStaleCache: true,
         silentRefresh: true, // Don't show loading spinner during auto-refresh
+        priority: _PendingOperation.priorityAutoRefresh, // Lowest priority
       );
     });
     
-    // Immediate first load (can show loading indicator)
+    // Immediate first load (can show loading indicator, medium priority)
     loadSchedule(
       lineCode, 
       stationCode, 
       forceRefresh: false, 
       allowStaleCache: true,
       silentRefresh: false, // Show loading on initial load
+      priority: _PendingOperation.priorityUserAction, // Medium priority for initial load
     );
     notifyListeners();
   }
@@ -1262,6 +1417,7 @@ class MtrScheduleProvider extends ChangeNotifier {
   
   /// Manual refresh - forces network call and resets circuit breaker
   /// Shows loading indicator but keeps old data visible during refresh
+  /// OPTIMIZED: Uses highest priority to override auto-refresh operations
   Future<void> manualRefresh(String lineCode, String stationCode) async {
     _closeCircuitBreaker(); // Allow manual refresh to try
     await loadSchedule(
@@ -1270,6 +1426,7 @@ class MtrScheduleProvider extends ChangeNotifier {
       forceRefresh: true, 
       allowStaleCache: false,
       silentRefresh: _data != null, // Silent if we have data, show loading if empty
+      priority: _PendingOperation.priorityManualRefresh, // Highest priority - overrides everything
     );
   }
   
@@ -1316,8 +1473,13 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
       _autoRefreshInitialized = true;
       final schedule = context.read<MtrScheduleProvider>();
       final catalog = context.read<MtrCatalogProvider>();
+      final devSettings = context.read<DeveloperSettingsProvider>();
+      
       schedule.loadAutoRefreshPref().then((_) {
-        if (catalog.hasSelection) {
+        // Only start auto-refresh if auto-load is enabled AND we have a selection
+        final shouldAutoLoad = devSettings.mtrAutoLoadCachedSelection && catalog.hasSelection;
+        
+        if (shouldAutoLoad) {
           if (schedule.autoRefreshEnabled) {
             if (!schedule.isAutoRefreshActive) {
               schedule.startAutoRefresh(
@@ -1342,7 +1504,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadScheduleIfNeeded();
+      _initializeCatalogAndSchedule();
     });
     // Optimized refresh animation with ease-in-out for smoother rotation
     _refreshAnimController = AnimationController(
@@ -1355,6 +1517,20 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
         curve: Curves.easeInOut,
       ),
     );
+  }
+  
+  /// Initialize catalog and schedule based on auto-load setting
+  void _initializeCatalogAndSchedule() {
+    final catalog = context.read<MtrCatalogProvider>();
+    final devSettings = context.read<DeveloperSettingsProvider>();
+    
+    // Apply user preference for auto-loading cached selection
+    catalog.initializeWithSettings(devSettings.mtrAutoLoadCachedSelection).then((_) {
+      // After catalog is initialized with user preference, load schedule if appropriate
+      if (devSettings.mtrAutoLoadCachedSelection && catalog.hasSelection) {
+        _loadScheduleIfNeeded();
+      }
+    });
   }
 
   @override
@@ -1371,10 +1547,12 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     if (state == AppLifecycleState.resumed) {
       // Resume auto-refresh if selection exists AND auto-refresh was enabled
       if (catalog.hasSelection && schedule.autoRefreshEnabled) {
+        // App resumed - use user action priority
         schedule.loadSchedule(
           catalog.selectedLine!.lineCode,
           catalog.selectedStation!.stationCode,
           forceRefresh: true,
+          priority: _PendingOperation.priorityUserAction,
         );
         if (!schedule.isAutoRefreshActive) {
           schedule.startAutoRefresh(
@@ -1391,14 +1569,21 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
   void _loadScheduleIfNeeded() {
     final catalog = context.read<MtrCatalogProvider>();
     final schedule = context.read<MtrScheduleProvider>();
-    if (catalog.hasSelection && !schedule.hasData && !schedule.loading) {
+    final devSettings = context.read<DeveloperSettingsProvider>();
+    
+    // Only auto-load schedule if user has enabled auto-load AND we have a selection
+    final shouldAutoLoad = devSettings.mtrAutoLoadCachedSelection && catalog.hasSelection;
+    
+    if (shouldAutoLoad && !schedule.hasData && !schedule.loading) {
+      // Initial load from cached selection - use user action priority
       schedule.loadSchedule(
         catalog.selectedLine!.lineCode,
         catalog.selectedStation!.stationCode,
+        priority: _PendingOperation.priorityUserAction,
       );
     }
-    // Start/stop auto-refresh based on cached preference
-    if (catalog.hasSelection) {
+    // Start/stop auto-refresh based on cached preference (only if auto-load is enabled)
+    if (shouldAutoLoad) {
       if (schedule.autoRefreshEnabled) {
         if (!schedule.isAutoRefreshActive) {
           schedule.startAutoRefresh(
@@ -1462,14 +1647,26 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
           onLineChanged: (line) async {
             await catalog.selectLine(line);
             if (catalog.selectedStation != null) {
-              schedule.loadSchedule(line.lineCode, catalog.selectedStation!.stationCode, forceRefresh: true);
+              // User changed line - use user action priority
+              schedule.loadSchedule(
+                line.lineCode,
+                catalog.selectedStation!.stationCode,
+                forceRefresh: true,
+                priority: _PendingOperation.priorityUserAction,
+              );
               schedule.startAutoRefresh(line.lineCode, catalog.selectedStation!.stationCode);
             }
           },
           onStationChanged: (station) async {
             await catalog.selectStation(station);
             if (catalog.selectedLine != null) {
-              schedule.loadSchedule(catalog.selectedLine!.lineCode, station.stationCode, forceRefresh: true);
+              // User changed station - use user action priority
+              schedule.loadSchedule(
+                catalog.selectedLine!.lineCode,
+                station.stationCode,
+                forceRefresh: true,
+                priority: _PendingOperation.priorityUserAction,
+              );
               schedule.startAutoRefresh(catalog.selectedLine!.lineCode, station.stationCode);
             }
           },
