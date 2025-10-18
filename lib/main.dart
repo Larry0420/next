@@ -4892,7 +4892,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
         
         // 根據螢幕大小調整佈局 - 地區選擇器始終較短或等寬
         // 中等及更寬螢幕：地區選擇器保持較短，給予路線選擇器更多空間
-        final int districtFlex = isVeryWideScreen ? 2 : (isWideScreen ? 2 : (isMediumScreen ? 1 : 1));
+        final int districtFlex = isVeryWideScreen ? 2 : (isWideScreen ? 2 : (isMediumScreen ? 2 : 1));
         final int routeFlex = isVeryWideScreen ? 3 : (isWideScreen ? 3 : (isMediumScreen ? 2 : 1));
         final double horizontalPadding = isNarrowScreen ? 8 : 10;
         final double verticalPadding = showDistricts || showRoutes ? 8 : 4;

@@ -473,6 +473,8 @@ class MtrTrainInfo {
   final String time;
   final int? timeInMinutes; // ttnt: Time to Next Train in minutes
   final int? sequence;
+  final String? timeType; // Optional: "A" = Arrival, "D" = Departure (EAL only)
+  final String? route; // Optional: "" = Normal, "RAC" = Via Racecourse (EAL only)
   
   MtrTrainInfo({
     required this.destination,
@@ -480,6 +482,8 @@ class MtrTrainInfo {
     required this.time,
     this.timeInMinutes,
     this.sequence,
+    this.timeType,
+    this.route,
   });
   
   factory MtrTrainInfo.fromJson(Map<String, dynamic> json) {
@@ -494,46 +498,131 @@ class MtrTrainInfo {
       time: json['time'] as String? ?? '',
       timeInMinutes: parseInt(json['ttnt']),
       sequence: parseInt(json['seq']),
+      timeType: json['timetype'] as String?,
+      route: json['route'] as String?,
     );
   }
   
-  bool get isArriving => time.toLowerCase().contains('arriving') || time == '-';
-  
-  String get displayTime {
-    // Use timeInMinutes (ttnt: Time to Next Train in minutes)
-    if (timeInMinutes != null) {
-      final minutes = timeInMinutes!;
-      if (minutes <= 0) return 'Arriving';
-      
-      if (minutes == 1) {
-        return '1 min';
-      } else {
-        return '$minutes mins';
-      }
+  /// Check if train is arriving at this station (based on timetype field)
+  /// For terminus stations, timetype "A" means arriving, "D" means departing
+  bool get isArriving {
+    // Check timetype field (API standard for EAL, may apply to other lines)
+    if (timeType != null) {
+      return timeType!.toUpperCase() == 'A';
     }
     
-    // Fallback to time field if ttnt is not available
-    if (time.isEmpty) return '-';
-    if (time.toUpperCase() == 'ARR' || isArriving) return 'Arriving';
+    // Fallback to time field analysis
+    final timeUpper = time.toUpperCase();
+    // Check for 'ARR' status from API
+    if (timeUpper == 'ARR' || timeUpper.contains('ARRIVING')) return true;
+    // Check if time is dash (arriving soon indicator)
+    if (time == '-') return true;
+    
+    return false;
+  }
+  
+  /// Check if train is departing from this station (based on timetype field)
+  /// For terminus stations, this is important to distinguish from through trains
+  bool get isDeparting {
+    // Check timetype field (API standard for EAL, may apply to other lines)
+    if (timeType != null) {
+      return timeType!.toUpperCase() == 'D';
+    }
+    
+    // Fallback to time field analysis
+    final timeUpper = time.toUpperCase();
+    return timeUpper == 'DEP' || timeUpper.contains('DEPARTING');
+  }
+  
+  /// Check if train is at platform (timeInMinutes <= 0)
+  bool get isAtPlatform => timeInMinutes != null && timeInMinutes! <= 0;
+  
+  /// Display time with English localization (deprecated - use displayTimeLocalized)
+  @Deprecated('Use displayTimeLocalized(isEnglish) instead')
+  String get displayTime => displayTimeLocalized(true);
+  
+  /// Display time with proper localization support
+  /// Handles terminus stations and through trains correctly using timetype field
+  /// According to MTR API: 
+  /// - 'time' field contains actual arrival/departure time
+  /// - 'ttnt' (timeInMinutes) contains minutes until arrival/departure
+  ///   - ttnt = 2 or less: Train is arriving
+  ///   - ttnt = 0: Through trains show "Departing" (arrived and departing)
+  ///   - ttnt = 0 + timetype='A': Terminus arrival (show "Arriving")
+  ///   - ttnt = 0 + timetype='D': Terminus departure (show "Departing")
+  /// - 'timetype' field: "A" = Arrival, "D" = Departure (EAL terminus stations)
+  String displayTimeLocalized(bool isEnglish) {
+    // Priority 1: Check for special status codes from API
+    final timeUpper = time.toUpperCase();
+    
+    // Check for explicit status codes
+    if (timeUpper == 'ARR' || time == '-') {
+      return isEnglish ? 'Arriving' : '即將到達';
+    }
+    if (timeUpper == 'DEP') {
+      return isEnglish ? 'Departing' : '正在離開';
+    }
+    
+    // Priority 2: Use timeInMinutes (ttnt) if available
+    if (timeInMinutes != null) {
+      final minutes = timeInMinutes!;
+      
+      // ttnt = 0: Train is at platform
+      if (minutes <= 0) {
+        // For EAL terminus stations with timetype field
+        if (timeType != null) {
+          if (timeType!.toUpperCase() == 'A') {
+            // Terminus arrival - train just arrived at terminus
+            return isEnglish ? 'Arriving' : '即將到達';
+          } else if (timeType!.toUpperCase() == 'D') {
+            // Terminus departure - train departing from terminus
+            return isEnglish ? 'Departing' : '正在離開';
+          }
+        }
+        
+        // For through trains (no timetype field)
+        // Train has arrived and is departing to next station
+        return isEnglish ? 'Departing' : '正在離開';
+      }
+      
+      // ttnt = 1-2: Train is arriving
+      if (minutes <= 2) {
+        return isEnglish ? 'Arriving' : '即將到達';
+      }
+      
+      // ttnt > 2: Show minutes
+      return isEnglish ? '$minutes mins' : '$minutes 分鐘';
+    }
+    
+    // Priority 3: Fallback to time field (actual time string from API)
+    if (time.isEmpty) {
+      return isEnglish ? 'No data' : '無資料';
+    }
+    
+    // Check if time contains 'ARRIVING' text
+    if (timeUpper.contains('ARRIVING')) {
+      return isEnglish ? 'Arriving' : '即將到達';
+    }
+    
+    // Return the actual time string from API (e.g., "14:30:00")
     return time;
   }
 
+  /// Check if train is due soon (within 1 minute or arriving)
   bool get isDueSoon {
-    if (isArriving) return true;
+    if (isDeparting || isArriving) return true;
     if (timeInMinutes != null) return timeInMinutes! <= 1;
     return false;
   }
 
-  String get etaDescription {
-    if (isArriving) return 'Arriving';
-    if (timeInMinutes != null) {
-      final minutes = timeInMinutes!;
-      if (minutes <= 0) return 'Arriving';
-      if (minutes == 1) return '1 min';
-      return '$minutes mins';
-    }
-    return displayTime;
+  /// ETA description with localization support
+  String etaDescriptionLocalized(bool isEnglish) {
+    return displayTimeLocalized(isEnglish);
   }
+  
+  /// ETA description (deprecated - use etaDescriptionLocalized)
+  @Deprecated('Use etaDescriptionLocalized(isEnglish) instead')
+  String get etaDescription => etaDescriptionLocalized(true);
 
   String displayDestination(StationNameResolver resolver, {bool isEnglish = true}) {
     if (destination.isEmpty) return isEnglish ? 'Destination TBC' : '目的地待定';
@@ -1209,6 +1298,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     }
   }
   late final AnimationController _refreshAnimController;
+  late final Animation<double> _refreshRotation;
 
   @override
   void initState() {
@@ -1217,9 +1307,16 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadScheduleIfNeeded();
     });
+    // Optimized refresh animation with ease-in-out for smoother rotation
     _refreshAnimController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 1),
+      duration: const Duration(milliseconds: 1200),
+    );
+    _refreshRotation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(
+        parent: _refreshAnimController,
+        curve: Curves.easeInOut,
+      ),
     );
   }
 
@@ -1328,7 +1425,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
         // Auto-refresh control bar with integrated status
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           decoration: BoxDecoration(
             color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
             borderRadius: BorderRadius.circular(8),
@@ -1345,14 +1442,10 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 icon: Stack(
                   children: [
-                    AnimatedBuilder(
-                      animation: _refreshAnimController,
-                      builder: (context, child) {
-                        return Transform.rotate(
-                          angle: schedule.isAutoRefreshActive ? _refreshAnimController.value * 6.28319 : 0,
-                          child: Icon(Icons.refresh, size: 20, color: colorScheme.primary),
-                        );
-                      },
+                    // Optimized rotation with cached animation
+                    RotationTransition(
+                      turns: _refreshRotation,
+                      child: Icon(Icons.refresh, size: 20, color: colorScheme.primary),
                     ),
                     if (schedule.isAutoRefreshActive)
                       Positioned(
@@ -1717,19 +1810,60 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
               ),
             ),
           ),
+          // Optimized AnimatedSize with seamless fade and slide
           AnimatedSize(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOutCubic,
+            alignment: Alignment.topCenter,
             child: content != null && isExpanded
-                ? Container(
-                    padding: const EdgeInsets.fromLTRB(UIConstants.cardPadding, 4, UIConstants.cardPadding, UIConstants.cardPadding),
-                    child: content,
+                ? AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: isExpanded ? 1.0 : 0.0,
+                    curve: Curves.easeIn,
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(UIConstants.cardPadding, 4, UIConstants.cardPadding, UIConstants.cardPadding),
+                      child: content,
+                    ),
                   )
                 : const SizedBox.shrink(),
           ),
         ],
       ),
     );
+  }
+
+  /// Calculate contrast text color for better readability on colored backgrounds
+  /// Uses luminance calculation and theme-aware colors for consistency
+  /// IMPORTANT: For transparent colors, this blends with surface color to get accurate luminance
+  Color _getContrastTextColor(Color backgroundColor, BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    // For semi-transparent colors, blend with the actual surface background
+    // This is critical for selected chips with color.withOpacity(0.2)
+    final effectiveColor = backgroundColor.opacity < 1.0
+        ? Color.alphaBlend(backgroundColor, colorScheme.surface)
+        : backgroundColor;
+    
+    final luminance = effectiveColor.computeLuminance();
+    
+    // Calculate if background is light or dark based on luminance threshold
+    final isLightBackground = luminance > 0.5;
+    
+    if (isLightBackground) {
+      // Light background - use dark text
+      // Use theme's onSurface color for consistency with app design
+      return colorScheme.onSurface.withOpacity(0.87);
+    } else {
+      // Dark background - use light text
+      if (brightness == Brightness.dark) {
+        // Dark theme: Use onSurface which is already light
+        return colorScheme.onSurface.withOpacity(0.95);
+      } else {
+        // Light theme: Use inverted color (light text on dark background)
+        return Colors.white.withOpacity(0.95);
+      }
+    }
   }
 
   Widget _buildChip({
@@ -1744,78 +1878,103 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     
+    // Calculate proper text color with good contrast against the chip background
+    final textColor = isSelected 
+        ? _getContrastTextColor(color.withOpacity(0.2), context)
+        : colorScheme.onSurface;
+    
     return AnimatedBuilder(
       animation: _animController,
       builder: (context, child) {
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeInOut,
-                padding: const EdgeInsets.symmetric(horizontal: UIConstants.chipPaddingH, vertical: UIConstants.chipPaddingV),
-                decoration: BoxDecoration(
-                  color: isSelected 
-                      ? color.withOpacity(0.2) 
-                      : colorScheme.surfaceContainerHighest,
+        // Staggered fade-in animation for smooth appearance
+        final scale = Tween<double>(begin: 0.95, end: 1.0).animate(
+          CurvedAnimation(
+            parent: _animController,
+            curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic),
+          ),
+        );
+        final opacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+          CurvedAnimation(
+            parent: _animController,
+            curve: const Interval(0.0, 0.5, curve: Curves.easeIn),
+          ),
+        );
+        
+        return FadeTransition(
+          opacity: opacity,
+          child: ScaleTransition(
+            scale: scale,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onTap,
                   borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-                  border: Border.all(
-                    color: isSelected
-                        ? color.withOpacity(UIConstants.selectedChipBorderOpacity) 
-                        : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
-                    width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (leadingWidget != null) ...[
-                      leadingWidget,
-                      const SizedBox(width: UIConstants.selectorSpacing),
-                    ],
-                    if (isSelected)
-                      Icon(
-                        Icons.check_circle,
-                        size: UIConstants.checkIconSize,
-                        color: color,
-                      ),
-                    if (isSelected) const SizedBox(width: 4),
-                    Flexible(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            label,
-                            style: TextStyle(
-                              fontSize: UIConstants.chipFontSize,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                              color: isSelected ? color : colorScheme.onSurface,
-                            ),
-                          ),
-                          if (subtitle != null)
-                            Text(
-                              subtitle,
-                              style: TextStyle(
-                                fontSize: UIConstants.chipSubtitleFontSize,
-                                color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                        ],
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    padding: const EdgeInsets.symmetric(horizontal: UIConstants.chipPaddingH, vertical: UIConstants.chipPaddingV),
+                    decoration: BoxDecoration(
+                      color: isSelected 
+                          ? color.withOpacity(0.2) 
+                          : colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(UIConstants.chipRadius),
+                      border: Border.all(
+                        color: isSelected
+                            ? color.withOpacity(UIConstants.selectedChipBorderOpacity) 
+                            : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
+                        width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
                       ),
                     ),
-                    if (trailing != null) ...[
-                      const SizedBox(width: 4),
-                      trailing,
-                    ],
-                  ],
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (leadingWidget != null) ...[
+                          leadingWidget,
+                          const SizedBox(width: UIConstants.selectorSpacing),
+                        ],
+                        if (isSelected)
+                          Icon(
+                            Icons.check_circle,
+                            size: UIConstants.checkIconSize,
+                            color: color,
+                          ),
+                        if (isSelected) const SizedBox(width: 4),
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  fontSize: UIConstants.chipFontSize,
+                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                  color: textColor,
+                                ),
+                              ),
+                              if (subtitle != null)
+                                Text(
+                                  subtitle,
+                                  style: TextStyle(
+                                    fontSize: UIConstants.chipSubtitleFontSize,
+                                    color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                        ),
+                        if (trailing != null) ...[
+                          const SizedBox(width: 4),
+                          trailing,
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1830,6 +1989,9 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
       return const Icon(Icons.compare_arrows, size: 12);
     }
 
+    final lang = context.watch<LanguageProvider>();
+    final colorScheme = Theme.of(context).colorScheme;
+
     // Build color indicators for interchange lines
     final lineColors = station.interchangeLines
         .map((lineCode) => _lineMetadata[lineCode]?.color)
@@ -1841,32 +2003,64 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
       return const Icon(Icons.compare_arrows, size: 12);
     }
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.compare_arrows, size: 12),
-        const SizedBox(width: 4),
-        ...lineColors.take(3).map((color) => Container(
-          width: 8,
-          height: 8,
-          margin: const EdgeInsets.only(left: 2),
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
+    return Tooltip(
+      message: lang.isEnglish 
+          ? 'Interchange station'
+          : '轉車站',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: colorScheme.outline.withOpacity(0.2),
+            width: 0.5,
           ),
-        )),
-        if (lineColors.length > 3)
-          Padding(
-            padding: const EdgeInsets.only(left: 2),
-            child: Text(
-              '+${lineColors.length - 3}',
-              style: TextStyle(
-                fontSize: 9,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.compare_arrows, 
+              size: 12,
+              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
             ),
-          ),
-      ],
+            const SizedBox(width: 4),
+            ...lineColors.take(3).map((color) => Container(
+              width: 10,
+              height: 10,
+              margin: const EdgeInsets.only(left: 2),
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.3),
+                  width: 0.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withOpacity(0.3),
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+            )),
+            if (lineColors.length > 3)
+              Padding(
+                padding: const EdgeInsets.only(left: 3),
+                child: Text(
+                  '+${lineColors.length - 3}',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.8),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1877,74 +2071,123 @@ class _MtrSelectorState extends State<_MtrSelector> with SingleTickerProviderSta
     }
 
     final catalog = context.read<MtrCatalogProvider>();
+    final lang = context.watch<LanguageProvider>();
+    final colorScheme = Theme.of(context).colorScheme;
 
     // Build clickable line badges for interchange lines
     final interchangeLineCodes = station.interchangeLines;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ...interchangeLineCodes.map((lineCode) {
-          final lineColor = _lineMetadata[lineCode]?.color;
-          if (lineColor == null) return const SizedBox.shrink();
-          
-          return InkWell(
-            onTap: () async {
-              // Find the line with this code
-              final targetLine = widget.lines.firstWhere(
-                (line) => line.lineCode == lineCode,
-                orElse: () => widget.lines.first,
+    return Tooltip(
+      message: lang.isEnglish 
+          ? 'Tap to switch line'
+          : '點擊切換綫路',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: colorScheme.outline.withOpacity(0.2),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.compare_arrows,
+              size: 14,
+              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+            ),
+            const SizedBox(width: 6),
+            ...interchangeLineCodes.map((lineCode) {
+              final lineColor = _lineMetadata[lineCode]?.color;
+              final lineName = _lineMetadata[lineCode];
+              if (lineColor == null) return const SizedBox.shrink();
+              
+              return Tooltip(
+                message: lineName != null
+                    ? (lang.isEnglish ? lineName.nameEn : lineName.nameZh)
+                    : lineCode,
+                child: InkWell(
+                  onTap: () async {
+                    // Find the line with this code
+                    final targetLine = widget.lines.firstWhere(
+                      (line) => line.lineCode == lineCode,
+                      orElse: () => widget.lines.first,
+                    );
+                    
+                    // Switch to the interchange line while keeping the same station
+                    HapticFeedback.selectionClick();
+                    await catalog.selectLine(targetLine);
+                    
+                    // The station will be auto-selected to the first station of the new line
+                    // So we need to manually select the current station on the new line
+                    final stationOnNewLine = targetLine.stations.firstWhere(
+                      (s) => s.stationCode == station.stationCode,
+                      orElse: () => targetLine.stations.first,
+                    );
+                    
+                    await catalog.selectStation(stationOnNewLine);
+                    widget.onLineChanged(targetLine);
+                    widget.onStationChanged(stationOnNewLine);
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  // Hover/press feedback
+                  splashColor: lineColor.withOpacity(0.3),
+                  highlightColor: lineColor.withOpacity(0.1),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 28,
+                    height: 28,
+                    margin: const EdgeInsets.only(left: 4),
+                    decoration: BoxDecoration(
+                      color: lineColor,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.4),
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: lineColor.withOpacity(0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    // Add subtle visual cue that it's clickable
+                    child: Center(
+                      child: Icon(
+                        Icons.train,
+                        size: 14,
+                        color: Colors.white.withOpacity(0.9),
+                      ),
+                    ),
+                  ),
+                ),
               );
-              
-              // Switch to the interchange line while keeping the same station
-              HapticFeedback.selectionClick();
-              await catalog.selectLine(targetLine);
-              
-              // The station will be auto-selected to the first station of the new line
-              // So we need to manually select the current station on the new line
-              final stationOnNewLine = targetLine.stations.firstWhere(
-                (s) => s.stationCode == station.stationCode,
-                orElse: () => targetLine.stations.first,
-              );
-              
-              await catalog.selectStation(stationOnNewLine);
-              widget.onLineChanged(targetLine);
-              widget.onStationChanged(stationOnNewLine);
-            },
-            borderRadius: BorderRadius.circular(4),
-            child: Container(
-              width: 24,
-              height: 24,
-              margin: const EdgeInsets.only(left: 4),
-              decoration: BoxDecoration(
-                color: lineColor,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.3),
-                  width: 0.5,
+            }),
+            if (interchangeLineCodes.length > 4)
+              Container(
+                margin: const EdgeInsets.only(left: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '+${interchangeLineCodes.length - 4}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
-            ),
-          );
-        }),
-        if (interchangeLineCodes.length > 4)
-          Container(
-            margin: const EdgeInsets.only(left: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              '+${interchangeLineCodes.length - 4}',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-      ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1974,10 +2217,11 @@ class _MtrScheduleBody extends StatelessWidget {
     if (loading) {
       content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        children: const [
-          SizedBox(height: 160),
-          Center(child: CircularProgressIndicator()),
-          SizedBox(height: 160),
+        padding: const EdgeInsets.all(8),
+        children: [
+          const SizedBox(height: 20),
+          // Modern shimmer loading cards
+          ..._buildShimmerLoadingCards(context),
         ],
       );
     } else if (error != null) {
@@ -2189,102 +2433,26 @@ class _MtrScheduleBody extends StatelessWidget {
                             final train = entry.value;
                             final isLast = idx == trains.length - 1;
                             
-                            return Container(
-                              margin: EdgeInsets.only(bottom: isLast ? 0 : 6),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surface.withOpacity(0.5),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Theme.of(context).colorScheme.outline.withOpacity(0.08),
-                                  width: 0.5,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  // Status indicator dot with color coding
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: () {
-                                        final minutesVal = train.timeInMinutes;
-                                        final timeUpper = train.time.toUpperCase();
-                                        // Departing: Deep Orange
-                                        if (timeUpper == 'DEP' || (minutesVal != null && minutesVal <= 0)) {
-                                          return Colors.deepOrange;
-                                        }
-                                        // Arriving: Green
-                                        if (timeUpper == 'ARR' || train.isArriving || (minutesVal != null && minutesVal == 1)) {
-                                          return Colors.green;
-                                        }
-                                        // Approaching: Amber
-                                        if (minutesVal != null && minutesVal == 2) {
-                                          return Colors.amber;
-                                        }
-                                        // Default: Primary color
-                                        return Theme.of(context).colorScheme.primary;
-                                      }(),
-                                      shape: BoxShape.circle,
-                                      boxShadow: () {
-                                        final minutesVal = train.timeInMinutes;
-                                        final timeUpper = train.time.toUpperCase();
-                                        // Pulse effect for departing
-                                        if (timeUpper == 'DEP' || (minutesVal != null && minutesVal <= 0)) {
-                                          return [
-                                            BoxShadow(
-                                              color: Colors.deepOrange.withOpacity(0.5),
-                                              blurRadius: 8,
-                                              spreadRadius: 1,
-                                            ),
-                                          ];
-                                        }
-                                        // Pulse effect for arriving
-                                        if (timeUpper == 'ARR' || train.isArriving || (minutesVal != null && minutesVal == 1)) {
-                                          return [
-                                            BoxShadow(
-                                              color: Colors.green.withOpacity(0.4),
-                                              blurRadius: 6,
-                                              spreadRadius: 1,
-                                            ),
-                                          ];
-                                        }
-                                        // Subtle glow for approaching
-                                        if (minutesVal != null && minutesVal == 2) {
-                                          return [
-                                            BoxShadow(
-                                              color: Colors.amber.withOpacity(0.3),
-                                              blurRadius: 5,
-                                              spreadRadius: 1,
-                                            ),
-                                          ];
-                                        }
-                                        return null;
-                                      }(),
-                                    ),
+                            // Staggered fade-in animation for smoother list appearance
+                            return TweenAnimationBuilder<double>(
+                              key: ValueKey(train.hashCode),
+                              duration: Duration(milliseconds: 200 + (idx * 50).clamp(0, 400)),
+                              tween: Tween(begin: 0.0, end: 1.0),
+                              curve: Curves.easeOutCubic,
+                              builder: (context, value, child) {
+                                return Opacity(
+                                  opacity: value,
+                                  child: Transform.translate(
+                                    offset: Offset(0, 8 * (1 - value)),
+                                    child: child,
                                   ),
-                                  const SizedBox(width: 10),
-                                  // Destination
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          train.displayDestination(stationNameResolver, isEnglish: lang.isEnglish),
-                                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13,
-                                            letterSpacing: 0.1,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                        ),
-                                        const SizedBox(height: 3),
-                                        _buildTrainSubtitle(context, train, lang, devSettings),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                                );
+                              },
+                              child: _TrainListItem(
+                                train: train,
+                                isLast: isLast,
+                                lang: lang,
+                                devSettings: devSettings,
                               ),
                             );
                           }),
@@ -2309,12 +2477,296 @@ class _MtrScheduleBody extends StatelessWidget {
     return content;
   }
 
-  Widget _buildTrainSubtitle(
-    BuildContext context,
-    MtrTrainInfo train,
-    LanguageProvider lang,
-    DeveloperSettingsProvider devSettings,
-  ) {
+  /// Build shimmer loading cards for better loading UX
+  List<Widget> _buildShimmerLoadingCards(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return List.generate(2, (directionIndex) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colorScheme.surface.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: colorScheme.outline.withOpacity(0.15),
+            width: 0.5,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Direction header shimmer
+            _ShimmerBox(
+              width: 180,
+              height: 32,
+              borderRadius: 10,
+            ),
+            const SizedBox(height: 10),
+            // Train items shimmer
+            ...List.generate(3, (trainIndex) {
+              return Container(
+                margin: EdgeInsets.only(bottom: trainIndex == 2 ? 0 : 6),
+                child: Row(
+                  children: [
+                    _ShimmerBox(width: 8, height: 8, borderRadius: 4),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _ShimmerBox(width: double.infinity, height: 13, borderRadius: 4),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              _ShimmerBox(width: 80, height: 18, borderRadius: 5),
+                              const SizedBox(width: 4),
+                              _ShimmerBox(width: 60, height: 18, borderRadius: 5),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    _ShimmerBox(width: 60, height: 24, borderRadius: 8),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      );
+    });
+  }
+}
+
+/// Shimmer loading box widget
+class _ShimmerBox extends StatefulWidget {
+  final double width;
+  final double height;
+  final double borderRadius;
+
+  const _ShimmerBox({
+    required this.width,
+    required this.height,
+    required this.borderRadius,
+  });
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox> with SingleTickerProviderStateMixin {
+  late final AnimationController _shimmerController;
+  late final Animation<double> _shimmerAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+    
+    _shimmerAnimation = Tween<double>(begin: -1.0, end: 2.0).animate(
+      CurvedAnimation(
+        parent: _shimmerController,
+        curve: Curves.easeInOut,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _shimmerController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return AnimatedBuilder(
+      animation: _shimmerAnimation,
+      builder: (context, child) {
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.borderRadius),
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              stops: [
+                _shimmerAnimation.value - 0.3,
+                _shimmerAnimation.value,
+                _shimmerAnimation.value + 0.3,
+              ].map((e) => e.clamp(0.0, 1.0)).toList(),
+              colors: [
+                colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                colorScheme.surfaceContainerHighest.withOpacity(0.6),
+                colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Optimized train list item widget with cached status indicator
+class _TrainListItem extends StatelessWidget {
+  final MtrTrainInfo train;
+  final bool isLast;
+  final LanguageProvider lang;
+  final DeveloperSettingsProvider devSettings;
+
+  const _TrainListItem({
+    required this.train,
+    required this.isLast,
+    required this.lang,
+    required this.devSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final statusInfo = _getStatusInfo(context);
+    
+    return Container(
+      margin: EdgeInsets.only(bottom: isLast ? 0 : 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: colorScheme.outline.withOpacity(0.08),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Status indicator dot - optimized with cached calculation
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: statusInfo.color,
+              shape: BoxShape.circle,
+              boxShadow: statusInfo.shadow,
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Destination
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  train.displayDestination(stationNameResolver, isEnglish: lang.isEnglish),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    letterSpacing: 0.1,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+                const SizedBox(height: 3),
+                _buildTrainSubtitle(context),
+              ],
+            ),
+          ),
+          // Time display
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              train.displayTimeLocalized(lang.isEnglish),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: colorScheme.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Cached status info calculation with optimized logic
+  /// Uses timetype field to distinguish EAL terminus from through trains
+  /// For through trains: ttnt=0 means "Departing" (arrived and leaving)
+  /// For EAL terminus: timetype='A'/ttnt=0 = "Arriving", timetype='D'/ttnt=0 = "Departing"
+  ({Color color, List<BoxShadow>? shadow}) _getStatusInfo(BuildContext context) {
+    final minutesVal = train.timeInMinutes;
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    // Handle trains at platform (ttnt = 0)
+    if (minutesVal != null && minutesVal <= 0) {
+      // EAL terminus arrival (timetype='A')
+      if (train.timeType?.toUpperCase() == 'A') {
+        return (
+          color: Colors.green,
+          shadow: [
+            BoxShadow(
+              color: Colors.green.withOpacity(0.4),
+              blurRadius: 6,
+              spreadRadius: 1,
+            ),
+          ],
+        );
+      }
+      // All other cases (through trains or timetype='D'): Departing
+      return (
+        color: Colors.deepOrange,
+        shadow: [
+          BoxShadow(
+            color: Colors.deepOrange.withOpacity(0.5),
+            blurRadius: 8,
+            spreadRadius: 1,
+          ),
+        ],
+      );
+    }
+    
+    // Arriving: 1-2 minutes away
+    if (minutesVal != null && minutesVal <= 2) {
+      return (
+        color: Colors.green,
+        shadow: [
+          BoxShadow(
+            color: Colors.green.withOpacity(0.4),
+            blurRadius: 6,
+            spreadRadius: 1,
+          ),
+        ],
+      );
+    }
+    
+    // Approaching: 3 minutes away
+    if (minutesVal != null && minutesVal == 3) {
+      return (
+        color: Colors.amber,
+        shadow: [
+          BoxShadow(
+            color: Colors.amber.withOpacity(0.3),
+            blurRadius: 5,
+            spreadRadius: 1,
+          ),
+        ],
+      );
+    }
+    
+    // Default: Primary color
+    return (color: colorScheme.primary, shadow: null);
+  }
+
+  Widget _buildTrainSubtitle(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final minutesVal = train.timeInMinutes;
     final minutesLabel = () {
@@ -2324,30 +2776,40 @@ class _MtrScheduleBody extends StatelessWidget {
         if (minutesVal == 1) return '1 min';
         return '$minutesVal mins';
       } else {
-        // Chinese: always use 分鐘, no singular form
         final v = minutesVal < 0 ? 0 : minutesVal;
         return '$v 分鐘';
       }
     }();
 
-    final timeUpper = train.time.toUpperCase();
+    // Determine status using optimized properties
+    // For through trains: ttnt=0 means "Departing"
+    // For EAL terminus: timetype='A'/ttnt=0 = "Arriving", timetype='D'/ttnt=0 = "Departing"
     String statusLabel = '';
     Color? statusColor;
     IconData? statusIcon;
     
-    // Determine status with refined thresholds
-    if (timeUpper == 'DEP' || (minutesVal != null && minutesVal <= 0)) {
-      // Train is departing or already at platform
-      statusLabel = lang.isEnglish ? 'Departing' : '即將開出';
-      statusColor = Colors.deepOrange;
-      statusIcon = Icons.near_me;
-    } else if (timeUpper == 'ARR' || train.isArriving || (minutesVal != null && minutesVal == 1)) {
-      // Train is arriving (1 minute or marked as arriving)
-      statusLabel = lang.isEnglish ? 'Arriving' : '即將到站';
+    // Handle trains at platform (ttnt = 0)
+    if (minutesVal != null && minutesVal <= 0) {
+      // EAL terminus arrival (timetype='A')
+      if (train.timeType?.toUpperCase() == 'A') {
+        statusLabel = lang.isEnglish ? 'Arriving' : '即將到達';
+        statusColor = Colors.green;
+        statusIcon = Icons.adjust;
+      } else {
+        // Through trains or EAL terminus departure (timetype='D')
+        statusLabel = lang.isEnglish ? 'Departing' : '正在離開';
+        statusColor = Colors.deepOrange;
+        statusIcon = Icons.near_me;
+      }
+    } 
+    // Arriving: Train is 1-2 minutes away
+    else if (minutesVal != null && minutesVal <= 2) {
+      statusLabel = lang.isEnglish ? 'Arriving' : '即將到達';
       statusColor = Colors.green;
       statusIcon = Icons.adjust;
-    } else if (minutesVal != null && minutesVal == 2) {
-      // Train is approaching (2 minutes)
+    } 
+    // Approaching: Train is 3 minutes away
+    else if (minutesVal != null && minutesVal == 3) {
       statusLabel = lang.isEnglish ? 'Approaching' : '接近中';
       statusColor = Colors.amber;
       statusIcon = Icons.directions_transit;
@@ -2358,7 +2820,6 @@ class _MtrScheduleBody extends StatelessWidget {
       runSpacing: 3,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        // Platform chip (if enabled)
         if (devSettings.showMtrArrivalDetails && train.platform.isNotEmpty)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -2387,7 +2848,6 @@ class _MtrScheduleBody extends StatelessWidget {
               ],
             ),
           ),
-        // Minutes
         if (minutesLabel.isNotEmpty)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -2411,7 +2871,6 @@ class _MtrScheduleBody extends StatelessWidget {
               ],
             ),
           ),
-        // Status badge
         if (statusLabel.isNotEmpty)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -2434,11 +2893,7 @@ class _MtrScheduleBody extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (statusIcon != null) ...[
-                  Icon(
-                    statusIcon,
-                    size: 9,
-                    color: statusColor,
-                  ),
+                  Icon(statusIcon, size: 9, color: statusColor),
                   const SizedBox(width: 3),
                 ],
                 Text(
