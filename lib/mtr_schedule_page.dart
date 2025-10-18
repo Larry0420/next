@@ -1002,6 +1002,7 @@ class MtrScheduleProvider extends ChangeNotifier {
   
   MtrScheduleResponse? _data;
   bool _loading = false;
+  bool _backgroundRefreshing = false; // Silent background refresh flag
   String? _error;
   
   // ===== ADAPTIVE REFRESH FOR POOR NETWORK CONDITIONS =====
@@ -1012,7 +1013,7 @@ class MtrScheduleProvider extends ChangeNotifier {
   static const Duration _slowNetworkInterval = Duration(seconds: 60); // Slower on poor network
   static const Duration _offlineInterval = Duration(seconds: 120); // Very slow when offline
   
-  DateTime? _lastRefreshTime;
+  DateTime? _lastSuccessfulRefreshTime;
   int _consecutiveErrors = 0;
   static const int _maxConsecutiveErrors = 5; // Increased tolerance
   
@@ -1029,22 +1030,26 @@ class MtrScheduleProvider extends ChangeNotifier {
   
   MtrScheduleResponse? get data => _data;
   bool get loading => _loading;
+  bool get backgroundRefreshing => _backgroundRefreshing;
   String? get error => _error;
   bool get hasData => _data != null;
   bool get isAutoRefreshActive => _autoRefreshTimer != null && _autoRefreshTimer!.isActive;
   bool get isNetworkSlow => _isNetworkSlow;
   bool get isCircuitBreakerOpen => _circuitBreakerOpen;
   String get currentRefreshIntervalDescription => _currentRefreshInterval != null ? '${_currentRefreshInterval!.inSeconds}s' : '';
+  DateTime? get lastRefreshTime => _lastSuccessfulRefreshTime;
   
-  /// Load schedule with network-aware optimizations
+  /// Load schedule with network-aware optimizations and seamless UI updates
+  /// Uses background refresh to avoid jarring loading states
   Future<void> loadSchedule(
     String lineCode, 
     String stationCode, {
     bool forceRefresh = false,
     bool allowStaleCache = true,
+    bool silentRefresh = false, // Don't show loading spinner if we have data
   }) async {
     // Prevent concurrent loads
-    if (_loading) {
+    if (_loading && !silentRefresh) {
       debugPrint('MTR Schedule: Already loading, skipping');
       return;
     }
@@ -1064,9 +1069,15 @@ class MtrScheduleProvider extends ChangeNotifier {
       }
     }
     
-    _loading = true;
-    _error = null;
-    if (forceRefresh) _data = null;
+    // Seamless refresh: Only show loading if we don't have data
+    final hadData = _data != null;
+    if (silentRefresh && hadData) {
+      _backgroundRefreshing = true;
+    } else {
+      _loading = true;
+      _error = null;
+      // Don't clear data on force refresh to keep UI stable
+    }
     notifyListeners();
     
     final fetchStart = DateTime.now();
@@ -1083,17 +1094,27 @@ class MtrScheduleProvider extends ChangeNotifier {
       _trackFetchDuration(fetchDuration);
       
       if (schedule.status != 1) {
-        _data = null;
+        // Only clear data if we don't have previous data
+        if (!hadData || forceRefresh) {
+          _data = null;
+        }
         _error = schedule.message.isNotEmpty ? schedule.message : 'Unable to load schedule';
         _consecutiveErrors++;
       } else {
         _data = schedule;
         _error = null;
-        _lastRefreshTime = DateTime.now();
+        _lastSuccessfulRefreshTime = DateTime.now();
         _consecutiveErrors = 0; // Reset on success
       }
     } catch (e) {
-      _error = _formatError(e.toString());
+      final errorMessage = _formatError(e.toString());
+      // Only show error if we don't have cached data
+      if (!hadData || forceRefresh) {
+        _error = errorMessage;
+      } else {
+        // Silent failure - keep showing old data
+        debugPrint('MTR Schedule: Background refresh failed, keeping old data: $e');
+      }
       debugPrint('MTR Schedule Error: $e');
       _consecutiveErrors++;
       
@@ -1103,6 +1124,7 @@ class MtrScheduleProvider extends ChangeNotifier {
       }
     } finally {
       _loading = false;
+      _backgroundRefreshing = false;
       notifyListeners();
     }
   }
@@ -1177,7 +1199,7 @@ class MtrScheduleProvider extends ChangeNotifier {
     return 'Unable to fetch schedule: ${error.replaceAll('Exception: ', '')}';
   }
   
-  /// Start auto-refresh with adaptive intervals
+  /// Start auto-refresh with adaptive intervals and seamless updates
   void startAutoRefresh(String lineCode, String stationCode, {Duration? interval}) {
     stopAutoRefresh();
     
@@ -1196,17 +1218,25 @@ class MtrScheduleProvider extends ChangeNotifier {
         return;
       }
       
-      debugPrint('MTR Auto-refresh: Refreshing $lineCode/$stationCode');
+      debugPrint('MTR Auto-refresh: Background refresh $lineCode/$stationCode');
+      // Use silent refresh to avoid jarring UI updates
       await loadSchedule(
         lineCode, 
         stationCode, 
         forceRefresh: false, // Allow stale-while-revalidate
         allowStaleCache: true,
+        silentRefresh: true, // Don't show loading spinner during auto-refresh
       );
     });
     
-    // Immediate refresh (allow cache to serve stale data quickly)
-    loadSchedule(lineCode, stationCode, forceRefresh: false, allowStaleCache: true);
+    // Immediate first load (can show loading indicator)
+    loadSchedule(
+      lineCode, 
+      stationCode, 
+      forceRefresh: false, 
+      allowStaleCache: true,
+      silentRefresh: false, // Show loading on initial load
+    );
     notifyListeners();
   }
   
@@ -1231,9 +1261,16 @@ class MtrScheduleProvider extends ChangeNotifier {
   }
   
   /// Manual refresh - forces network call and resets circuit breaker
+  /// Shows loading indicator but keeps old data visible during refresh
   Future<void> manualRefresh(String lineCode, String stationCode) async {
     _closeCircuitBreaker(); // Allow manual refresh to try
-    await loadSchedule(lineCode, stationCode, forceRefresh: true, allowStaleCache: false);
+    await loadSchedule(
+      lineCode, 
+      stationCode, 
+      forceRefresh: true, 
+      allowStaleCache: false,
+      silentRefresh: _data != null, // Silent if we have data, show loading if empty
+    );
   }
   
   /// Clear all caches and reset state
@@ -1377,6 +1414,21 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     }
   }
 
+  /// Format last update time with relative time for recent updates
+  String _formatLastUpdateTime(DateTime lastUpdate, bool isEnglish) {
+    final now = DateTime.now();
+    final difference = now.difference(lastUpdate);
+    
+    if (difference.inSeconds < 60) {
+      return isEnglish ? 'Just now' : '剛剛';
+    } else if (difference.inMinutes < 60) {
+      final mins = difference.inMinutes;
+      return isEnglish ? '${mins}m ago' : '$mins 分鐘前';
+    } else {
+      return TimeOfDay.fromDateTime(lastUpdate).format(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final catalog = context.watch<MtrCatalogProvider>();
@@ -1482,8 +1534,23 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                     : null,
               ),
               const SizedBox(width: 2),
-              // Status indicator
+              // Status indicator with background refresh pulse
               if (schedule.hasData) ...[
+                // Background refresh indicator (subtle pulse)
+                if (schedule.backgroundRefreshing)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          colorScheme.primary.withOpacity(0.6),
+                        ),
+                      ),
+                    ),
+                  ),
                 Icon(
                   schedule.data!.status != 1
                       ? Icons.error_outline
@@ -1504,14 +1571,18 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                         ? (lang.isEnglish ? 'Service Alert' : '服務提示')
                         : schedule.data!.isDelay
                             ? (lang.isEnglish ? 'Delays' : '延誤')
-                            : (lang.isEnglish ? 'Normal' : '正常'),
+                            : schedule.backgroundRefreshing
+                                ? (lang.isEnglish ? 'Updating...' : '更新中...')
+                                : (lang.isEnglish ? 'Normal' : '正常'),
                     style: TextStyle(
                       fontSize: 12,
                       color: schedule.data!.status != 1
                           ? Colors.red[800]
                           : schedule.data!.isDelay
                               ? Colors.orange[800]
-                              : colorScheme.onSurfaceVariant,
+                              : schedule.backgroundRefreshing
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -1519,15 +1590,15 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                 ),
                 const SizedBox(width: 6),
               ],
-              // Last update time
-              if (schedule._lastRefreshTime != null)
+              // Last update time with relative time if recent
+              if (schedule.lastRefreshTime != null)
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.access_time, size: 11, color: colorScheme.onSurfaceVariant),
                     const SizedBox(width: 3),
                     Text(
-                      TimeOfDay.fromDateTime(schedule._lastRefreshTime!).format(context),
+                      _formatLastUpdateTime(schedule.lastRefreshTime!, lang.isEnglish),
                       style: TextStyle(
                         fontSize: 10.5,
                         color: colorScheme.onSurfaceVariant,
