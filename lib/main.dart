@@ -3547,49 +3547,81 @@ class _StatusBar extends StatelessWidget {
     final ok = status == 1;
     final t = systemTime != null ? '${DateFormat('HH:mm:ss').format(systemTime!)} HKT' : lang.noData;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    // 根據深色模式調整顏色
-    final backgroundColor = ok 
-        ? (isDark ? Colors.green.shade800.withValues(alpha: 0.2) : Colors.green.withValues(alpha: 0.08))
-        : (isDark ? Colors.orange.shade800.withValues(alpha: 0.2) : Colors.orange.withValues(alpha: 0.12));
-    
-    final iconColor = ok
-        ? (isDark ? Colors.green.shade300 : Colors.green.shade800)
-        : (isDark ? Colors.orange.shade300 : Colors.orange.shade800);
-    
-    final textColor = ok
-        ? (isDark ? Colors.green.shade100 : Colors.green.shade900)
-        : (isDark ? Colors.orange.shade100 : Colors.orange.shade900);
-    
+
+    // Emphasized color scheme
+    final Color statusColor = ok
+        ? (isDark ? Colors.greenAccent.shade400 : Colors.green.shade600)
+        : (isDark ? Colors.orangeAccent.shade200 : Colors.orange.shade700);
+    final Color borderColor = statusColor.withOpacity(0.35);
+    final Color bgColor = statusColor.withOpacity(isDark ? 0.18 : 0.12);
+    final Color iconColor = statusColor;
+    final Color textColor = isDark ? Colors.white : Colors.black.withOpacity(0.85);
+    final Color subTextColor = isDark ? Colors.white70 : Colors.black54;
+
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
       curve: MotionConstants.standardEasing,
-      color: backgroundColor,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Consumer<AccessibilityProvider>(
-              builder: (context, accessibility, _) => AnimatedSwitcher(
-                duration: MotionConstants.contentTransition,
-                child: Icon(
-                  ok ? Icons.check_circle : Icons.error, 
-                  color: iconColor, 
-                  size: 18 * accessibility.iconScale,
-                  key: ValueKey(ok),
-                ),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withOpacity(0.10),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) => AnimatedSwitcher(
+              duration: MotionConstants.contentTransition,
+              child: Icon(
+                ok ? Icons.check_circle_rounded : Icons.error_rounded,
+                color: iconColor,
+                size: 28 * accessibility.iconScale,
+                key: ValueKey(ok),
+                shadows: [
+                  Shadow(
+                    color: statusColor.withOpacity(0.25),
+                    blurRadius: 6,
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            AnimatedDefaultTextStyle(
-              duration: MotionConstants.contentTransition,
-              curve: MotionConstants.standardEasing,
-              style: TextStyle(color: textColor),
-              child: Text('${lang.system}: ${ok ? lang.normal : lang.alert} • ${lang.lastUpdated}: $t'),
+          ),
+          const SizedBox(width: 14),
+          AnimatedDefaultTextStyle(
+            duration: MotionConstants.contentTransition,
+            curve: MotionConstants.standardEasing,
+            style: TextStyle(
+              color: textColor,
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+              letterSpacing: 0.1,
             ),
-          ],
-        ),
+            child: Row(
+              children: [
+                Text('${lang.system}: ${ok ? lang.normal : lang.alert}'),
+                const SizedBox(width: 12),
+                Text(
+                  '${lang.lastUpdated}: $t',
+                  style: TextStyle(
+                    color: subTextColor,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3750,6 +3782,10 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
       _contentAnimationController.forward();
       _staggerController.forward(from: 0);
       HapticFeedback.mediumImpact();
+      // Optimization: Stop auto-refresh for previous station and start for current
+      final scheduleProvider = context.read<ScheduleProvider>();
+      scheduleProvider.stopAutoRefresh();
+      scheduleProvider.startAutoRefresh(widget.platform.platformId);
     } else {
       _animationController.reverse();
       _contentAnimationController.reverse();

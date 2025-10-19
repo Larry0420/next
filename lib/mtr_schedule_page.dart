@@ -2435,13 +2435,19 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                        widget.selectedLine != null &&
                        widget.selectedLine!.isTerminusStation(widget.selectedStation!.stationCode);
     
-    // Only show direction filter for through trains (non-terminus stations)
-    if (!hasDirections || widget.selectedStation == null || isTerminus) {
-      return const SizedBox.shrink();
-    }
+      // Only show direction filter for through trains (non-terminus stations)
+      if (!hasDirections || widget.selectedStation == null || isTerminus) {
+        // If switching to a terminus, reset direction selection to avoid crash
+        if (isTerminus && selectedDirection != null && selectedDirection.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            catalog.selectDirection('');
+          });
+        }
+        return const SizedBox.shrink();
+      }
     
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 200),
       curve: Curves.easeInOut,
       decoration: BoxDecoration(
         color: colorScheme.surface,
@@ -2450,46 +2456,35 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           color: widget.selectedLine!.lineColor.withOpacity(UIConstants.cardBorderOpacity),
           width: UIConstants.cardBorderWidth,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: colorScheme.shadow.withOpacity(0.05),
-            blurRadius: UIConstants.cardElevation,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: UIConstants.cardPadding,
-          vertical: 10,
+          vertical: 4,
         ),
         child: Row(
           children: [
-            // Direction icon
             Icon(
               Icons.swap_vert_rounded,
-              size: 18,
+              size: 15,
               color: widget.selectedLine!.lineColor,
             ),
-            const SizedBox(width: 10),
-            // Direction label
+            const SizedBox(width: 6),
             Text(
               lang.isEnglish ? 'Direction' : '方向',
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: colorScheme.onSurface,
-                fontSize: UIConstants.cardTitleFontSize,
+                fontSize: UIConstants.chipFontSize + 1,
               ),
             ),
-            const SizedBox(width: 12),
-            // Direction buttons
+            const SizedBox(width: 8),
             Expanded(
               child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
+                spacing: 4,
+                runSpacing: 4,
                 alignment: WrapAlignment.end,
                 children: [
-                  // "All" button
                   _buildCompactDirectionButton(
                     context: context,
                     label: lang.isEnglish ? 'All' : '全部',
@@ -2503,7 +2498,6 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                       });
                     },
                   ),
-                  // Direction-specific buttons
                   ...directions.map((dir) {
                     return _buildCompactDirectionButton(
                       context: context,
@@ -2944,22 +2938,23 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     final catalog = context.read<MtrCatalogProvider>();
     final lang = context.watch<LanguageProvider>();
     final colorScheme = Theme.of(context).colorScheme;
-
-    // Build clickable line badges for interchange lines
     final interchangeLineCodes = station.interchangeLines;
 
+    // Emphasized container with label and animation
     return Tooltip(
-      message: lang.isEnglish 
+      message: lang.isEnglish
           ? 'Tap to switch line'
-          : '點擊切換綫路',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          : '\u9ede\u64ca\u5207\u63db\u7dab\u8def',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest.withOpacity(0.6),
-          borderRadius: BorderRadius.circular(6),
+          color: colorScheme.primary.withOpacity(0.13),
+          borderRadius: BorderRadius.circular(7),
           border: Border.all(
-            color: colorScheme.outline.withOpacity(0.2),
-            width: 1,
+            color: colorScheme.primary,
+            width: 1.2,
           ),
         ),
         child: Row(
@@ -2967,74 +2962,63 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           children: [
             Icon(
               Icons.compare_arrows,
-              size: 14,
-              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+              size: 16,
+              color: colorScheme.primary,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              lang.isEnglish ? 'Lines' : '轉綫',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: colorScheme.primary,
+              ),
             ),
             const SizedBox(width: 6),
             ...interchangeLineCodes.map((lineCode) {
               final lineColor = _lineMetadata[lineCode]?.color;
               final lineName = _lineMetadata[lineCode];
               if (lineColor == null) return const SizedBox.shrink();
-              
               return Tooltip(
                 message: lineName != null
                     ? (lang.isEnglish ? lineName.nameEn : lineName.nameZh)
                     : lineCode,
                 child: InkWell(
                   onTap: () async {
-                    // Find the line with this code
                     final targetLine = widget.lines.firstWhere(
                       (line) => line.lineCode == lineCode,
                       orElse: () => widget.lines.first,
                     );
-                    
-                    // Find the same station on the target line (interchange station)
                     final stationOnNewLine = targetLine.stations.firstWhere(
                       (s) => s.stationCode == station.stationCode,
                       orElse: () => targetLine.stations.first,
                     );
-                    
-                    // Provide haptic feedback
                     HapticFeedback.selectionClick();
-                    
-                    // Atomically switch to interchange line with the same station
-                    // This prevents intermediate UI state showing wrong station name
                     await catalog.selectLineAndStation(targetLine, stationOnNewLine);
-                    
-                    // Trigger callbacks to update schedule
                     widget.onLineChanged(targetLine);
                     widget.onStationChanged(stationOnNewLine);
                   },
                   borderRadius: BorderRadius.circular(4),
-                  // Hover/press feedback
-                  splashColor: lineColor.withOpacity(0.3),
-                  highlightColor: lineColor.withOpacity(0.1),
+                  splashColor: lineColor.withOpacity(0.25),
+                  highlightColor: lineColor.withOpacity(0.08),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 28,
-                    height: 28,
+                    duration: const Duration(milliseconds: 120),
+                    width: 22,
+                    height: 22,
                     margin: const EdgeInsets.only(left: 4),
                     decoration: BoxDecoration(
                       color: lineColor,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(5),
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.4),
-                        width: 1.5,
+                        color: Colors.white.withOpacity(0.6),
+                        width: 1.2,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: lineColor.withOpacity(0.3),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
                     ),
-                    // Add subtle visual cue that it's clickable
                     child: Center(
                       child: Icon(
                         Icons.train,
-                        size: 14,
-                        color: Colors.white.withOpacity(0.9),
+                        size: 12,
+                        color: Colors.white,
                       ),
                     ),
                   ),
@@ -3044,7 +3028,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
             if (interchangeLineCodes.length > 4)
               Container(
                 margin: const EdgeInsets.only(left: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(4),
@@ -3054,7 +3038,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
-                    color: colorScheme.onSurfaceVariant,
+                    color: colorScheme.primary,
                   ),
                 ),
               ),
