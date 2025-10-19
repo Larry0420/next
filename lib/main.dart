@@ -3550,7 +3550,7 @@ class _StatusBar extends StatelessWidget {
 
     // Emphasized color scheme
     final Color statusColor = ok
-        ? (isDark ? Colors.greenAccent.shade400 : Colors.green.shade600)
+        ? (isDark ? Colors.greenAccent.shade200 : Colors.green.shade600)
         : (isDark ? Colors.orangeAccent.shade200 : Colors.orange.shade700);
     final Color borderColor = statusColor.withOpacity(0.35);
     final Color bgColor = statusColor.withOpacity(isDark ? 0.18 : 0.12);
@@ -3561,11 +3561,11 @@ class _StatusBar extends StatelessWidget {
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
       curve: MotionConstants.standardEasing,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 0.1),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 5),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(1),
         border: Border.all(color: borderColor, width: 1.2),
         boxShadow: [
           BoxShadow(
@@ -3585,7 +3585,7 @@ class _StatusBar extends StatelessWidget {
               child: Icon(
                 ok ? Icons.check_circle_rounded : Icons.error_rounded,
                 color: iconColor,
-                size: 28 * accessibility.iconScale,
+                size: 20 * accessibility.iconScale,
                 key: ValueKey(ok),
                 shadows: [
                   Shadow(
@@ -3782,10 +3782,6 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
       _contentAnimationController.forward();
       _staggerController.forward(from: 0);
       HapticFeedback.mediumImpact();
-      // Optimization: Stop auto-refresh for previous station and start for current
-      final scheduleProvider = context.read<ScheduleProvider>();
-      scheduleProvider.stopAutoRefresh();
-      scheduleProvider.startAutoRefresh(widget.platform.platformId);
     } else {
       _animationController.reverse();
       _contentAnimationController.reverse();
