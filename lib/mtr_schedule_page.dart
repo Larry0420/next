@@ -1762,37 +1762,53 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     final isDelay = schedule.data?.isDelay ?? false;
     final isRefreshing = schedule.backgroundRefreshing;
     
+    // Get train count for emphasis (count all trains across all directions)
+    final totalTrains = schedule.data?.directionTrains.values
+        .fold<int>(0, (sum, trains) => sum + trains.length) ?? 0;
+    
     // Status colors and icons
     Color statusColor;
     Color bgColor;
     IconData statusIcon;
     String statusText;
+    String statusDetail;
     
     if (!hasData) {
       statusColor = colorScheme.onSurfaceVariant;
       bgColor = colorScheme.surfaceContainerHighest;
       statusIcon = Icons.info_outline;
-      statusText = lang.isEnglish ? 'Select a station' : '選擇車站';
+      statusText = lang.isEnglish ? 'No Station Selected' : '未選擇車站';
+      statusDetail = lang.isEnglish ? 'Tap to select line & station' : '點擊選擇線路及車站';
     } else if (isError) {
       statusColor = const Color(0xFFD32F2F); // Red
       bgColor = const Color(0xFFFFEBEE); // Light red
       statusIcon = Icons.error_outline;
-      statusText = lang.isEnglish ? 'Service Alert' : '服務異常';
+      statusText = lang.isEnglish ? 'Service Disrupted' : '服務受阻';
+      statusDetail = lang.isEnglish ? 'Check MTR official updates' : '請查閱港鐵官方通告';
     } else if (isDelay) {
       statusColor = const Color(0xFFF57C00); // Orange
       bgColor = const Color(0xFFFFF3E0); // Light orange
       statusIcon = Icons.warning_amber_rounded;
-      statusText = lang.isEnglish ? 'Delays Reported' : '服務延誤';
+      statusText = lang.isEnglish ? 'Service Delayed' : '服務延誤';
+      statusDetail = lang.isEnglish 
+          ? 'Trains running with delays'
+          : '列車運行受到延誤';
     } else if (isRefreshing) {
       statusColor = colorScheme.primary;
       bgColor = colorScheme.primaryContainer.withOpacity(0.3);
       statusIcon = Icons.refresh_rounded;
-      statusText = lang.isEnglish ? 'Updating...' : '更新中';
+      statusText = lang.isEnglish ? 'Updating Schedule...' : '正在更新班次';
+      statusDetail = lang.isEnglish 
+          ? 'Fetching latest train times'
+          : '獲取最新列車時間';
     } else {
       statusColor = const Color(0xFF2E7D32); // Green
       bgColor = const Color(0xFFE8F5E9); // Light green
       statusIcon = Icons.check_circle_outline;
       statusText = lang.isEnglish ? 'Normal Service' : '服務正常';
+      statusDetail = lang.isEnglish 
+          ? '$totalTrains trains tracked'
+          : '追蹤 $totalTrains 班列車';
     }
     
     // Display current date and time from API response
@@ -1836,59 +1852,94 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: bgColor,
         border: Border(
           bottom: BorderSide(
-            color: statusColor.withOpacity(0.2),
-            width: 1,
+            color: statusColor.withOpacity(0.3),
+            width: 1.5,
           ),
         ),
       ),
       child: Row(
         children: [
-          // Status icon
-          Icon(
-            statusIcon,
-            size: 18,
-            color: statusColor,
-          ),
-          const SizedBox(width: 8),
-          
-          // Status text
-          Expanded(
-            child: Text(
-              statusText,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: statusColor,
-                letterSpacing: 0.1,
+          // Emphasized status indicator
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.15),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: statusColor.withOpacity(0.3),
+                width: 1.5,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            ),
+            child: Icon(
+              statusIcon,
+              size: 16,
+              color: statusColor,
+            ),
+          ),
+          const SizedBox(width: 10),
+          
+          // Status text with detail
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  statusText,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: statusColor,
+                    letterSpacing: 0.2,
+                    height: 1.2,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  statusDetail,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                    color: statusColor.withOpacity(0.75),
+                    letterSpacing: 0.1,
+                    height: 1.1,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
           ),
           
-          // Update time with tooltip showing full date/time and source
+          // Update time with detailed tooltip
           if (updateTime != null) ...[
             Tooltip(
               message: updateTimeDetail ?? updateTime,
               preferBelow: true,
-              verticalOffset: 8,
+              verticalOffset: 10,
               textStyle: const TextStyle(
                 fontSize: 11,
                 color: Colors.white,
               ),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(6),
+              ),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: statusColor.withOpacity(0.2),
-                    width: 0.5,
+                    color: statusColor.withOpacity(0.25),
+                    width: 1,
                   ),
                 ),
                 child: Row(
@@ -1897,85 +1948,105 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                     // Icon varies based on data source
                     Icon(
                       isSystemTime ? Icons.cloud_sync_rounded : Icons.schedule_rounded,
-                      size: 12,
-                      color: statusColor.withOpacity(0.85),
+                      size: 13,
+                      color: statusColor.withOpacity(0.9),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 5),
                     Text(
                       updateTime,
                       style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: statusColor.withOpacity(0.95),
-                        letterSpacing: 0.2,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: statusColor,
+                        letterSpacing: 0.3,
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
           ],
           
-          // Auto-refresh toggle button
-          InkWell(
-            onTap: catalog.hasSelection
-                ? () async {
-                    if (schedule.isAutoRefreshActive) {
-                      schedule.stopAutoRefresh();
-                      await schedule.saveAutoRefreshPref(false);
-                    } else {
-                      schedule.startAutoRefresh(
-                        catalog.selectedLine!.lineCode,
-                        catalog.selectedStation!.stationCode,
-                      );
-                      await schedule.saveAutoRefreshPref(true);
+          // Enhanced auto-refresh toggle with detailed state
+          Tooltip(
+            message: schedule.isAutoRefreshActive
+                ? (lang.isEnglish 
+                    ? 'Auto-refresh ON\nSchedule updates every 30s\nTap to disable'
+                    : '自動更新：開啟\n每30秒更新班次\n點擊以關閉')
+                : (lang.isEnglish
+                    ? 'Auto-refresh OFF\nTap to enable automatic updates'
+                    : '自動更新：關閉\n點擊以開啟自動更新'),
+            preferBelow: true,
+            verticalOffset: 10,
+            textStyle: const TextStyle(fontSize: 11, color: Colors.white),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: InkWell(
+              onTap: catalog.hasSelection
+                  ? () async {
+                      HapticFeedback.lightImpact();
+                      if (schedule.isAutoRefreshActive) {
+                        schedule.stopAutoRefresh();
+                        await schedule.saveAutoRefreshPref(false);
+                      } else {
+                        schedule.startAutoRefresh(
+                          catalog.selectedLine!.lineCode,
+                          catalog.selectedStation!.stationCode,
+                        );
+                        await schedule.saveAutoRefreshPref(true);
+                      }
                     }
-                  }
-                : null,
-            borderRadius: BorderRadius.circular(20),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: schedule.isAutoRefreshActive
-                    ? statusColor.withOpacity(0.15)
-                    : statusColor.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
+                  : null,
+              borderRadius: BorderRadius.circular(20),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
                   color: schedule.isAutoRefreshActive
-                      ? statusColor.withOpacity(0.4)
-                      : statusColor.withOpacity(0.2),
-                  width: 1,
+                      ? statusColor.withOpacity(0.18)
+                      : statusColor.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: schedule.isAutoRefreshActive
+                        ? statusColor.withOpacity(0.5)
+                        : statusColor.withOpacity(0.25),
+                    width: 1.5,
+                  ),
                 ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Animated refresh icon
-                  RotationTransition(
-                    turns: _refreshRotation,
-                    child: Icon(
-                      Icons.refresh_rounded,
-                      size: 14,
-                      color: schedule.isAutoRefreshActive
-                          ? statusColor
-                          : statusColor.withOpacity(0.6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Animated refresh icon
+                    RotationTransition(
+                      turns: _refreshRotation,
+                      child: Icon(
+                        Icons.autorenew_rounded,
+                        size: 15,
+                        color: schedule.isAutoRefreshActive
+                            ? statusColor
+                            : statusColor.withOpacity(0.5),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    schedule.isAutoRefreshActive
-                        ? (lang.isEnglish ? 'ON' : '開')
-                        : (lang.isEnglish ? 'OFF' : '關'),
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: schedule.isAutoRefreshActive
-                          ? statusColor
-                          : statusColor.withOpacity(0.6),
+                    const SizedBox(width: 5),
+                    // Status text
+                    Text(
+                      schedule.isAutoRefreshActive
+                          ? (lang.isEnglish ? 'AUTO' : '自動')
+                          : (lang.isEnglish ? 'OFF' : '關閉'),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: schedule.isAutoRefreshActive
+                            ? statusColor
+                            : statusColor.withOpacity(0.5),
+                        letterSpacing: 0.5,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -2237,33 +2308,25 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 6,
-                  children: widget.lines.asMap().entries.map((entry) {
-                    final idx = entry.key;
-                    final line = entry.value;
+                  children: widget.lines.map((line) {
                     final isSelected = line == widget.selectedLine;
                     
-                    // Staggered fade-in when expanding
-                    return AnimatedOpacity(
-                      opacity: _showLines ? 1.0 : 0.0,
-                      duration: Duration(milliseconds: 100 + (idx * 20)),
-                      curve: Curves.easeOut,
-                      child: _buildChip(
-                        context: context,
-                        label: line.displayName(lang.isEnglish),
-                        isSelected: isSelected,
-                        color: line.lineColor,
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          widget.onLineChanged(line);
-                          _animController.forward(from: 0);
-                        },
-                        leadingWidget: Container(
-                          width: 3,
-                          height: 16,
-                          decoration: BoxDecoration(
-                            color: line.lineColor,
-                            borderRadius: BorderRadius.circular(1.5),
-                          ),
+                    return _buildChip(
+                      context: context,
+                      label: line.displayName(lang.isEnglish),
+                      isSelected: isSelected,
+                      color: line.lineColor,
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        widget.onLineChanged(line);
+                        _animController.forward(from: 0);
+                      },
+                      leadingWidget: Container(
+                        width: 3,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: line.lineColor,
+                          borderRadius: BorderRadius.circular(1.5),
                         ),
                       ),
                     );
@@ -2308,127 +2371,51 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     required List<MtrStation> filteredStations,
     required ColorScheme colorScheme,
   }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeInOut,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(UIConstants.cardRadius),
-        border: Border.all(
-          color: widget.selectedLine!.lineColor.withOpacity(UIConstants.cardBorderOpacity),
-          width: UIConstants.cardBorderWidth,
+    // Build station list content
+    final stationListContent = SizeTransition(
+      sizeFactor: _stationExpandAnimation,
+      axisAlignment: -1.0,
+      child: FadeTransition(
+        opacity: _stationExpandAnimation,
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: filteredStations.map((station) {
+            final isSelected = station == widget.selectedStation;
+            
+            return _buildChip(
+              context: context,
+              label: station.displayName(lang.isEnglish),
+              isSelected: isSelected,
+              color: widget.selectedLine!.lineColor,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                widget.onStationChanged(station);
+              },
+              trailing: station.isInterchange 
+                  ? _buildInterchangeIndicator(context, station)
+                  : null,
+            );
+          }).toList(),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: colorScheme.shadow.withOpacity(0.05),
-            blurRadius: UIConstants.cardElevation,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Station header with direction filter
-          InkWell(
-            onTap: () => _saveStationExpandPref(!_showStations),
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(UIConstants.cardRadius),
-              bottom: _showStations ? Radius.zero : Radius.circular(UIConstants.cardRadius),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: UIConstants.cardPadding, vertical: 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Station title row
-                  Row(
-                    children: [
-                      Icon(Icons.location_on_outlined, size: 20, color: widget.selectedLine!.lineColor),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          widget.selectedStation != null
-                              ? widget.selectedStation!.displayName(lang.isEnglish)
-                              : lang.isEnglish ? 'Select Station' : '選擇車站',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: colorScheme.onSurface,
-                            fontSize: UIConstants.cardTitleFontSize,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // Interchange indicator
-                      if (widget.selectedStation != null && widget.selectedStation!.isInterchange)
-                        _buildCompactInterchangeIndicator(context, widget.selectedStation!),
-                      const SizedBox(width: 4),
-                      // Expand/collapse icon
-                      AnimatedRotation(
-                        turns: _showStations ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 250),
-                        child: Icon(
-                          Icons.keyboard_arrow_down,
-                          size: 20,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          // Station list (collapsible with smooth animation)
-          SizeTransition(
-            sizeFactor: _stationExpandAnimation,
-            axisAlignment: -1.0,
-            child: FadeTransition(
-              opacity: _stationExpandAnimation,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  UIConstants.cardPadding,
-                  0,
-                  UIConstants.cardPadding,
-                  UIConstants.cardPadding,
-                ),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: filteredStations.asMap().entries.map((entry) {
-                    final idx = entry.key;
-                    final station = entry.value;
-                    final isSelected = station == widget.selectedStation;
-                    
-                    // Staggered fade-in when expanding
-                    return AnimatedOpacity(
-                      opacity: _showStations ? 1.0 : 0.0,
-                      duration: Duration(milliseconds: 100 + (idx * 20)),
-                      curve: Curves.easeOut,
-                      child: _buildChip(
-                        context: context,
-                        label: station.displayName(lang.isEnglish),
-                        isSelected: isSelected,
-                        color: widget.selectedLine!.lineColor,
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          widget.onStationChanged(station);
-                        },
-                        trailing: station.isInterchange 
-                            ? _buildInterchangeIndicator(context, station)
-                            : null,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    );
+    
+    // Use unified _buildSelectorCard for consistency
+    return _buildSelectorCard(
+      context: context,
+      icon: Icons.location_on_outlined,
+      title: widget.selectedStation != null
+          ? widget.selectedStation!.displayName(lang.isEnglish)
+          : lang.isEnglish ? 'Select Station' : '選擇車站',
+      color: widget.selectedLine!.lineColor,
+      isExpanded: _showStations,
+      showToggle: true,
+      onToggle: () => _saveStationExpandPref(!_showStations),
+      trailing: widget.selectedStation != null && widget.selectedStation!.isInterchange
+          ? _buildCompactInterchangeIndicator(context, widget.selectedStation!)
+          : null,
+      content: stationListContent,
     );
   }
   
@@ -2550,27 +2537,33 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(UIConstants.chipRadius),
       splashColor: color.withOpacity(0.15),
       highlightColor: color.withOpacity(0.08),
       hoverColor: color.withOpacity(0.05),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeInOut,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        // Use consistent chip padding for uniform appearance
+        padding: const EdgeInsets.symmetric(
+          horizontal: UIConstants.chipPaddingH,
+          vertical: UIConstants.chipPaddingV,
+        ),
         decoration: BoxDecoration(
-          color: isSelected ? color.withOpacity(0.15) : colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
+          color: isSelected ? color.withOpacity(0.2) : colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(UIConstants.chipRadius),
           border: Border.all(
-            color: isSelected ? color : colorScheme.outline.withOpacity(0.3),
-            width: isSelected ? 1.5 : 1,
+            color: isSelected 
+                ? color.withOpacity(UIConstants.selectedChipBorderOpacity)
+                : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
+            width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
           ),
           // Subtle shadow for selected state
           boxShadow: isSelected ? [
             BoxShadow(
-              color: color.withOpacity(0.1),
-              blurRadius: 3,
-              offset: const Offset(0, 1),
+              color: color.withOpacity(0.15),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
             ),
           ] : null,
         ),
@@ -2578,7 +2571,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
           style: TextStyle(
-            fontSize: 10.5,
+            fontSize: UIConstants.chipFontSize,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
             color: isSelected ? color : colorScheme.onSurfaceVariant,
           ),
@@ -2669,7 +2662,8 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                     const SizedBox(width: 4),
                     AnimatedRotation(
                       turns: isExpanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 250),
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
                       child: Icon(
                         Icons.keyboard_arrow_down,
                         size: UIConstants.iconSize,
@@ -2681,22 +2675,25 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
               ),
             ),
           ),
-          // Optimized AnimatedSize with seamless fade and slide
-          AnimatedSize(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOutCubic,
-            alignment: Alignment.topCenter,
-            child: content != null && isExpanded
-                ? AnimatedOpacity(
-                    duration: const Duration(milliseconds: 200),
-                    opacity: isExpanded ? 1.0 : 0.0,
-                    curve: Curves.easeIn,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(UIConstants.cardPadding, 4, UIConstants.cardPadding, UIConstants.cardPadding),
+          // Unified expand/collapse animation with consistent timing
+          ClipRect(
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              alignment: Alignment.topCenter,
+              child: content != null && isExpanded
+                  ? Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(
+                        UIConstants.cardPadding,
+                        4,
+                        UIConstants.cardPadding,
+                        UIConstants.cardPadding,
+                      ),
                       child: content,
-                    ),
-                  )
-                : const SizedBox.shrink(),
+                    )
+                  : const SizedBox(width: double.infinity, height: 0),
+            ),
           ),
         ],
       ),
@@ -2754,122 +2751,111 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         ? _getContrastTextColor(color.withOpacity(0.2), context)
         : colorScheme.onSurface;
     
-    // Simple fade-in animation
-    return AnimatedOpacity(
-      opacity: 1.0,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-          splashColor: color.withOpacity(0.15),
-          highlightColor: color.withOpacity(0.08),
-          hoverColor: color.withOpacity(0.05),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            padding: const EdgeInsets.symmetric(
-              horizontal: UIConstants.chipPaddingH, 
-              vertical: UIConstants.chipPaddingV,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(UIConstants.chipRadius),
+        splashColor: color.withOpacity(0.15),
+        highlightColor: color.withOpacity(0.08),
+        hoverColor: color.withOpacity(0.05),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(
+            horizontal: UIConstants.chipPaddingH, 
+            vertical: UIConstants.chipPaddingV,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected 
+                ? color.withOpacity(0.2) 
+                : colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(UIConstants.chipRadius),
+            border: Border.all(
+              color: isSelected
+                  ? color.withOpacity(UIConstants.selectedChipBorderOpacity) 
+                  : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
+              width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
             ),
-            decoration: BoxDecoration(
-              color: isSelected 
-                  ? color.withOpacity(0.2) 
-                  : colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-              border: Border.all(
-                color: isSelected
-                    ? color.withOpacity(UIConstants.selectedChipBorderOpacity) 
-                    : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
-                width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
+            // Subtle shadow for selected chips
+            boxShadow: isSelected ? [
+              BoxShadow(
+                color: color.withOpacity(0.15),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
               ),
-              // Subtle shadow for selected chips
-              boxShadow: isSelected ? [
-                BoxShadow(
-                  color: color.withOpacity(0.15),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ] : null,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (leadingWidget != null) ...[
-                  leadingWidget,
-                  const SizedBox(width: UIConstants.selectorSpacing),
-                ],
-                // Animated check icon
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  transitionBuilder: (child, animation) {
-                    return ScaleTransition(
-                      scale: animation,
-                      child: FadeTransition(
-                        opacity: animation,
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: isSelected
-                      ? Padding(
-                          key: const ValueKey('check'),
-                          padding: const EdgeInsets.only(right: 4),
-                          child: Icon(
-                            Icons.check_circle,
-                            size: UIConstants.checkIconSize,
-                            color: color,
-                          ),
-                        )
-                      : const SizedBox.shrink(key: ValueKey('no-check')),
-                ),
-                Flexible(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Animated text properties
-                      AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeInOut,
-                        style: TextStyle(
-                          fontSize: UIConstants.chipFontSize,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                          color: textColor,
-                        ),
-                        child: Text(label),
-                      ),
-                      if (subtitle != null)
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            fontSize: UIConstants.chipSubtitleFontSize,
-                            color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
-                  ),
-                ),
-                if (trailing != null) ...[
-                  const SizedBox(width: 4),
-                  trailing,
-                ],
+            ] : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (leadingWidget != null) ...[
+                leadingWidget,
+                const SizedBox(width: UIConstants.selectorSpacing),
               ],
-            ),
+              // Animated check icon (fade only, no scale)
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: child,
+                  );
+                },
+                child: isSelected
+                    ? Padding(
+                        key: const ValueKey('check'),
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Icon(
+                          Icons.check_circle,
+                          size: UIConstants.checkIconSize,
+                          color: color,
+                        ),
+                      )
+                    : const SizedBox.shrink(key: ValueKey('no-check')),
+              ),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Animated text properties
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeInOut,
+                      style: TextStyle(
+                        fontSize: UIConstants.chipFontSize,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                        color: textColor,
+                      ),
+                      child: Text(label),
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: UIConstants.chipSubtitleFontSize,
+                          color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+              if (trailing != null) ...[
+                const SizedBox(width: 4),
+                trailing,
+              ],
+            ],
           ),
         ),
       ),
     );
-  }
-
-  Widget _buildInterchangeIndicator(BuildContext context, MtrStation station) {
+  }  Widget _buildInterchangeIndicator(BuildContext context, MtrStation station) {
     if (!station.isInterchange || station.interchangeLines.isEmpty) {
-      // Return SizedBox with consistent height to maintain layout consistency
-      return const SizedBox(width: 0, height: 20);
+      // Return empty SizedBox to maintain layout without visual element
+      return const SizedBox.shrink();
     }
 
     final lang = context.watch<LanguageProvider>();
@@ -2883,7 +2869,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         .toList();
 
     if (lineColors.isEmpty) {
-      return const SizedBox(width: 0, height: 20);
+      return const SizedBox.shrink();
     }
 
     return Tooltip(
@@ -2891,12 +2877,12 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           ? 'Interchange station'
           : '轉車站',
       child: Container(
-        // Fixed height to match non-interchange stations
-        height: 20,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        // Remove fixed height - let content determine height naturally
+        // Use minimal padding to fit within chip's vertical padding
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: colorScheme.outline.withOpacity(0.2),
             width: 0.5,
@@ -2907,13 +2893,13 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           children: [
             Icon(
               Icons.compare_arrows, 
-              size: 12,
+              size: UIConstants.compareIconSize,
               color: colorScheme.onSurfaceVariant.withOpacity(0.7),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 3),
             ...lineColors.take(3).map((color) => Container(
-              width: 10,
-              height: 10,
+              width: 8,
+              height: 8,
               margin: const EdgeInsets.only(left: 2),
               decoration: BoxDecoration(
                 color: color,
@@ -2937,7 +2923,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                 child: Text(
                   '+${lineColors.length - 3}',
                   style: TextStyle(
-                    fontSize: 9,
+                    fontSize: UIConstants.chipSubtitleFontSize,
                     fontWeight: FontWeight.w600,
                     color: colorScheme.onSurfaceVariant.withOpacity(0.8),
                   ),
