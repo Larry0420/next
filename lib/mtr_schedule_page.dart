@@ -976,20 +976,29 @@ class MtrCatalogProvider extends ChangeNotifier {
       final savedLineCode = prefs.getString('mtr_selected_line');
       final savedStationCode = prefs.getString('mtr_selected_station');
       final savedDirection = prefs.getString('mtr_selected_direction');
-      
+
       if (savedLineCode != null && savedStationCode != null) {
-        final line = _lines.firstWhere(
-          (l) => l.lineCode == savedLineCode,
-          orElse: () => _lines.first,
-        );
-        final station = line.stations.firstWhere(
-          (s) => s.stationCode == savedStationCode,
-          orElse: () => line.stations.first,
-        );
-        
+        MtrLine? line;
+        if (_lines.isNotEmpty) {
+          line = _lines.firstWhere(
+            (l) => l.lineCode == savedLineCode,
+            orElse: () => _lines.first,
+          );
+        }
+        MtrStation? station;
+        if (line != null && line.stations.isNotEmpty) {
+          station = line.stations.firstWhere(
+            (s) => s.stationCode == savedStationCode,
+            orElse: () => line!.stations.first,
+          );
+        }
         _selectedLine = line;
         _selectedStation = station;
         _selectedDirection = savedDirection;
+      } else {
+        _selectedLine = null;
+        _selectedStation = null;
+        _selectedDirection = null;
       }
     } catch (e) {
       debugPrint('Failed to load MTR saved selection: $e');
@@ -1562,37 +1571,33 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    
+
     // Detect if this page is currently visible in the PageView
-    // This will be true when user is on the MTR tab
     _checkPageVisibility();
-    
-    // Load auto-refresh preference once when widget is inserted
+
+    // Load auto-refresh preference and trigger auto-refresh on app start
     if (!_autoRefreshInitialized) {
       _autoRefreshInitialized = true;
       final schedule = context.read<MtrScheduleProvider>();
       final catalog = context.read<MtrCatalogProvider>();
       final devSettings = context.read<DeveloperSettingsProvider>();
-      
+
       schedule.loadAutoRefreshPref().then((_) {
-        // Only start auto-refresh if auto-load is enabled AND we have a selection AND page is visible
-        final shouldAutoLoad = devSettings.mtrAutoLoadCachedSelection && catalog.hasSelection;
-        
-        if (shouldAutoLoad && _isPageVisible) {
-          if (schedule.autoRefreshEnabled) {
+        // Auto-load selection if enabled
+        catalog.initializeWithSettings(devSettings.mtrAutoLoadCachedSelection).then((_) {
+          // After catalog is initialized, trigger auto-refresh if conditions are met
+          if (_isPageVisible && catalog.hasSelection && schedule.autoRefreshEnabled) {
             if (!schedule.isAutoRefreshActive) {
-              debugPrint('MTR Page: Starting auto-refresh (page is visible)');
+              debugPrint('MTR Page: Auto-triggering auto-refresh on app start');
               schedule.startAutoRefresh(
                 catalog.selectedLine!.lineCode,
                 catalog.selectedStation!.stationCode,
               );
             }
-          } else {
-            if (schedule.isAutoRefreshActive) {
-              schedule.stopAutoRefresh();
-            }
+          } else if (schedule.isAutoRefreshActive && (!catalog.hasSelection || !schedule.autoRefreshEnabled)) {
+            schedule.stopAutoRefresh();
           }
-        }
+        });
       });
     }
   }
@@ -1989,14 +1994,14 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                   ? () async {
                       HapticFeedback.lightImpact();
                       if (schedule.isAutoRefreshActive) {
+                        await schedule.saveAutoRefreshPref(false); // Cache toggle state first
                         schedule.stopAutoRefresh();
-                        await schedule.saveAutoRefreshPref(false);
                       } else {
+                        await schedule.saveAutoRefreshPref(true); // Cache toggle state first
                         schedule.startAutoRefresh(
                           catalog.selectedLine!.lineCode,
                           catalog.selectedStation!.stationCode,
                         );
-                        await schedule.saveAutoRefreshPref(true);
                       }
                     }
                   : null,
@@ -2100,7 +2105,11 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                 forceRefresh: true,
                 priority: _PendingOperation.priorityUserAction,
               );
-              schedule.startAutoRefresh(line.lineCode, catalog.selectedStation!.stationCode);
+              if (schedule.autoRefreshEnabled) {
+                schedule.startAutoRefresh(line.lineCode, catalog.selectedStation!.stationCode);
+              } else if (schedule.isAutoRefreshActive) {
+                schedule.stopAutoRefresh();
+              }
             }
           },
           onStationChanged: (station) async {
@@ -2113,7 +2122,11 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                 forceRefresh: true,
                 priority: _PendingOperation.priorityUserAction,
               );
-              schedule.startAutoRefresh(catalog.selectedLine!.lineCode, station.stationCode);
+              if (schedule.autoRefreshEnabled) {
+                schedule.startAutoRefresh(catalog.selectedLine!.lineCode, station.stationCode);
+              } else if (schedule.isAutoRefreshActive) {
+                schedule.stopAutoRefresh();
+              }
             }
           },
         ),
@@ -2179,7 +2192,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
       duration: const Duration(milliseconds: 300),
     );
     _animController.forward();
-    
+
     // Line dropdown expand/collapse animation
     _lineExpandController = AnimationController(
       vsync: this,
@@ -2189,7 +2202,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
       parent: _lineExpandController,
       curve: Curves.easeInOut,
     );
-    
+
     // Station dropdown expand/collapse animation
     _stationExpandController = AnimationController(
       vsync: this,
@@ -2199,8 +2212,14 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
       parent: _stationExpandController,
       curve: Curves.easeInOut,
     );
-    
+
     _loadExpandPrefs();
+
+    // Ensure cached selection is applied and chips are highlighted
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final catalog = context.read<MtrCatalogProvider>();
+      catalog.applyCachedSelection();
+    });
   }
 
   Future<void> _loadExpandPrefs() async {

@@ -3,7 +3,10 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'dart:ui'; // For ImageFilter.blur
+
 import 'package:animations/animations.dart';
+
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, setEquals;
@@ -11,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 import 'package:implicitly_animated_reorderable_list_2/implicitly_animated_reorderable_list_2.dart';
 import 'package:implicitly_animated_reorderable_list_2/transitions.dart';
@@ -18,6 +22,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+
+//Tailor Made .dart imported
 import 'mtr_schedule_page.dart';
 
 // ========================= Station Grouping (Top-level) =========================
@@ -285,45 +291,37 @@ class AnimationUtils {
     );
   }
   
-  /// 創建優化的淡入動畫
-  static Widget createFadeAnimation({
-    required Widget child,
-    required AnimationController controller,
-    double opacityFrom = 0.0,
-    double opacityTo = 1.0,
-    Curve curve = MotionConstants.standardEasing,
-  }) {
-    final animation = Tween<double>(
-      begin: opacityFrom,
-      end: opacityTo,
-    ).animate(CurvedAnimation(parent: controller, curve: curve));
-    
-    return FadeTransition(
-      opacity: animation,
-      child: child,
-    );
-  }
-  
-  /// 創建滑入動畫
-  static Widget createSlideAnimation({
-    required Widget child,
-    required AnimationController controller,
-    Offset offsetFrom = const Offset(0.0, 1.0),
-    Offset offsetTo = Offset.zero,
-    Curve curve = MotionConstants.deceleratedEasing,
-  }) {
-    final animation = Tween<Offset>(
-      begin: offsetFrom,
-      end: offsetTo,
-    ).animate(CurvedAnimation(parent: controller, curve: curve));
-    
-    return SlideTransition(
-      position: animation,
-      child: child,
-    );
-  }
+  Widget build(BuildContext context) {
+    final lang = context.watch<LanguageProvider>();
+    final routesCatalog = context.watch<RoutesCatalogProvider>();
+    final stationProvider = context.watch<StationProvider>();
+  // Removed unused variable 'selectedDistrict'
+    final selectedRoute = routesCatalog.selectedRoute;
 
-  /// 創建彈性進入動畫（使用 flutter_animate 風格）
+    // Optimized: use O(1) lookup for station details, no looping required
+    final stationDetails = selectedRoute?.stations.map((stationName) {
+      final id = stationProvider.idByEnglish(stationName.en);
+      final data = (id != null) ? OptimizedStationLookup.getData(id) : null;
+      return data?.displayName(lang.isEnglish) ?? stationName.en;
+    }).toList() ?? [];
+
+    return CustomScrollView(
+      slivers: [
+        // ...existing SliverAppBar and content
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final station = stationDetails[index];
+              return ListTile(
+                title: Text(station),
+              );
+            },
+            childCount: stationDetails.length,
+          ),
+        ),
+      ],
+    );
+  }
   static Widget createBounceInAnimation({
     required Widget child,
     Duration delay = Duration.zero,
@@ -3280,91 +3278,177 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: AnimatedSwitcher(
-          duration: MotionConstants.contentTransition,
-          switchInCurve: MotionConstants.standardEasing,
-          child: Text(lang.appTitle, key: ValueKey(lang.isEnglish)),
-        ),
-        actions: [
-          Consumer<AccessibilityProvider>(
-            builder: (context, accessibility, _) => IconButton(
-              icon: Icon(Icons.translate, size: 24 * accessibility.iconScale),
-              tooltip: lang.language,
-              onPressed: lang.toggle,
-            ),
-          ),
-          Consumer<AccessibilityProvider>(
-            builder: (context, accessibility, _) => IconButton(
-              icon: Stack(
-                children: [
-                  Icon(Icons.refresh, size: 24 * accessibility.iconScale),
-                  if (sched.isAutoRefreshActive)
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: AppColors.getSuccessColor(context), // 使用語義化成功顏色
-                          shape: BoxShape.circle,
-                        ),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: AnnotatedRegion<SystemUiOverlayStyle>(
+          value: Theme.of(context).brightness == Brightness.dark
+              ? SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent)
+              : SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+          child: SafeArea(
+            top: true,
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Theme.of(context).colorScheme.surface.withOpacity(0.9),
+                          Theme.of(context).colorScheme.surface.withOpacity(0.7),
+                        ],
                       ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outline.withOpacity(0.12),
+                        width: 1.0,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                        BoxShadow(
+                          color: Theme.of(context).colorScheme.shadow.withOpacity(0.02),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
-                ],
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 4),
+                        SvgPicture.asset(
+                          'assets/icon/tram_icon_android.svg',
+                          width: 32,
+                          height: 32,
+                          fit: BoxFit.contain,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: AnimatedSwitcher(
+                              duration: MotionConstants.contentTransition,
+                              switchInCurve: MotionConstants.standardEasing,
+                              child: Text(
+                                lang.appTitle,
+                                key: ValueKey(lang.isEnglish),
+                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Consumer<AccessibilityProvider>(
+                          builder: (context, accessibility, _) => IconButton(
+                            icon: Icon(Icons.translate, size: 24 * accessibility.iconScale),
+                            tooltip: lang.language,
+                            onPressed: lang.toggle,
+                            splashRadius: 24,
+                          ),
+                        ),
+                        Consumer<AccessibilityProvider>(
+                          builder: (context, accessibility, _) => IconButton(
+                            icon: Stack(
+                              children: [
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 250),
+                                  child: Icon(Icons.refresh, size: 24 * accessibility.iconScale, key: ValueKey(sched.isAutoRefreshActive)),
+                                ),
+                                if (sched.isAutoRefreshActive)
+                                  Positioned(
+                                    right: 0,
+                                    top: 0,
+                                    child: Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.getSuccessColor(context),
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: AppColors.getSuccessColor(context).withOpacity(0.4),
+                                            blurRadius: 8,
+                                            spreadRadius: 2,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            tooltip: sched.isAutoRefreshActive 
+                                ? '自動刷新已啟用 (${sched.currentRefreshIntervalDescription})' 
+                                : lang.refresh,
+                            onPressed: connectivity.isOnline 
+                                ? () {
+                                    debugPrint('=== Manual refresh button pressed ===');
+                                    debugPrint('Current auto-refresh state: ${sched.isAutoRefreshActive}');
+                                    debugPrint('Selected station: ${station.selectedStationId}');
+                                    if (sched.isAutoRefreshActive) {
+                                      debugPrint('Stopping auto-refresh');
+                                      sched.stopAutoRefresh();
+                                    } else {
+                                      debugPrint('Starting auto-refresh');
+                                      sched.startAutoRefresh(station.selectedStationId);
+                                    }
+                                  }
+                                : null,
+                            splashRadius: 24,
+                          ),
+                        ),
+                        Consumer2<AccessibilityProvider, ThemeProvider>(
+                          builder: (context, accessibility, themeProvider, _) => IconButton(
+                            icon: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 250),
+                              child: Icon(
+                                themeProvider.useSystemTheme 
+                                  ? Icons.brightness_auto
+                                  : (themeProvider.isDarkMode ? Icons.brightness_2 : Icons.brightness_7),
+                                size: 24 * accessibility.iconScale,
+                                key: ValueKey(themeProvider.useSystemTheme.toString() + themeProvider.isDarkMode.toString()),
+                              ),
+                            ),
+                            tooltip: themeProvider.useSystemTheme 
+                                ? (lang.isEnglish ? 'Auto Theme' : '自動主題')
+                                : (themeProvider.isDarkMode 
+                                    ? (lang.isEnglish ? 'Dark Theme' : '深色主題')
+                                    : (lang.isEnglish ? 'Light Theme' : '淺色主題')),
+                            onPressed: () {
+                              if (themeProvider.useSystemTheme) {
+                                themeProvider.setUseSystemTheme(false);
+                                themeProvider.setDarkMode(false);
+                              } else {
+                                if (!themeProvider.isDarkMode) {
+                                  themeProvider.setDarkMode(true);
+                                } else {
+                                  themeProvider.setUseSystemTheme(true);
+                                }
+                              }
+                            },
+                            splashRadius: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-              tooltip: sched.isAutoRefreshActive 
-                  ? '自動刷新已啟用 (${sched.currentRefreshIntervalDescription})' 
-                  : lang.refresh,
-              onPressed: connectivity.isOnline 
-                  ? () {
-                      debugPrint('=== Manual refresh button pressed ===');
-                      debugPrint('Current auto-refresh state: ${sched.isAutoRefreshActive}');
-                      debugPrint('Selected station: ${station.selectedStationId}');
-                      
-                      if (sched.isAutoRefreshActive) {
-                        debugPrint('Stopping auto-refresh');
-                        sched.stopAutoRefresh();
-                      } else {
-                        debugPrint('Starting auto-refresh');
-                        sched.startAutoRefresh(station.selectedStationId);
-                      }
-                    }
-                  : null,
             ),
           ),
-          Consumer2<AccessibilityProvider, ThemeProvider>(
-            builder: (context, accessibility, themeProvider, _) => IconButton(
-              icon: Icon(
-                themeProvider.useSystemTheme 
-                  ? Icons.brightness_auto
-                  : (themeProvider.isDarkMode ? Icons.brightness_2 : Icons.brightness_7),
-                size: 24 * accessibility.iconScale,
-              ),
-              tooltip: themeProvider.useSystemTheme 
-                  ? (lang.isEnglish ? 'Auto Theme' : '自動主題')
-                  : (themeProvider.isDarkMode 
-                      ? (lang.isEnglish ? 'Dark Theme' : '深色主題')
-                      : (lang.isEnglish ? 'Light Theme' : '淺色主題')),
-              onPressed: () {
-                if (themeProvider.useSystemTheme) {
-                  // Switch from auto to light mode
-                  themeProvider.setUseSystemTheme(false);
-                  themeProvider.setDarkMode(false);
-                } else {
-                  if (!themeProvider.isDarkMode) {
-                    // Switch from light to dark mode
-                    themeProvider.setDarkMode(true);
-                  } else {
-                    // Switch from dark to auto mode
-                    themeProvider.setUseSystemTheme(true);
-                  }
-                }
-              },
-            ),
-          ),
-        ],
+        ),
       ),
       body: Column(
         children: [
@@ -4574,12 +4658,15 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
   }
 
   Future<void> _loadForRoute(LrtRoute route, StationProvider sp, ConnectivityProvider net) async {
-    if (net.isOffline) return;
-    
+    // Prevent loading if network is unstable or offline
+    if (net.isOffline || !net.isOnline) {
+      debugPrint('Routes: Skipping load due to unstable or offline network');
+      return;
+    }
+
     final httpErrorProvider = context.read<HttpErrorProvider>();
     if (httpErrorProvider.shouldStopRequests && !httpErrorProvider.canRetryAfterError()) {
       debugPrint('Routes: Skipping load due to API errors');
-      // FIX: Add mounted check before setState
       if (mounted) {
         setState(() {
           _loading = false;
@@ -4589,9 +4676,8 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
       return;
     }
 
-    // FIX: Add mounted check before setState
     if (!mounted) return;
-    
+
     setState(() {
       _loading = true;
       _schedules = {};
@@ -4601,9 +4687,15 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
     try {
       // Build station ID list
       final ids = <int>[];
+      final selectedStationId = sp.selectedStationId;
       for (final s in route.stations) {
         final id = sp.idByEither(s.en, s.zh);
         if (id != null) {
+          // Prevent duplicate API call for selected station
+          if (id == selectedStationId) {
+            debugPrint('Skipping duplicate API call for selected station $id');
+            continue;
+          }
           ids.add(id);
         } else {
           _unmatched.add('${s.en} / ${s.zh}');
@@ -4612,7 +4704,6 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
 
       if (ids.isEmpty) {
         debugPrint('Routes: No valid station IDs found for route ${route.routeNumber}');
-        // FIX: Add mounted check before setState
         if (mounted) {
           setState(() {
             _loading = false;
@@ -4622,29 +4713,23 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
         return;
       }
 
-      // Create futures with timeout and better error handling
       final futures = ids.map((id) async {
         try {
-          // Add timeout to prevent getting stuck
           final res = await _api.fetch(id).timeout(
             const Duration(seconds: 15),
             onTimeout: () {
               throw TimeoutException('Request timeout for station $id', const Duration(seconds: 15));
             },
           );
-          
-          // Report success for each successful call
           httpErrorProvider.reportApiSuccess();
           return MapEntry(id, res);
         } catch (e) {
-          // Report error for each failed call
           httpErrorProvider.reportApiError(e.toString());
           debugPrint('Failed to load data for station $id: $e');
           return null;
         }
       });
 
-      // Wait for all requests with overall timeout
       final results = await Future.wait(futures).timeout(
         const Duration(seconds: 30),
         onTimeout: () {
@@ -4654,47 +4739,30 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
         },
       );
 
-      // Process results - Performance Optimization: Pre-allocate map size for O(1) insertions
       final newSchedules = <int, LrtScheduleResponse>{};
-      // Pre-size the map if we know the approximate size
-      if (ids.length < 20) {
-        // Most routes have < 20 stations, pre-allocate for efficiency
-        for (final result in results) {
-          if (result != null) {
-            newSchedules[result.key] = result.value; // O(1) insertion into pre-sized map
-          }
-        }
-      } else {
-        // For larger routes, standard processing
-        for (final result in results) {
-          if (result != null) {
-            newSchedules[result.key] = result.value;
-          }
+      for (final result in results) {
+        if (result != null) {
+          newSchedules[result.key] = result.value;
         }
       }
 
-      // Check if we got any data
       if (newSchedules.isEmpty && ids.isNotEmpty) {
         debugPrint('Routes: No data retrieved for any stations in route ${route.routeNumber}');
         httpErrorProvider.reportApiError('No data available for route');
       }
 
-      // FIX: Add mounted check before setState after async operations
       if (!mounted) return;
-      
+
       setState(() {
         _schedules = newSchedules;
         _loading = false;
         _isLoadingCachedData = false;
       });
-      
+
     } catch (e) {
       debugPrint('Routes: Error loading route ${route.routeNumber}: $e');
       httpErrorProvider.reportApiError('Route loading failed: $e');
-      
-      // FIX: Add mounted check before setState in catch block
       if (!mounted) return;
-      
       setState(() {
         _loading = false;
         _isLoadingCachedData = false;
