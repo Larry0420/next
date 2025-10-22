@@ -1187,7 +1187,7 @@ class MtrScheduleProvider extends ChangeNotifier {
   
   Timer? _autoRefreshTimer;
   Duration? _currentRefreshInterval;
-  static const Duration _defaultRefreshInterval = Duration(seconds: 30);
+  static const Duration _defaultRefreshInterval = Duration(seconds: 15); // Normal interval
   static const Duration _slowNetworkInterval = Duration(seconds: 60); // Slower on poor network
   static const Duration _offlineInterval = Duration(seconds: 120); // Very slow when offline
   
@@ -1205,6 +1205,17 @@ class MtrScheduleProvider extends ChangeNotifier {
   final List<Duration> _recentFetchDurations = [];
   static const int _maxFetchDurationSamples = 5;
   static const Duration _slowNetworkThreshold = Duration(seconds: 5);
+  // Faster interval when network is stable and responsive
+  static const Duration _fastNetworkInterval = Duration(seconds: 20);
+
+  // Hysteresis / stability counters to avoid flapping refresh intervals
+  Duration? _lastSuggestedInterval;
+  int _stableSuggestionCount = 0;
+  static const int _requiredStableSuggestionCount = 3; // require 3 consistent samples before changing
+
+  // Store auto-refresh target so we can reschedule without restarting from callers
+  String? _autoRefreshLineCode;
+  String? _autoRefreshStationCode;
   
   MtrScheduleResponse? get data => _data;
   bool get loading => _loading;
@@ -1392,27 +1403,109 @@ class MtrScheduleProvider extends ChangeNotifier {
       final avgDuration = _recentFetchDurations.reduce((a, b) => a + b) ~/ _recentFetchDurations.length;
       final wasNetworkSlow = _isNetworkSlow;
       _isNetworkSlow = avgDuration > _slowNetworkThreshold;
-      
+
       if (_isNetworkSlow != wasNetworkSlow) {
         debugPrint('MTR Schedule: Network speed changed - slow: $_isNetworkSlow (avg: ${avgDuration.inSeconds}s)');
-        // Adjust refresh interval if auto-refresh is active
-        if (isAutoRefreshActive) {
-          _adjustRefreshInterval();
-        }
+      }
+
+      // Evaluate and possibly adjust interval using hysteresis to avoid frequent reschedules
+      if (isAutoRefreshActive) {
+        _adjustRefreshInterval(avgDuration);
       }
     }
   }
   
-  /// Adjust refresh interval based on network conditions
-  void _adjustRefreshInterval() {
-    final newInterval = _isNetworkSlow 
-      ? _slowNetworkInterval 
-      : (_circuitBreakerOpen ? _offlineInterval : _defaultRefreshInterval);
-    
-    if (newInterval != _currentRefreshInterval) {
-      debugPrint('MTR Schedule: Adjusting refresh interval to ${newInterval.inSeconds}s');
-      _currentRefreshInterval = newInterval;
-      // Note: Timer will use new interval on next tick
+  /// Adjust refresh interval based on network conditions and recent fetch durations.
+  /// Uses hysteresis: require several consistent samples before applying a change.
+  void _adjustRefreshInterval(Duration avgFetchDuration) {
+    // Suggest interval based on observed network quality and error state
+    Duration suggested;
+    if (_circuitBreakerOpen) {
+      suggested = _offlineInterval;
+    } else if (_isNetworkSlow) {
+      suggested = _slowNetworkInterval;
+    } else {
+      // If network is very responsive and no recent errors, use a faster interval
+      if (avgFetchDuration <= Duration(seconds: 2) && _consecutiveErrors == 0) {
+        suggested = _fastNetworkInterval;
+      } else {
+        suggested = _defaultRefreshInterval;
+      }
+    }
+
+    // Hysteresis: asymmetric behavior to reduce perceived delay when network improves
+    // If suggested interval is faster than current, allow quicker application (fewer samples)
+    final int requiredCountForThisChange;
+    if (_currentRefreshInterval == null) {
+      // If we don't have a current interval, apply immediately
+      requiredCountForThisChange = 1;
+    } else if (suggested < _currentRefreshInterval!) {
+      // Faster interval: be more aggressive (apply after 1 stable sample)
+      requiredCountForThisChange = 1;
+    } else {
+      // Slower interval: be conservative (require multiple stable samples)
+      requiredCountForThisChange = _requiredStableSuggestionCount;
+    }
+
+    if (_lastSuggestedInterval == null || _lastSuggestedInterval != suggested) {
+      _lastSuggestedInterval = suggested;
+      _stableSuggestionCount = 1;
+      debugPrint('MTR Schedule: Suggested new interval ${suggested.inSeconds}s (1/$requiredCountForThisChange)');
+      return;
+    }
+
+    _stableSuggestionCount++;
+    debugPrint('MTR Schedule: Suggested interval ${suggested.inSeconds}s ($_stableSuggestionCount/$requiredCountForThisChange)');
+
+    if (_stableSuggestionCount >= requiredCountForThisChange) {
+      // Apply the change only if it actually differs
+      if (suggested != _currentRefreshInterval) {
+        debugPrint('MTR Schedule: Applying adjusted refresh interval to ${suggested.inSeconds}s');
+        _currentRefreshInterval = suggested;
+        // Reschedule timer if auto-refresh is active
+        if (isAutoRefreshActive) {
+          _rescheduleAutoRefresh(suggested);
+        }
+      }
+      // Reset counter so future changes require stability again
+      _stableSuggestionCount = 0;
+    }
+  }
+
+  /// Reschedule the periodic auto-refresh timer to use a new interval without triggering
+  /// an immediate full restart or extra loads. Uses stored target line/station.
+  void _rescheduleAutoRefresh(Duration newInterval) {
+    try {
+      // Preserve target
+      final lineCode = _autoRefreshLineCode;
+      final stationCode = _autoRefreshStationCode;
+      if (lineCode == null || stationCode == null) {
+        // Nothing to schedule against
+        return;
+      }
+
+      // Cancel existing timer and create a new periodic timer with the new interval
+      _autoRefreshTimer?.cancel();
+      _autoRefreshTimer = Timer.periodic(newInterval, (_) async {
+        // On each tick, evaluate whether we still need to adjust next time
+        final adaptiveInterval = _getAdaptiveInterval();
+        if (adaptiveInterval != _currentRefreshInterval) {
+          // Instead of immediate recursive restart, let hysteresis handle real change
+          // The next _trackFetchDuration call will perform the reschedule when stable
+        }
+
+        debugPrint('MTR Auto-refresh: Background refresh $lineCode/$stationCode');
+        await loadSchedule(
+          lineCode,
+          stationCode,
+          forceRefresh: false,
+          allowStaleCache: true,
+          silentRefresh: true,
+          priority: _PendingOperation.priorityAutoRefresh,
+        );
+      });
+    } catch (e) {
+      debugPrint('MTR Schedule: Failed to reschedule auto-refresh: $e');
     }
   }
   
@@ -1454,27 +1547,23 @@ class MtrScheduleProvider extends ChangeNotifier {
   /// OPTIMIZED: Uses priority-based sequential execution (no parallel operations)
   void startAutoRefresh(String lineCode, String stationCode, {Duration? interval}) {
     stopAutoRefresh();
-    
+    // Store the target so rescheduling can reuse it without callers needing to re-pass
+    _autoRefreshLineCode = lineCode;
+    _autoRefreshStationCode = stationCode;
+
     // Use adaptive interval if not specified
     final refreshInterval = interval ?? _getAdaptiveInterval();
     _currentRefreshInterval = refreshInterval;
-    
+
     debugPrint('MTR Auto-refresh: Starting with interval ${refreshInterval.inSeconds}s (priority: auto-refresh)');
-    
+
     _autoRefreshTimer = Timer.periodic(refreshInterval, (_) async {
-      // Check if we should adjust interval
-      final adaptiveInterval = _getAdaptiveInterval();
-      if (adaptiveInterval != _currentRefreshInterval) {
-        debugPrint('MTR Auto-refresh: Restarting with new interval ${adaptiveInterval.inSeconds}s');
-        startAutoRefresh(lineCode, stationCode, interval: adaptiveInterval);
-        return;
-      }
-      
+      // No immediate recursive restart here; interval adjustments are handled by _adjustRefreshInterval
       debugPrint('MTR Auto-refresh: Background refresh $lineCode/$stationCode');
       // Use silent refresh with lowest priority (won't interrupt user actions)
       await loadSchedule(
-        lineCode, 
-        stationCode, 
+        lineCode,
+        stationCode,
         forceRefresh: false, // Allow stale-while-revalidate
         allowStaleCache: true,
         silentRefresh: true, // Don't show loading spinner during auto-refresh
@@ -1510,6 +1599,8 @@ class MtrScheduleProvider extends ChangeNotifier {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = null;
     _currentRefreshInterval = null;
+    _autoRefreshLineCode = null;
+    _autoRefreshStationCode = null;
     debugPrint('MTR Auto-refresh: Stopped');
     notifyListeners();
   }
@@ -1839,9 +1930,9 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     }
     
     if (sourceTime != null) {
-      // Format current date and time (not relative time)
-      // Show time in HH:MM format for compact display
-      updateTime = '${sourceTime.hour.toString().padLeft(2, '0')}:${sourceTime.minute.toString().padLeft(2, '0')}';
+  // Format current date and time (not relative time)
+  // Show time in HH:MM:SS format for compact display (include seconds)
+  updateTime = '${sourceTime.hour.toString().padLeft(2, '0')}:${sourceTime.minute.toString().padLeft(2, '0')}:${sourceTime.second.toString().padLeft(2, '0')}';
       
       // Format full date/time for tooltip with source
       final dateTimeStr = lang.isEnglish

@@ -25,6 +25,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 //Tailor Made .dart imported
 import 'mtr_schedule_page.dart';
+import 'kmb_dialer.dart';
 
 // ========================= Station Grouping (Top-level) =========================
 class _StationGroupInfo {
@@ -1780,12 +1781,14 @@ class ThemeProvider extends ChangeNotifier {
     static const String _showCacheStatusKey = 'show_cache_status';
     static const String _showMtrArrivalDetailsKey = 'show_mtr_arrival_details';
     static const String _mtrAutoLoadCachedSelectionKey = 'mtr_auto_load_cached_selection';
+  static const String _showKmbInNavKey = 'show_kmb_in_nav';
     
     bool _hideStationId = false;
     bool _showGridDebug = false;
     bool _showCacheStatus = false; // Default to hidden
     bool _showMtrArrivalDetails = false; // Default to hidden for cleaner UI
     bool _mtrAutoLoadCachedSelection = true; // Default to true for convenience
+  bool _showKmbInNav = true; // Default to visible
     SharedPreferences? _prefs;
 
     bool get hideStationId => _hideStationId;
@@ -1793,6 +1796,7 @@ class ThemeProvider extends ChangeNotifier {
     bool get showCacheStatus => _showCacheStatus;
     bool get showMtrArrivalDetails => _showMtrArrivalDetails;
     bool get mtrAutoLoadCachedSelection => _mtrAutoLoadCachedSelection;
+  bool get showKmbInNav => _showKmbInNav;
 
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
@@ -1801,6 +1805,7 @@ class ThemeProvider extends ChangeNotifier {
       _showCacheStatus = _prefs!.getBool(_showCacheStatusKey) ?? false;
       _showMtrArrivalDetails = _prefs!.getBool(_showMtrArrivalDetailsKey) ?? false;
       _mtrAutoLoadCachedSelection = _prefs!.getBool(_mtrAutoLoadCachedSelectionKey) ?? true;
+      _showKmbInNav = _prefs!.getBool(_showKmbInNavKey) ?? true;
       notifyListeners();
     }
 
@@ -1836,6 +1841,13 @@ class ThemeProvider extends ChangeNotifier {
       _mtrAutoLoadCachedSelection = autoLoad;
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool(_mtrAutoLoadCachedSelectionKey, autoLoad);
+      notifyListeners();
+    }
+
+    Future<void> setShowKmbInNav(bool show) async {
+      _showKmbInNav = show;
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool(_showKmbInNavKey, show);
       notifyListeners();
     }
   }
@@ -3138,9 +3150,15 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   int _pageIndex = 0;
   bool _reverse = false;
+  bool? _prevShowKmbInNav;
+  // Animation controller for live refresh indicator
+  late final AnimationController _refreshAnimController;
+  late final Animation<double> _rotationAnim;
+  late final Animation<double> _pulseAnim;
+  late final Animation<double> _pulseOpacity;
   
   // 頁面緩存相關
   static const String _pageIndexKey = 'selected_page_index';
@@ -3150,13 +3168,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Initialize refresh animation controller
+    _refreshAnimController = AnimationController(
+      vsync: this,
+      // slower base rotation to reduce visual busyness
+      duration: const Duration(milliseconds: 1200),
+    );
+  _rotationAnim = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _refreshAnimController, curve: Curves.linear));
+  // Neutral, low-amplitude pulse: subtle scaling from 0.97 to 1.03 using a smooth sine-like curve
+  _pulseAnim = Tween<double>(begin: 0.97, end: 1.03).animate(CurvedAnimation(parent: _refreshAnimController, curve: Curves.easeInOutSine));
+  // Subtle opacity animation for dot appearing/disappearing during transitions
+  _pulseOpacity = Tween<double>(begin: 0.6, end: 1.0).animate(CurvedAnimation(parent: _refreshAnimController, curve: Curves.easeInOut));
     _loadCachedPageIndex();
+    // Capture initial developer settings visibility after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _prevShowKmbInNav = context.read<DeveloperSettingsProvider>().showKmbInNav;
+    });
     // Wait for station provider to initialize before starting auto refresh
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 延遲一點時間確保所有provider都已初始化
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) {
           _checkAndStartAutoRefresh();
+          // Also check and start MTR auto-refresh if user had previously selected a MTR station
+          try {
+            _checkAndStartMtrAutoRefresh();
+          } catch (e) {
+            debugPrint('Failed to start MTR auto-refresh on init: $e');
+          }
         }
       });
     });
@@ -3211,6 +3251,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  /// Start MTR auto-refresh if conditions are met (mirrors LRT logic)
+  void _checkAndStartMtrAutoRefresh() {
+    final catalog = context.read<MtrCatalogProvider>();
+    final mtrSched = context.read<MtrScheduleProvider>();
+    final connectivity = context.read<ConnectivityProvider>();
+    final devSettings = context.read<DeveloperSettingsProvider>();
+
+    debugPrint('=== _checkAndStartMtrAutoRefresh called ===');
+    debugPrint('Connectivity isOnline: ${connectivity.isOnline}');
+    debugPrint('MTR auto-load pref: ${devSettings.mtrAutoLoadCachedSelection}');
+    debugPrint('Catalog hasSelection: ${catalog.hasSelection}');
+    debugPrint('MTR Auto refresh active: ${mtrSched.isAutoRefreshActive}');
+
+    if (connectivity.isOnline && devSettings.mtrAutoLoadCachedSelection && catalog.hasSelection) {
+      debugPrint('Conditions met, checking if MTR auto-refresh is not active');
+      if (!mtrSched.isAutoRefreshActive && mtrSched.autoRefreshEnabled) {
+        debugPrint('Starting MTR auto-refresh for ${catalog.selectedLine!.lineCode}/${catalog.selectedStation!.stationCode}');
+        mtrSched.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
+      } else {
+        debugPrint('MTR auto-refresh already active or disabled');
+      }
+    } else {
+      debugPrint('Conditions not met for MTR auto-refresh: online=${connectivity.isOnline}, pref=${devSettings.mtrAutoLoadCachedSelection}, hasSelection=${catalog.hasSelection}');
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final sched = context.read<ScheduleProvider>();
@@ -3227,9 +3293,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           priority: _LrtPendingOperation.priorityStationSwitch,
         );
         sched.startAutoRefresh(station.selectedStationId);
+        // Also resume MTR auto-refresh if applicable
+        try {
+          _checkAndStartMtrAutoRefresh();
+        } catch (e) {
+          debugPrint('Failed to resume MTR auto-refresh on app resume: $e');
+        }
       }
     } else if (state == AppLifecycleState.paused) {
       sched.stopAutoRefresh();
+      // Stop MTR auto-refresh as well
+      try {
+        final mtrSched = context.read<MtrScheduleProvider>();
+        if (mtrSched.isAutoRefreshActive) mtrSched.stopAutoRefresh();
+      } catch (e) {
+        debugPrint('Failed to stop MTR auto-refresh on app pause: $e');
+      }
     }
   }
 
@@ -3270,12 +3349,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
     });
 
-    final pages = [
+  final devSettings = context.watch<DeveloperSettingsProvider>();
+    // Detect change in KMB visibility to adjust _pageIndex predictably
+    const int kmbIndex = 3; // desired insertion index: after MTR and before Settings
+    if (_prevShowKmbInNav != null && _prevShowKmbInNav != devSettings.showKmbInNav) {
+      // KMB was visible and now hidden (5->4)
+      if (_prevShowKmbInNav == true && devSettings.showKmbInNav == false) {
+        if (_pageIndex == kmbIndex) {
+          // If user was on KMB, move them to the previous logical page (MTR)
+          _pageIndex = (kmbIndex - 1).clamp(0, kmbIndex - 1);
+        } else if (_pageIndex > kmbIndex) {
+          // Pages to the right shift left
+          _pageIndex = _pageIndex - 1;
+        }
+      }
+
+      // KMB was hidden and now visible (4->5)
+      if (_prevShowKmbInNav == false && devSettings.showKmbInNav == true) {
+        if (_pageIndex >= kmbIndex) {
+          // Shift pages to the right to keep same logical page visible
+          _pageIndex = _pageIndex + 1;
+        }
+      }
+
+      _prevShowKmbInNav = devSettings.showKmbInNav;
+    }
+
+    // Build base pages: Schedule, Routes, MTR
+    final List<Widget> pages = [
       _SchedulePage(stationProvider: station, scheduleProvider: sched, key: const ValueKey('schedule')),
       const _RoutesPage(key: ValueKey('routes')),
       const MtrSchedulePage(key: ValueKey('mtr')),
-      const _SettingsPage(key: ValueKey('settings')),
     ];
+
+    // Insert KMB before Settings at index 3 if enabled
+    if (devSettings.showKmbInNav) {
+      pages.insert(kmbIndex, Scaffold(
+        appBar: AppBar(title: Text('KMB Routes')),
+        body: KmbDialer(),
+      ));
+    }
+
+    // Always add Settings at the end
+    pages.add(const _SettingsPage(key: ValueKey('settings')));
+
+    // Ensure current page index is within bounds if pages list length changed
+    if (_pageIndex >= pages.length) {
+      // Defer navigation change to after build to avoid setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final newIndex = pages.length - 1;
+        // Use _goTo so saved index is updated and animations handled
+        _goTo(newIndex);
+      });
+    }
 
     return Scaffold(
       appBar: PreferredSize(
@@ -3288,7 +3415,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             top: true,
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: BackdropFilter(
@@ -3325,14 +3452,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     ),
                     child: Row(
                       children: [
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 2),
                         SvgPicture.asset(
                           'assets/icon/tram_icon_android.svg',
-                          width: 32,
-                          height: 32,
+                          width: 28,
+                          height: 28,
                           fit: BoxFit.contain,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         Expanded(
                           child: Align(
                             alignment: Alignment.centerLeft,
@@ -3342,9 +3469,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               child: Text(
                                 lang.appTitle,
                                 key: ValueKey(lang.isEnglish),
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.2,
+                                  letterSpacing: 0.15,
                                 ),
                               ),
                             ),
@@ -3358,56 +3485,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             splashRadius: 24,
                           ),
                         ),
-                        Consumer<AccessibilityProvider>(
-                          builder: (context, accessibility, _) => IconButton(
-                            icon: Stack(
-                              children: [
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 250),
-                                  child: Icon(Icons.refresh, size: 24 * accessibility.iconScale, key: ValueKey(sched.isAutoRefreshActive)),
-                                ),
-                                if (sched.isAutoRefreshActive)
-                                  Positioned(
-                                    right: 0,
-                                    top: 0,
-                                    child: Container(
-                                      width: 8,
-                                      height: 8,
-                                      decoration: BoxDecoration(
-                                        color: AppColors.getSuccessColor(context),
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: AppColors.getSuccessColor(context).withOpacity(0.4),
-                                            blurRadius: 8,
-                                            spreadRadius: 2,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            tooltip: sched.isAutoRefreshActive 
-                                ? '自動刷新已啟用 (${sched.currentRefreshIntervalDescription})' 
-                                : lang.refresh,
-                            onPressed: connectivity.isOnline 
-                                ? () {
-                                    debugPrint('=== Manual refresh button pressed ===');
-                                    debugPrint('Current auto-refresh state: ${sched.isAutoRefreshActive}');
-                                    debugPrint('Selected station: ${station.selectedStationId}');
-                                    if (sched.isAutoRefreshActive) {
-                                      debugPrint('Stopping auto-refresh');
-                                      sched.stopAutoRefresh();
-                                    } else {
-                                      debugPrint('Starting auto-refresh');
-                                      sched.startAutoRefresh(station.selectedStationId);
-                                    }
-                                  }
-                                : null,
-                            splashRadius: 24,
-                          ),
-                        ),
+                        // (moved) auto-refresh pill will be inserted after theme consumer below
                         Consumer2<AccessibilityProvider, ThemeProvider>(
                           builder: (context, accessibility, themeProvider, _) => IconButton(
                             icon: AnimatedSwitcher(
@@ -3439,6 +3517,146 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             },
                             splashRadius: 24,
                           ),
+                        ),
+                        // Auto-refresh pill (moved to right corner)
+                        Consumer2<AccessibilityProvider, MtrScheduleProvider>(
+                          builder: (context, accessibility, mtrSchedInner, _) {
+                            final List<Widget> _pagesForCheck = [
+                              _SchedulePage(stationProvider: station, scheduleProvider: sched, key: const ValueKey('schedule')),
+                              const _RoutesPage(key: ValueKey('routes')),
+                              const MtrSchedulePage(key: ValueKey('mtr')),
+                            ];
+                            final bool isMtrPageVisible = _pageIndex >= 0 && _pageIndex < _pagesForCheck.length && _pagesForCheck[_pageIndex] is MtrSchedulePage;
+                            final bool active = isMtrPageVisible ? mtrSchedInner.isAutoRefreshActive : sched.isAutoRefreshActive;
+                            final String tooltip = isMtrPageVisible
+                              ? (mtrSchedInner.isAutoRefreshActive ? 'MTR 自動刷新已啟用 (${mtrSchedInner.currentRefreshIntervalDescription})' : lang.refresh)
+                              : (sched.isAutoRefreshActive ? '自動刷新已啟用 (${sched.currentRefreshIntervalDescription})' : lang.refresh);
+
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              if (active) {
+                                if (!_refreshAnimController.isAnimating) _refreshAnimController.repeat();
+                              } else {
+                                if (_refreshAnimController.isAnimating) _refreshAnimController.stop();
+                                _refreshAnimController.reset();
+                              }
+                            });
+
+                            return IconButton(
+                              icon: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                  color: active
+                    ? Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.14)
+                    : Theme.of(context).colorScheme.onSurface.withOpacity(0.06),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                  color: active
+                    ? Theme.of(context).colorScheme.outline.withOpacity(0.28)
+                    : Theme.of(context).colorScheme.onSurface.withOpacity(0.20),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    RotationTransition(
+                                      turns: _rotationAnim,
+                                      child: Icon(
+                                          Icons.autorenew_rounded,
+                                          size: 15 * accessibility.iconScale,
+                                          color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
+                                        ),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    // Animated label (AUTO / OFF)
+                                    AnimatedSwitcher(
+                                      duration: const Duration(milliseconds: 220),
+                                      transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+                                      child: Text(
+                                        active ? (lang.isEnglish ? 'AUTO' : '自動') : (lang.isEnglish ? 'OFF' : '關閉'),
+                                        key: ValueKey(active),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                    ),
+                                    // Animated dot (appears when active)
+                                    AnimatedSwitcher(
+                                      duration: const Duration(milliseconds: 250),
+                                      transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: ScaleTransition(scale: animation, child: child)),
+                                      child: active
+                                          ? Padding(
+                                              key: const ValueKey('dot_on'),
+                                              padding: const EdgeInsets.only(left: 6),
+                                              child: FadeTransition(
+                                                opacity: _pulseOpacity,
+                                                child: ScaleTransition(
+                                                  scale: _pulseAnim,
+                                                  child: Container(
+                                                    width: 8,
+                                                    height: 8,
+                                                    decoration: BoxDecoration(
+                                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                      shape: BoxShape.circle,
+                                                      boxShadow: [
+                                                        BoxShadow(
+                                                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.18),
+                                                          blurRadius: 6,
+                                                          spreadRadius: 0.6,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            )
+                                          : const SizedBox(key: ValueKey('dot_off'), width: 0, height: 0),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              tooltip: tooltip,
+                              onPressed: connectivity.isOnline
+                                  ? () async {
+                                      debugPrint('=== Manual refresh button pressed ===');
+                                      if (isMtrPageVisible) {
+                                        debugPrint('Toggling MTR auto-refresh (current=${mtrSchedInner.isAutoRefreshActive})');
+                                        if (mtrSchedInner.isAutoRefreshActive) {
+                                          mtrSchedInner.stopAutoRefresh();
+                                          await mtrSchedInner.saveAutoRefreshPref(false);
+                                        } else {
+                                          final catalog = context.read<MtrCatalogProvider>();
+                                          if (catalog.hasSelection) {
+                                            mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
+                                            await mtrSchedInner.saveAutoRefreshPref(true);
+                                          } else {
+                                            await catalog.applyCachedSelection();
+                                            if (catalog.hasSelection) {
+                                              mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
+                                              await mtrSchedInner.saveAutoRefreshPref(true);
+                                            } else {
+                                              debugPrint('No MTR selection available to start auto-refresh');
+                                            }
+                                          }
+                                        }
+                                      } else {
+                                        debugPrint('Toggling LRT auto-refresh (current=${sched.isAutoRefreshActive})');
+                                        if (sched.isAutoRefreshActive) {
+                                          sched.stopAutoRefresh();
+                                        } else {
+                                          sched.startAutoRefresh(station.selectedStationId);
+                                        }
+                                      }
+                                    }
+                                  : null,
+                              splashRadius: 24,
+                            );
+                          }
                         ),
                         const SizedBox(width: 4),
                       ],
@@ -3486,28 +3704,40 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         selectedIndex: _pageIndex,
         onDestinationSelected: _goTo,
         destinations: [
+          // Schedule
           Consumer<AccessibilityProvider>(
             builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.schedule, size: 24 * accessibility.iconScale), 
-              label: lang.schedule
+              icon: Icon(Icons.schedule, size: 24 * accessibility.iconScale),
+              label: lang.schedule,
             ),
           ),
+          // Routes
           Consumer<AccessibilityProvider>(
             builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.route, size: 24 * accessibility.iconScale), 
-              label: lang.routes
+              icon: Icon(Icons.route, size: 24 * accessibility.iconScale),
+              label: lang.routes,
             ),
           ),
+          // MTR
           Consumer<AccessibilityProvider>(
             builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.train, size: 24 * accessibility.iconScale), 
-              label: lang.mtr
+              icon: Icon(Icons.train, size: 24 * accessibility.iconScale),
+              label: lang.mtr,
             ),
           ),
+          // Conditionally insert KMB here (before Settings)
+          if (devSettings.showKmbInNav)
+            Consumer<AccessibilityProvider>(
+              builder: (context, accessibility, _) => NavigationDestination(
+                icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
+                label: 'KMB',
+              ),
+            ),
+          // Settings
           Consumer<AccessibilityProvider>(
             builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.settings, size: 24 * accessibility.iconScale), 
-              label: lang.settings
+              icon: Icon(Icons.settings, size: 24 * accessibility.iconScale),
+              label: lang.settings,
             ),
           ),
         ],
@@ -8229,6 +8459,25 @@ class _SettingsPage extends StatelessWidget {
         ),
         
         const SizedBox(height: UIConstants.spacingXS),
+
+        // Show KMB in Navigation setting
+        Consumer<DeveloperSettingsProvider>(
+          builder: (context, devSettings, _) => _buildCompactCard(
+            context,
+            icon: Icons.directions_bus,
+            title: lang.isEnglish ? 'Show KMB in Navigation' : '在導覽列顯示 KMB',
+            subtitle: devSettings.showKmbInNav
+                ? (lang.isEnglish ? 'KMB tab is visible' : 'KMB 標籤已顯示')
+                : (lang.isEnglish ? 'KMB tab is hidden' : 'KMB 標籤已隱藏'),
+            trailing: Switch(
+              value: devSettings.showKmbInNav,
+              onChanged: (value) {
+                devSettings.setShowKmbInNav(value);
+              },
+            ),
+          ),
+        ),
+
         
         // MTR Auto-load Cached Selection setting
         Consumer<DeveloperSettingsProvider>(
@@ -11342,4 +11591,11 @@ class SimpleStationSelector extends StatelessWidget {
       ),
     );
   }
+}
+
+// Compatibility alias for tests expecting `MyApp`
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+  @override
+  Widget build(BuildContext context) => const LrtApp();
 }
