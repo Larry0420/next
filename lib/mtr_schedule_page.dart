@@ -9,8 +9,8 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ui_constants.dart';
 
-// Import LanguageProvider and DeveloperSettingsProvider from main.dart
-import 'main.dart' show LanguageProvider, DeveloperSettingsProvider;
+// Import LanguageProvider, DeveloperSettingsProvider and AppColors from main.dart
+import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, AppColors;
 
 // ========================= MTR API Service =========================
 
@@ -1187,9 +1187,9 @@ class MtrScheduleProvider extends ChangeNotifier {
   
   Timer? _autoRefreshTimer;
   Duration? _currentRefreshInterval;
-  static const Duration _defaultRefreshInterval = Duration(seconds: 15); // Normal interval
-  static const Duration _slowNetworkInterval = Duration(seconds: 60); // Slower on poor network
-  static const Duration _offlineInterval = Duration(seconds: 120); // Very slow when offline
+  // Use a fixed 10s auto-refresh interval as requested (avoid multiplicative backoff)
+  static const Duration _defaultRefreshInterval = Duration(seconds: 10); // Fixed once interval
+  // No offline/adaptive intervals — auto-refresh uses fixed interval.
   
   DateTime? _lastSuccessfulRefreshTime;
   int _consecutiveErrors = 0;
@@ -1200,22 +1200,8 @@ class MtrScheduleProvider extends ChangeNotifier {
   DateTime? _circuitBreakerOpenedAt;
   static const Duration _circuitBreakerResetDuration = Duration(minutes: 2);
   
-  // Network quality tracking
-  bool _isNetworkSlow = false;
-  final List<Duration> _recentFetchDurations = [];
-  static const int _maxFetchDurationSamples = 5;
-  static const Duration _slowNetworkThreshold = Duration(seconds: 5);
-  // Faster interval when network is stable and responsive
-  static const Duration _fastNetworkInterval = Duration(seconds: 20);
-
-  // Hysteresis / stability counters to avoid flapping refresh intervals
-  Duration? _lastSuggestedInterval;
-  int _stableSuggestionCount = 0;
-  static const int _requiredStableSuggestionCount = 3; // require 3 consistent samples before changing
-
-  // Store auto-refresh target so we can reschedule without restarting from callers
-  String? _autoRefreshLineCode;
-  String? _autoRefreshStationCode;
+  // Simplified auto-refresh: fixed-interval behavior. Adaptive network-based
+  // adjustments have been removed to keep refresh cadence predictable.
   
   MtrScheduleResponse? get data => _data;
   bool get loading => _loading;
@@ -1223,7 +1209,7 @@ class MtrScheduleProvider extends ChangeNotifier {
   String? get error => _error;
   bool get hasData => _data != null;
   bool get isAutoRefreshActive => _autoRefreshTimer != null && _autoRefreshTimer!.isActive;
-  bool get isNetworkSlow => _isNetworkSlow;
+  // Network quality tracking removed; refresh interval is fixed.
   bool get isCircuitBreakerOpen => _circuitBreakerOpen;
   String get currentRefreshIntervalDescription => _currentRefreshInterval != null ? '${_currentRefreshInterval!.inSeconds}s' : '';
   DateTime? get lastRefreshTime => _lastSuccessfulRefreshTime;
@@ -1352,9 +1338,7 @@ class MtrScheduleProvider extends ChangeNotifier {
         allowStale: allowStaleCache && !forceRefresh,
       );
       
-      final fetchDuration = DateTime.now().difference(fetchStart);
-      _trackFetchDuration(fetchDuration);
-      
+  DateTime.now().difference(fetchStart);
       if (schedule.status != 1) {
         // Only clear data if we don't have previous data
         if (!hadData || forceRefresh) {
@@ -1391,123 +1375,7 @@ class MtrScheduleProvider extends ChangeNotifier {
     }
   }
   
-  /// Track fetch duration to detect slow network
-  void _trackFetchDuration(Duration duration) {
-    _recentFetchDurations.add(duration);
-    if (_recentFetchDurations.length > _maxFetchDurationSamples) {
-      _recentFetchDurations.removeAt(0);
-    }
-    
-    // Calculate average
-    if (_recentFetchDurations.length >= 3) {
-      final avgDuration = _recentFetchDurations.reduce((a, b) => a + b) ~/ _recentFetchDurations.length;
-      final wasNetworkSlow = _isNetworkSlow;
-      _isNetworkSlow = avgDuration > _slowNetworkThreshold;
-
-      if (_isNetworkSlow != wasNetworkSlow) {
-        debugPrint('MTR Schedule: Network speed changed - slow: $_isNetworkSlow (avg: ${avgDuration.inSeconds}s)');
-      }
-
-      // Evaluate and possibly adjust interval using hysteresis to avoid frequent reschedules
-      if (isAutoRefreshActive) {
-        _adjustRefreshInterval(avgDuration);
-      }
-    }
-  }
-  
-  /// Adjust refresh interval based on network conditions and recent fetch durations.
-  /// Uses hysteresis: require several consistent samples before applying a change.
-  void _adjustRefreshInterval(Duration avgFetchDuration) {
-    // Suggest interval based on observed network quality and error state
-    Duration suggested;
-    if (_circuitBreakerOpen) {
-      suggested = _offlineInterval;
-    } else if (_isNetworkSlow) {
-      suggested = _slowNetworkInterval;
-    } else {
-      // If network is very responsive and no recent errors, use a faster interval
-      if (avgFetchDuration <= Duration(seconds: 2) && _consecutiveErrors == 0) {
-        suggested = _fastNetworkInterval;
-      } else {
-        suggested = _defaultRefreshInterval;
-      }
-    }
-
-    // Hysteresis: asymmetric behavior to reduce perceived delay when network improves
-    // If suggested interval is faster than current, allow quicker application (fewer samples)
-    final int requiredCountForThisChange;
-    if (_currentRefreshInterval == null) {
-      // If we don't have a current interval, apply immediately
-      requiredCountForThisChange = 1;
-    } else if (suggested < _currentRefreshInterval!) {
-      // Faster interval: be more aggressive (apply after 1 stable sample)
-      requiredCountForThisChange = 1;
-    } else {
-      // Slower interval: be conservative (require multiple stable samples)
-      requiredCountForThisChange = _requiredStableSuggestionCount;
-    }
-
-    if (_lastSuggestedInterval == null || _lastSuggestedInterval != suggested) {
-      _lastSuggestedInterval = suggested;
-      _stableSuggestionCount = 1;
-      debugPrint('MTR Schedule: Suggested new interval ${suggested.inSeconds}s (1/$requiredCountForThisChange)');
-      return;
-    }
-
-    _stableSuggestionCount++;
-    debugPrint('MTR Schedule: Suggested interval ${suggested.inSeconds}s ($_stableSuggestionCount/$requiredCountForThisChange)');
-
-    if (_stableSuggestionCount >= requiredCountForThisChange) {
-      // Apply the change only if it actually differs
-      if (suggested != _currentRefreshInterval) {
-        debugPrint('MTR Schedule: Applying adjusted refresh interval to ${suggested.inSeconds}s');
-        _currentRefreshInterval = suggested;
-        // Reschedule timer if auto-refresh is active
-        if (isAutoRefreshActive) {
-          _rescheduleAutoRefresh(suggested);
-        }
-      }
-      // Reset counter so future changes require stability again
-      _stableSuggestionCount = 0;
-    }
-  }
-
-  /// Reschedule the periodic auto-refresh timer to use a new interval without triggering
-  /// an immediate full restart or extra loads. Uses stored target line/station.
-  void _rescheduleAutoRefresh(Duration newInterval) {
-    try {
-      // Preserve target
-      final lineCode = _autoRefreshLineCode;
-      final stationCode = _autoRefreshStationCode;
-      if (lineCode == null || stationCode == null) {
-        // Nothing to schedule against
-        return;
-      }
-
-      // Cancel existing timer and create a new periodic timer with the new interval
-      _autoRefreshTimer?.cancel();
-      _autoRefreshTimer = Timer.periodic(newInterval, (_) async {
-        // On each tick, evaluate whether we still need to adjust next time
-        final adaptiveInterval = _getAdaptiveInterval();
-        if (adaptiveInterval != _currentRefreshInterval) {
-          // Instead of immediate recursive restart, let hysteresis handle real change
-          // The next _trackFetchDuration call will perform the reschedule when stable
-        }
-
-        debugPrint('MTR Auto-refresh: Background refresh $lineCode/$stationCode');
-        await loadSchedule(
-          lineCode,
-          stationCode,
-          forceRefresh: false,
-          allowStaleCache: true,
-          silentRefresh: true,
-          priority: _PendingOperation.priorityAutoRefresh,
-        );
-      });
-    } catch (e) {
-      debugPrint('MTR Schedule: Failed to reschedule auto-refresh: $e');
-    }
-  }
+  // Adaptive refresh logic removed — auto-refresh runs at fixed interval.
   
   /// Open circuit breaker to stop hammering the API
   void _openCircuitBreaker() {
@@ -1543,29 +1411,27 @@ class MtrScheduleProvider extends ChangeNotifier {
     return 'Unable to fetch schedule: ${error.replaceAll('Exception: ', '')}';
   }
   
-  /// Start auto-refresh with adaptive intervals and seamless updates
+  /// Start auto-refresh with option to prefer live API fetches
   /// OPTIMIZED: Uses priority-based sequential execution (no parallel operations)
-  void startAutoRefresh(String lineCode, String stationCode, {Duration? interval}) {
+  /// preferLive: when true, auto-refresh will prefer forcing a network call
+  /// (forceRefresh = true, allowStaleCache = false) to deliver live API results.
+  void startAutoRefresh(String lineCode, String stationCode, {Duration? interval, bool preferLive = false}) {
     stopAutoRefresh();
-    // Store the target so rescheduling can reuse it without callers needing to re-pass
-    _autoRefreshLineCode = lineCode;
-    _autoRefreshStationCode = stationCode;
-
-    // Use adaptive interval if not specified
-    final refreshInterval = interval ?? _getAdaptiveInterval();
+    // Use fixed interval (default 10s) unless an explicit interval is provided
+    final refreshInterval = interval ?? _defaultRefreshInterval;
     _currentRefreshInterval = refreshInterval;
 
-    debugPrint('MTR Auto-refresh: Starting with interval ${refreshInterval.inSeconds}s (priority: auto-refresh)');
+    debugPrint('MTR Auto-refresh: Starting with fixed interval ${refreshInterval.inSeconds}s (priority: auto-refresh) preferLive=$preferLive');
 
     _autoRefreshTimer = Timer.periodic(refreshInterval, (_) async {
-      // No immediate recursive restart here; interval adjustments are handled by _adjustRefreshInterval
-      debugPrint('MTR Auto-refresh: Background refresh $lineCode/$stationCode');
+      debugPrint('MTR Auto-refresh: Background refresh $lineCode/$stationCode (preferLive=$preferLive)');
       // Use silent refresh with lowest priority (won't interrupt user actions)
       await loadSchedule(
         lineCode,
         stationCode,
-        forceRefresh: false, // Allow stale-while-revalidate
-        allowStaleCache: true,
+        // prefer live when requested
+        forceRefresh: preferLive, 
+        allowStaleCache: !preferLive,
         silentRefresh: true, // Don't show loading spinner during auto-refresh
         priority: _PendingOperation.priorityAutoRefresh, // Lowest priority
       );
@@ -1575,32 +1441,21 @@ class MtrScheduleProvider extends ChangeNotifier {
     loadSchedule(
       lineCode, 
       stationCode, 
-      forceRefresh: false, 
-      allowStaleCache: true,
+      forceRefresh: preferLive, 
+      allowStaleCache: !preferLive,
       silentRefresh: false, // Show loading on initial load
       priority: _PendingOperation.priorityUserAction, // Medium priority for initial load
     );
     notifyListeners();
   }
   
-  /// Get adaptive refresh interval based on network conditions
-  Duration _getAdaptiveInterval() {
-    if (_circuitBreakerOpen) return _offlineInterval;
-    if (_isNetworkSlow) return _slowNetworkInterval;
-    if (_consecutiveErrors > 0) {
-      // Gradual backoff: 30s -> 45s -> 60s
-      final backoffMultiplier = 1 + (_consecutiveErrors * 0.5);
-      return Duration(seconds: (_defaultRefreshInterval.inSeconds * backoffMultiplier).round().clamp(30, 120));
-    }
-    return _defaultRefreshInterval;
-  }
+  // Adaptive interval removed; auto-refresh uses a fixed interval configured
+  // by `_defaultRefreshInterval` (or an explicit `interval` passed to startAutoRefresh).
 
   void stopAutoRefresh() {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = null;
     _currentRefreshInterval = null;
-    _autoRefreshLineCode = null;
-    _autoRefreshStationCode = null;
     debugPrint('MTR Auto-refresh: Stopped');
     notifyListeners();
   }
@@ -1625,9 +1480,7 @@ class MtrScheduleProvider extends ChangeNotifier {
     await _api.clearAllCaches();
     clearData();
     _consecutiveErrors = 0;
-    _recentFetchDurations.clear();
-    _isNetworkSlow = false;
-    _closeCircuitBreaker();
+  _closeCircuitBreaker();
   }
 
   @override
@@ -1678,11 +1531,12 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
         catalog.initializeWithSettings(devSettings.mtrAutoLoadCachedSelection).then((_) {
           // After catalog is initialized, trigger auto-refresh if conditions are met
           if (_isPageVisible && catalog.hasSelection && schedule.autoRefreshEnabled) {
-            if (!schedule.isAutoRefreshActive) {
+              if (!schedule.isAutoRefreshActive) {
               debugPrint('MTR Page: Auto-triggering auto-refresh on app start');
               schedule.startAutoRefresh(
                 catalog.selectedLine!.lineCode,
                 catalog.selectedStation!.stationCode,
+                preferLive: true,
               );
             }
           } else if (schedule.isAutoRefreshActive && (!catalog.hasSelection || !schedule.autoRefreshEnabled)) {
@@ -1706,17 +1560,34 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
   }
   
   /// Handle page visibility changes - start/stop auto-refresh accordingly
-  void _handleVisibilityChanged() {
+  ///
+  /// This method now re-initializes the current selection from the catalog
+  /// (applyCachedSelection) before starting auto-refresh. That prevents a
+  /// spurious immediate auto-refresh when the user simply navigates to the
+  /// MTR page and the selection/index hasn't been re-applied yet.
+  Future<void> _handleVisibilityChanged() async {
     final schedule = context.read<MtrScheduleProvider>();
     final catalog = context.read<MtrCatalogProvider>();
-    
+
     if (_isPageVisible) {
+      // Ensure catalog selection is applied/re-initialized before starting
+      // auto-refresh. This re-initializes the current index/selection state
+      // so startAutoRefresh receives a valid and up-to-date line/station.
+      try {
+        // Reload catalog data and apply cached selection so the line/station
+        // lists are guaranteed to be present before we start auto-refresh.
+        await catalog.reloadWithSettings(true);
+      } catch (e) {
+        debugPrint('MTR Page: Failed to reload/apply cached selection on visibility: $e');
+      }
+
       // Page became visible - resume auto-refresh if enabled and we have selection
-      if (schedule.autoRefreshEnabled && catalog.hasSelection && !schedule.isAutoRefreshActive) {
-        debugPrint('MTR Page: Resuming auto-refresh (page became visible)');
+        if (schedule.autoRefreshEnabled && catalog.hasSelection && !schedule.isAutoRefreshActive) {
+        debugPrint('MTR Page: Resuming auto-refresh (page became visible) after re-init selection');
         schedule.startAutoRefresh(
           catalog.selectedLine!.lineCode,
           catalog.selectedStation!.stationCode,
+          preferLive: true,
         );
       }
     } else {
@@ -1773,25 +1644,39 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
     final catalog = context.read<MtrCatalogProvider>();
     final schedule = context.read<MtrScheduleProvider>();
     if (state == AppLifecycleState.resumed) {
       // Resume auto-refresh only if page is visible AND auto-refresh is enabled
-      if (_isPageVisible && catalog.hasSelection && schedule.autoRefreshEnabled) {
-        debugPrint('MTR Page: App resumed, page is visible - refreshing data');
-        // App resumed - use user action priority
-        schedule.loadSchedule(
-          catalog.selectedLine!.lineCode,
-          catalog.selectedStation!.stationCode,
-          forceRefresh: true,
-          priority: _PendingOperation.priorityUserAction,
-        );
-        if (!schedule.isAutoRefreshActive) {
-          schedule.startAutoRefresh(
+      if (_isPageVisible && schedule.autoRefreshEnabled) {
+
+        // Reload catalog and apply cached selection to ensure the selected
+        // line and station exist before triggering refresh.
+        try {
+          await catalog.reloadWithSettings(true);
+        } catch (e) {
+          debugPrint('MTR Page: Failed to reload/apply cached selection on resume: $e');
+        }
+
+        if (catalog.hasSelection) {
+          debugPrint('MTR Page: App resumed, page is visible - refreshing data');
+          // App resumed - use user action priority
+          schedule.loadSchedule(
             catalog.selectedLine!.lineCode,
             catalog.selectedStation!.stationCode,
+            forceRefresh: true,
+            priority: _PendingOperation.priorityUserAction,
           );
+          if (!schedule.isAutoRefreshActive) {
+            schedule.startAutoRefresh(
+              catalog.selectedLine!.lineCode,
+              catalog.selectedStation!.stationCode,
+              preferLive: true,
+            );
+          }
+        } else {
+          debugPrint('MTR Page: App resumed but no selection available after re-init - skipping refresh');
         }
       } else if (!_isPageVisible) {
         debugPrint('MTR Page: App resumed, but page is hidden - skipping refresh');
@@ -1825,11 +1710,12 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     // IMPORTANT: Only start auto-refresh if the MTR page is currently visible
     if (shouldAutoLoad && _isPageVisible) {
       if (schedule.autoRefreshEnabled) {
-        if (!schedule.isAutoRefreshActive) {
+          if (!schedule.isAutoRefreshActive) {
           debugPrint('MTR Page: Starting auto-refresh (page is visible)');
           schedule.startAutoRefresh(
             catalog.selectedLine!.lineCode,
             catalog.selectedStation!.stationCode,
+            preferLive: true,
           );
         }
       } else {
@@ -2092,6 +1978,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                         schedule.startAutoRefresh(
                           catalog.selectedLine!.lineCode,
                           catalog.selectedStation!.stationCode,
+                          preferLive: true,
                         );
                       }
                     }
@@ -2196,8 +2083,8 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                 forceRefresh: true,
                 priority: _PendingOperation.priorityUserAction,
               );
-              if (schedule.autoRefreshEnabled) {
-                schedule.startAutoRefresh(line.lineCode, catalog.selectedStation!.stationCode);
+                if (schedule.autoRefreshEnabled) {
+                schedule.startAutoRefresh(line.lineCode, catalog.selectedStation!.stationCode, preferLive: true);
               } else if (schedule.isAutoRefreshActive) {
                 schedule.stopAutoRefresh();
               }
@@ -2214,7 +2101,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                 priority: _PendingOperation.priorityUserAction,
               );
               if (schedule.autoRefreshEnabled) {
-                schedule.startAutoRefresh(catalog.selectedLine!.lineCode, station.stationCode);
+                schedule.startAutoRefresh(catalog.selectedLine!.lineCode, station.stationCode, preferLive: true);
               } else if (schedule.isAutoRefreshActive) {
                 schedule.stopAutoRefresh();
               }
@@ -2245,6 +2132,11 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
 }
 
 // MTR Selector Widget
+// Animation tuning constants for selector and chips
+const Duration _kSelectorAnimDuration = Duration(milliseconds: 300);
+const Duration _kChipScaleDuration = Duration(milliseconds: 180);
+const double _kChipSelectedScale = 1.01; // very subtle, avoids squeezed look
+
 class _MtrSelector extends StatefulWidget {
   final List<MtrLine> lines;
   final MtrLine? selectedLine;
@@ -2269,47 +2161,33 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
   static const String _lineExpandPrefKey = 'mtr_line_dropdown_expanded';
   bool _showStations = true;
   bool _showLines = true;
-  late AnimationController _animController;
-  late AnimationController _lineExpandController;
-  late AnimationController _stationExpandController;
-  late Animation<double> _lineExpandAnimation;
-  late Animation<double> _stationExpandAnimation;
+  // Appearance animation removed: selector appears instantly.
 
   @override
   void initState() {
     super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _animController.forward();
-
-    // Line dropdown expand/collapse animation
-    _lineExpandController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _lineExpandAnimation = CurvedAnimation(
-      parent: _lineExpandController,
-      curve: Curves.easeInOut,
-    );
-
-    // Station dropdown expand/collapse animation
-    _stationExpandController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _stationExpandAnimation = CurvedAnimation(
-      parent: _stationExpandController,
-      curve: Curves.easeInOut,
-    );
+    // Removed entry/fade animation controller - selector now appears without fade.
+    // Note: we intentionally use simple bool-driven expand/collapse state
+    // and AnimatedSize/AnimatedSwitcher in the build method so that
+    // animations are consistent across selector elements and respect
+    // platform reduced-motion accessibility settings. This avoids
+    // managing multiple controllers and keeps the logic declarative.
 
     _loadExpandPrefs();
-
-    // Ensure cached selection is applied and chips are highlighted
+    // Ensure cached selection is applied if it hasn't been applied yet.
+    // We call `initializeWithSettings` (not applyCachedSelection) so the
+    // MtrCatalogProvider's internal guard (`_hasAppliedUserPreference`) will
+    // prevent duplicate application if the page already initialized it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final catalog = context.read<MtrCatalogProvider>();
-      catalog.applyCachedSelection();
+      try {
+        final catalog = context.read<MtrCatalogProvider>();
+        final devSettings = context.read<DeveloperSettingsProvider>();
+        // This will apply cached selection only once across the app lifetime
+        // and will not overwrite an already-applied selection.
+        catalog.initializeWithSettings(devSettings.mtrAutoLoadCachedSelection);
+      } catch (e) {
+        debugPrint('MTR Selector: Failed to ensure cached selection: $e');
+      }
     });
   }
 
@@ -2324,13 +2202,9 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         _showLines = lineExpanded;
       });
       
-      // Initialize animation controllers to match saved state
-      if (_showStations) {
-        _stationExpandController.value = 1.0;
-      }
-      if (_showLines) {
-        _lineExpandController.value = 1.0;
-      }
+      // No explicit controller initialization required; we just set
+      // the boolean state and let the AnimatedSize/AnimatedSwitcher
+      // reflect the saved preferences in the UI.
     } catch (_) {}
   }
 
@@ -2339,12 +2213,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
       _showStations = expanded;
     });
     
-    // Animate expand/collapse
-    if (expanded) {
-      _stationExpandController.forward();
-    } else {
-      _stationExpandController.reverse();
-    }
+    // UI animation handled declaratively in build via AnimatedSize/AnimatedSwitcher.
     
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2357,12 +2226,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
       _showLines = expanded;
     });
     
-    // Animate expand/collapse
-    if (expanded) {
-      _lineExpandController.forward();
-    } else {
-      _lineExpandController.reverse();
-    }
+    // UI animation handled declaratively in build via AnimatedSize/AnimatedSwitcher.
     
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2372,10 +2236,44 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
 
   @override
   void dispose() {
-    _animController.dispose();
-    _lineExpandController.dispose();
-    _stationExpandController.dispose();
+    // No controller to dispose (appearance animation removed).
     super.dispose();
+  }
+
+  /// Build an accessible expandable area that respects reduced-motion
+  /// preferences. Caller should provide a keyed child for AnimatedSwitcher
+  /// (eg. ValueKey('lines') / ValueKey('stations')) when needed.
+  Widget _expandableContent({required bool expanded, required Widget child}) {
+  final mq = MediaQuery.maybeOf(context);
+  final reduceMotion = mq?.disableAnimations == true || mq?.accessibleNavigation == true;
+  final duration = reduceMotion ? const Duration(milliseconds: 1) : _kSelectorAnimDuration;
+
+    return AnimatedSize(
+      duration: duration,
+      curve: Curves.easeInOut,
+      alignment: Alignment.topCenter,
+      child: AnimatedSwitcher(
+        duration: duration,
+        switchInCurve: Curves.easeInOut,
+        switchOutCurve: Curves.easeInOut,
+        transitionBuilder: (w, animation) {
+          // subtle slide from above + fade; disabled when reduced-motion requested
+          if (reduceMotion) return FadeTransition(opacity: animation, child: w);
+          final offset = Tween<Offset>(
+            begin: const Offset(0, -0.03),
+            end: Offset.zero,
+          ).chain(CurveTween(curve: Curves.easeOut));
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: animation.drive(offset),
+              child: w,
+            ),
+          );
+        },
+        child: expanded ? child : const SizedBox.shrink(),
+      ),
+    );
   }
 
   @override
@@ -2385,7 +2283,9 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     final filteredStations = catalog.filteredStations;
     final colorScheme = Theme.of(context).colorScheme;
     
-    return Container(
+  // MediaQuery-based reduced-motion checks are handled inside _expandableContent
+
+    final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: UIConstants.cardPadding, vertical: 8),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest,
@@ -2410,11 +2310,10 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
             isExpanded: _showLines,
             showToggle: true,
             onToggle: () async => await _saveLineExpandPref(!_showLines),
-            content: SizeTransition(
-              sizeFactor: _lineExpandAnimation,
-              axisAlignment: -1.0,
-              child: FadeTransition(
-                opacity: _lineExpandAnimation,
+            content: _expandableContent(
+              expanded: _showLines,
+              child: KeyedSubtree(
+                key: const ValueKey('line-list'),
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -2429,7 +2328,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                       onTap: () {
                         HapticFeedback.selectionClick();
                         widget.onLineChanged(line);
-                        _animController.forward(from: 0);
+                        // Appearance animation removed; no controller to trigger.
                       },
                       leadingWidget: Container(
                         width: 3,
@@ -2471,6 +2370,9 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         ],
       ),
     );
+
+    // Always return content directly; appearance animation removed.
+    return content;
   }
   
   /// Build station selector
@@ -2482,11 +2384,10 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     required ColorScheme colorScheme,
   }) {
     // Build station list content
-    final stationListContent = SizeTransition(
-      sizeFactor: _stationExpandAnimation,
-      axisAlignment: -1.0,
-      child: FadeTransition(
-        opacity: _stationExpandAnimation,
+    final stationListContent = _expandableContent(
+      expanded: _showStations,
+      child: KeyedSubtree(
+        key: const ValueKey('station-list'),
         child: Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -2566,6 +2467,13 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           color: widget.selectedLine!.lineColor.withOpacity(UIConstants.cardBorderOpacity),
           width: UIConstants.cardBorderWidth,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.05),
+            blurRadius: UIConstants.cardElevation,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(
@@ -2639,6 +2547,9 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     
+    final mq = MediaQuery.maybeOf(context);
+    final reduceMotion = mq?.disableAnimations == true || mq?.accessibleNavigation == true;
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(UIConstants.chipRadius),
@@ -2646,7 +2557,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
       highlightColor: color.withOpacity(0.08),
       hoverColor: color.withOpacity(0.05),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
+        duration: _kSelectorAnimDuration,
         curve: Curves.easeInOut,
         // Use consistent chip padding for uniform appearance
         padding: const EdgeInsets.symmetric(
@@ -2657,29 +2568,41 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           color: isSelected ? color.withOpacity(0.2) : colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(UIConstants.chipRadius),
           border: Border.all(
-            color: isSelected 
+            color: isSelected
                 ? color.withOpacity(UIConstants.selectedChipBorderOpacity)
                 : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
             width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
           ),
           // Subtle shadow for selected state
-          boxShadow: isSelected ? [
-            BoxShadow(
-              color: color.withOpacity(0.15),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ] : null,
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: color.withOpacity(0.15),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
         ),
-        child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 200),
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 1.0, end: isSelected ? _kChipSelectedScale : 1.0),
+          duration: reduceMotion ? const Duration(milliseconds: 1) : _kChipScaleDuration,
           curve: Curves.easeInOut,
-          style: TextStyle(
-            fontSize: UIConstants.chipFontSize,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            color: isSelected ? color : colorScheme.onSurfaceVariant,
+          builder: (ctx, scale, child) => Transform.scale(
+            scale: scale,
+            alignment: Alignment.center,
+            child: child,
           ),
-          child: Text(label),
+          child: AnimatedDefaultTextStyle(
+            duration: reduceMotion ? const Duration(milliseconds: 1) : _kChipScaleDuration,
+            curve: Curves.easeInOut,
+            style: TextStyle(
+              fontSize: UIConstants.chipFontSize,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+              color: isSelected ? color : colorScheme.onSurfaceVariant,
+            ),
+            child: Text(label),
+          ),
         ),
       ),
     );
@@ -2764,16 +2687,20 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                   ],
                   if (showToggle) ...[
                     const SizedBox(width: 4),
-                    AnimatedRotation(
-                      turns: isExpanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      child: Icon(
-                        Icons.keyboard_arrow_down,
-                        size: UIConstants.iconSize,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                    Builder(builder: (ctx) {
+                      final mq = MediaQuery.maybeOf(ctx);
+                      final reduceMotion = mq?.disableAnimations == true || mq?.accessibleNavigation == true;
+                      return AnimatedRotation(
+                        turns: isExpanded ? 0.5 : 0,
+                        duration: reduceMotion ? const Duration(milliseconds: 1) : _kSelectorAnimDuration,
+                        curve: Curves.easeInOut,
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          size: UIConstants.iconSize,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      );
+                    }),
                   ],
                 ],
               ),
@@ -2786,16 +2713,18 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
               curve: Curves.easeInOut,
               alignment: Alignment.topCenter,
               child: content != null && isExpanded
-                  ? Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.fromLTRB(
-                        UIConstants.cardPadding,
-                        4,
-                        UIConstants.cardPadding,
-                        UIConstants.cardPadding,
-                      ),
-                      child: content,
-                    )
+                    ? Container(
+                        width: double.infinity,
+                        // Align chip content with the header text (icon + spacing)
+                        // and reduce right padding so chips sit closer to the card edge.
+                        padding: const EdgeInsets.fromLTRB(
+                          UIConstants.cardPadding + 30,
+                          4,
+                          8,
+                          UIConstants.cardPadding,
+                        ),
+                        child: content,
+                      )
                   : const SizedBox(width: double.infinity, height: 0),
             ),
           ),
@@ -2850,10 +2779,14 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     
-    // Calculate proper text color with good contrast against the chip background
-    final textColor = isSelected 
-        ? _getContrastTextColor(color.withOpacity(0.2), context)
-        : colorScheme.onSurface;
+  // Calculate proper text color with good contrast against the chip background
+  final textColor = isSelected
+    ? _getContrastTextColor(color.withOpacity(0.2), context)
+    : colorScheme.onSurface;
+
+  // Respect reduced-motion / accessible navigation settings
+  final mq = MediaQuery.maybeOf(context);
+  final reduceMotion = mq?.disableAnimations == true || mq?.accessibleNavigation == true;
     
     return Material(
       color: Colors.transparent,
@@ -2864,33 +2797,44 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         highlightColor: color.withOpacity(0.08),
         hoverColor: color.withOpacity(0.05),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
+          duration: _kSelectorAnimDuration,
           curve: Curves.easeInOut,
           padding: const EdgeInsets.symmetric(
-            horizontal: UIConstants.chipPaddingH, 
+            horizontal: UIConstants.chipPaddingH,
             vertical: UIConstants.chipPaddingV,
           ),
           decoration: BoxDecoration(
-            color: isSelected 
-                ? color.withOpacity(0.2) 
+            color: isSelected
+                ? color.withOpacity(0.2)
                 : colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(UIConstants.chipRadius),
             border: Border.all(
               color: isSelected
-                  ? color.withOpacity(UIConstants.selectedChipBorderOpacity) 
+                  ? color.withOpacity(UIConstants.selectedChipBorderOpacity)
                   : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
               width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
             ),
             // Subtle shadow for selected chips
-            boxShadow: isSelected ? [
-              BoxShadow(
-                color: color.withOpacity(0.15),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ] : null,
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: color.withOpacity(0.15),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
-          child: Row(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 1.0, end: isSelected ? _kChipSelectedScale : 1.0),
+            duration: reduceMotion ? const Duration(milliseconds: 1) : _kChipScaleDuration,
+            curve: Curves.easeInOut,
+            builder: (ctx, scale, child) => Transform.scale(
+              scale: scale,
+              alignment: Alignment.center,
+              child: child,
+            ),
+            child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (leadingWidget != null) ...[
@@ -2899,7 +2843,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
               ],
               // Animated check icon (fade only, no scale)
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
+                duration: reduceMotion ? const Duration(milliseconds: 1) : _kChipScaleDuration,
                 transitionBuilder: (child, animation) {
                   return FadeTransition(
                     opacity: animation,
@@ -2925,7 +2869,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                   children: [
                     // Animated text properties
                     AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 200),
+                      duration: reduceMotion ? const Duration(milliseconds: 1) : _kChipScaleDuration,
                       curve: Curves.easeInOut,
                       style: TextStyle(
                         fontSize: UIConstants.chipFontSize,
@@ -2952,11 +2896,14 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                 trailing,
               ],
             ],
-          ),
-        ),
-      ),
-    );
-  }  Widget _buildInterchangeIndicator(BuildContext context, MtrStation station) {
+          ), // Row
+        ), // AnimatedContainer
+      ), // TweenAnimationBuilder
+    ), // InkWell
+  ); // Material
+  }
+
+  Widget _buildInterchangeIndicator(BuildContext context, MtrStation station) {
     if (!station.isInterchange || station.interchangeLines.isEmpty) {
       // Return empty SizedBox to maintain layout without visual element
       return const SizedBox.shrink();
@@ -3300,62 +3247,62 @@ class _MtrScheduleBody extends StatelessWidget {
           return AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutCubic,
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            margin: const EdgeInsets.symmetric(horizontal: UIConstants.cardPadding, vertical: 4),
             decoration: BoxDecoration(
-              // Liquid glass effect with gradient and blur
+              // Liquid glass effect with slightly stronger background contrast
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Theme.of(context).colorScheme.surface.withOpacity(0.9),
-                  Theme.of(context).colorScheme.surface.withOpacity(0.7),
+                  Theme.of(context).colorScheme.surface.withOpacity(0.96),
+                  Theme.of(context).colorScheme.surface.withOpacity(0.82),
                 ],
               ),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(UIConstants.cardRadius),
               border: Border.all(
                 color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
                 width: 0.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
                   spreadRadius: 0,
                 ),
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.shadow.withOpacity(0.02),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
+                  color: Theme.of(context).colorScheme.shadow.withOpacity(0.035),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
                 ),
               ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(UIConstants.cardRadius),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
+                    child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Theme.of(context).colorScheme.surface.withOpacity(0.3),
-                        Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.2),
+                        Theme.of(context).colorScheme.surface.withOpacity(0.45),
+                        Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.32),
                       ],
                     ),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(UIConstants.cardPadding),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // Direction header with improved layout
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: UIConstants.chipPaddingH, vertical: UIConstants.chipPaddingV),
                           decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(UIConstants.chipRadius),
                             border: Border.all(
                               color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
                               width: 0.5,
@@ -3371,7 +3318,7 @@ class _MtrScheduleBody extends StatelessWidget {
                                 ),
                                 child: Icon(
                                   Icons.train,
-                                  size: 16,
+                                  size: UIConstants.checkIconSize,
                                   color: Theme.of(context).colorScheme.primary,
                                 ),
                               ),
@@ -3384,8 +3331,9 @@ class _MtrScheduleBody extends StatelessWidget {
                                       '${directionLabel(directionKey)} ${lang.isEnglish ? 'departures' : '開出'}',
                                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                         fontWeight: FontWeight.w700,
-                                        fontSize: 13,
+                                        fontSize: UIConstants.cardTitleFontSize - 3,
                                         letterSpacing: 0.2,
+                                        color: AppColors.getPrimaryTextColor(context),
                                       ),
                                     ),
                                     if (terminusLabel != null) ...[
@@ -3393,8 +3341,8 @@ class _MtrScheduleBody extends StatelessWidget {
                                       Text(
                                         '${lang.isEnglish ? 'To' : '往'} $terminusLabel',
                                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          fontSize: 10,
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.8),
+                                          fontSize: UIConstants.chipSubtitleFontSize + 1,
+                                          color: AppColors.getSecondaryTextColor(context),
                                         ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
@@ -3415,7 +3363,7 @@ class _MtrScheduleBody extends StatelessWidget {
                               child: Text(
                                 lang.isEnglish ? 'No trains scheduled' : '暫無班次',
                                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6),
+                                  color: AppColors.getSecondaryTextColor(context).withOpacity(0.9),
                                 ),
                               ),
                             ),

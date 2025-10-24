@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'kmb.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'settings_page.dart';
+import 'widgets/saved_files_list.dart';
 import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class KmbRouteStatusPage extends StatefulWidget {
   final String route;
@@ -31,12 +35,24 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     _fetch();
   }
 
+
+  bool _combinedLoading = false;
+  String? _combinedError;
+  Map<String, dynamic>? _combinedData;
+
   Future<void> _fetch() async {
     setState(() {
       loading = true;
       error = null;
     });
     try {
+      // Try to load prebuilt assets first (fast startup)
+      final rnorm = widget.route.trim().toUpperCase();
+      final prebuiltLoaded = await _attemptLoadPrebuilt(rnorm);
+      if (prebuiltLoaded) {
+        setState(() { loading = false; });
+        return;
+      }
   final useRouteApi = await Kmb.getUseRouteApiSetting();
       final r = widget.route.trim().toUpperCase();
       final base = RegExp(r'^(\\d+)').firstMatch(r)?.group(1) ?? r;
@@ -77,6 +93,126 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
   }
 
+  /// Try to read prebuilt JSON assets and populate `data` if the route is present.
+  /// Returns true when prebuilt data was found and applied.
+  Future<bool> _attemptLoadPrebuilt(String route) async {
+    try {
+      String? raw;
+      // Try app documents prebuilt first (written by Regenerate prebuilt data)
+      try {
+        final doc = await getApplicationDocumentsDirectory();
+        final f = File('${doc.path}/prebuilt/kmb_route_stops.json');
+        if (f.existsSync()) raw = await f.readAsString();
+      } catch (_) {}
+
+      // Fallback to bundled asset
+      if (raw == null) {
+        try {
+          raw = await rootBundle.loadString('assets/prebuilt/kmb_route_stops.json');
+        } catch (_) {
+          raw = null;
+        }
+      }
+      if (raw == null || raw.isEmpty) return false;
+      final decoded = json.decode(raw) as Map<String, dynamic>;
+      // Keys are route strings; try exact or base match
+      final r = route.toUpperCase();
+      if (decoded.containsKey(r)) {
+        final entries = List<Map<String, dynamic>>.from((decoded[r] as List).map((e) => Map<String, dynamic>.from(e)));
+        // enrich with stop metadata if available
+        try {
+          final stopMap = await Kmb.buildStopMap();
+          final enriched = entries.map((e) {
+            final sid = e['stop']?.toString() ?? '';
+            return {
+              ...e,
+              'stopInfo': stopMap[sid],
+            };
+          }).toList();
+          setState(() {
+            data = {
+              'type': 'RouteStopList',
+              'version': 'prebuilt-asset',
+              'generatedtimestamp': DateTime.now().toIso8601String(),
+              'data': enriched,
+            };
+            // also set combined data so combined card shows stopInfo and empty etas
+            _combinedData = {
+              'type': 'CombinedRouteStatus',
+              'route': r,
+              'serviceType': null,
+              'generatedtimestamp': DateTime.now().toIso8601String(),
+              'data': {
+                'stops': enriched,
+                'routeEta': [],
+              }
+            };
+          });
+        } catch (_) {
+          setState(() {
+            data = {
+              'type': 'RouteStopList',
+              'version': 'prebuilt-asset',
+              'generatedtimestamp': DateTime.now().toIso8601String(),
+              'data': entries,
+            };
+          });
+        }
+        // populate variants from cache by ensuring route->stops map is built
+        try { await Kmb.buildRouteToStopsMap(); } catch (_) {}
+        _loadVariantsFromCache(r);
+        return true;
+      }
+
+      // Try base numeric key
+      final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1);
+      if (base != null && decoded.containsKey(base)) {
+        final entries = List<Map<String, dynamic>>.from((decoded[base] as List).map((e) => Map<String, dynamic>.from(e)));
+        try {
+          final stopMap = await Kmb.buildStopMap();
+          final enriched = entries.map((e) {
+            final sid = e['stop']?.toString() ?? '';
+            return {
+              ...e,
+              'stopInfo': stopMap[sid],
+            };
+          }).toList();
+          setState(() {
+            data = {
+              'type': 'RouteStopList',
+              'version': 'prebuilt-asset',
+              'generatedtimestamp': DateTime.now().toIso8601String(),
+              'data': enriched,
+            };
+            _combinedData = {
+              'type': 'CombinedRouteStatus',
+              'route': r,
+              'serviceType': null,
+              'generatedtimestamp': DateTime.now().toIso8601String(),
+              'data': {
+                'stops': enriched,
+                'routeEta': [],
+              }
+            };
+          });
+        } catch (_) {
+          setState(() {
+            data = {
+              'type': 'RouteStopList',
+              'version': 'prebuilt-asset',
+              'generatedtimestamp': DateTime.now().toIso8601String(),
+              'data': entries,
+            };
+          });
+        }
+        try { await Kmb.buildRouteToStopsMap(); } catch (_) {}
+        _loadVariantsFromCache(r);
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -88,6 +224,53 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             onPressed: _fetch,
           ),
           IconButton(
+            icon: Icon(Icons.cloud_download),
+            tooltip: 'Fetch combined status (route + stops + ETA)',
+            onPressed: _fetchCombined,
+          ),
+          IconButton(
+            icon: Icon(Icons.save_alt),
+            tooltip: 'Save current response to file',
+            onPressed: () async {
+              // Prepare filename and payload similarly to helper
+              final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-');
+              final rawFilename = 'kmb_route_${widget.route}_$timestamp';
+              dynamic toSave = _combinedData ?? data;
+              if (toSave == null) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nothing to save')));
+                return;
+              }
+              if (toSave is Map == false) {
+                try {
+                  toSave = json.decode(json.encode(toSave));
+                } catch (e) {
+                  toSave = {'value': toSave.toString()};
+                }
+              }
+              final res = await Kmb.saveRequestJsonToFile(rawFilename, toSave);
+              if (res.ok) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to ${res.path}')));
+              } else {
+                final msg = res.error ?? 'Unknown error while saving';
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save: $msg')));
+              }
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.folder_open),
+            tooltip: 'Open saved responses',
+            onPressed: () async {
+              final restored = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SavedFilesPage()));
+              if (restored != null) {
+                // restored contains the JSON data returned from preview->Restore
+                setState(() {
+                  data = Map<String, dynamic>.from(restored as Map);
+                });
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Restored saved snapshot')));
+              }
+            },
+          ),
+          IconButton(
             icon: Icon(Icons.settings),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage())),
           ),
@@ -96,12 +279,18 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       body: Padding(
         padding: const EdgeInsets.all(12.0),
         child: loading
-            ? Center(child: CircularProgressIndicator())
-            : error != null
-                ? Center(child: Text('Error: $error', style: TextStyle(color: Colors.red)))
-                : data == null
-                    ? Center(child: Text('No data'))
-                    : _buildStructuredView(),
+            ? const Center(child: CircularProgressIndicator())
+            : (error != null
+                ? Center(child: Text('Error: $error', style: const TextStyle(color: Colors.red)))
+                : (data == null
+                    ? const Center(child: Text('No data'))
+                    : Column(
+                        children: [
+                          if (_combinedLoading) const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator())),
+                          if (_combinedError != null) Padding(padding: const EdgeInsets.all(8.0), child: Text('Combined error: $_combinedError', style: const TextStyle(color: Colors.red))),
+                          Expanded(child: _buildStructuredView()),
+                        ],
+                      ))),
       ),
     );
   }
@@ -144,6 +333,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       // If none of the above matched, fall back to raw list view
       if (!first.containsKey('route') && !first.containsKey('seq') && !first.containsKey('eta')) {
         sections.add(_buildRawJsonCard());
+      }
+
+      // If we have combined data, show it prominently
+      if (_combinedData != null) {
+        sections.insert(0, _buildCombinedCard(_combinedData!));
       }
     } else if (payload is Map<String, dynamic>) {
       // Single-object payload: show its fields
@@ -244,6 +438,56 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }).toList();
 
     return Card(child: Column(children: widgets));
+  }
+
+  Future<void> _fetchCombined() async {
+    setState(() {
+      _combinedLoading = true;
+      _combinedError = null;
+      _combinedData = null;
+    });
+    try {
+      final combined = await Kmb.fetchCombinedRouteStatus(widget.route);
+      setState(() { _combinedData = combined; });
+    } catch (e) {
+      setState(() { _combinedError = e.toString(); });
+    } finally {
+      setState(() { _combinedLoading = false; });
+    }
+  }
+
+  Widget _buildCombinedCard(Map<String, dynamic> combined) {
+    final meta = combined['data'] ?? {};
+  final List stops = meta['stops'] ?? [];
+
+    if (stops.isEmpty) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('No combined stops')));
+
+    final combinedRouteEta = meta['routeEta'] ?? [];
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(title: Text('Combined status for ${combined['route']} · svc: ${combined['serviceType'] ?? 'n/a'} · ETAs: ${combinedRouteEta.length}')),
+          ...stops.map((s) {
+            final stopId = s['stop'] ?? '';
+            final stopInfo = s['stopInfo'] as Map<String, dynamic>?;
+            final etas = (s['etas'] as List?) ?? [];
+            final stopName = stopInfo != null ? (stopInfo['nameen'] ?? stopInfo['nametc'] ?? stopId) : stopId;
+            return ListTile(
+              title: Text('$stopId · $stopName'),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (etas.isEmpty) Text('No ETAs'),
+                  for (final e in etas)
+                    Text('${e['etaseq'] ?? ''} · ${e['eta'] ?? ''} · ${e['desten'] ?? e['desttc'] ?? ''}'),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
   }
 
   void _loadVariantsFromCache(String r) async {

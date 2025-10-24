@@ -20,6 +20,8 @@ dependencies:
   connectivity_plus: ^7.0.0
   shared_preferences: ^2.5.3
   liquid_glass_renderer: ^0.1.1-dev.10
+  path_provider: ^2.0.14
+  permission_handler: ^10.4.0
   auto_size_text: ^3.0.0 # Or the latest version
   flutter_svg: ^2.0.10
 
@@ -36,6 +38,8 @@ flutter:
     - assets/icon/tram_icon.svg
     - assets/icon/tram_icon.png
     - assets/icon/tram_icon_android.svg
+    - assets/prebuilt/kmb_route_stops.json
+    - assets/prebuilt/kmb_stops.json
 
 # 圖示配置 - 平台優化配置，遵循各平台設計指南
 flutter_launcher_icons:

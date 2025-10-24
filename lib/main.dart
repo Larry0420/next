@@ -73,27 +73,30 @@ String _getStationGroupEn(int stationId) {
 /// 統一的顏色方案類別 - 確保整個應用程式的顏色一致性與 WCAG 2.1 標準
 class AppColors {
   // 透明度常數 - WCAG AA/AAA 級對比度優化值
-  static const double _primaryOpacity = 0.75;        // 主要文字 - 提升至 0.75 (AA+ 級)
-  static const double _secondaryOpacity = 0.65;      // 次要文字 - 優化至 0.65 (AA 級)
-  static const double _hintOpacity = 0.55;           // 提示文字 - 提升至 0.55 增強可讀性
-  static const double _disabledOpacity = 0.40;       // 禁用文字 - 保持適中可辨識度
-  static const double _subtleOpacity = 0.45;         // 微妙文字 - 提升至 0.45 改善對比
-  static const double _verySubtleOpacity = 0.25;     // 非常微妙 - 優化至 0.25 保持層次
+  // Increased slightly for clearer schedule UI and better legibility
+  static const double _primaryOpacity = 0.87;        // primary text (stronger)
+  static const double _secondaryOpacity = 0.75;      // secondary text
+  static const double _hintOpacity = 0.65;           // hint text
+  static const double _disabledOpacity = 0.45;       // disabled text
+  static const double _subtleOpacity = 0.50;         // subtle text
+  static const double _verySubtleOpacity = 0.28;     // very subtle
   
   // 邊框和陰影透明度 - 細膩層次優化
-  static const double _borderSubtleOpacity = 0.08;   // 微妙邊框 - 提升可見度
-  static const double _borderLightOpacity = 0.12;    // 輕微邊框 - 增強分界線
-  static const double _borderMediumOpacity = 0.18;   // 中等邊框 - 清晰結構
-  static const double _borderStrongOpacity = 0.25;   // 強烈邊框 - 明確邊界
-  static const double _borderVeryStrongOpacity = 0.35; // 超強邊框 - 重點突出
+  // Slightly stronger borders for clearer separation
+  static const double _borderSubtleOpacity = 0.12;
+  static const double _borderLightOpacity = 0.16;
+  static const double _borderMediumOpacity = 0.22;
+  static const double _borderStrongOpacity = 0.30;
+  static const double _borderVeryStrongOpacity = 0.40;
   
   // 陰影透明度 - 深度感優化
-  static const double _shadowLightOpacity = 0.12;    // 輕微陰影 - 增強深度
-  static const double _shadowMediumOpacity = 0.18;   // 中等陰影 - 清晰層次
+  // Increase shadow opacity slightly for better separation from backgrounds
+  static const double _shadowLightOpacity = 0.16;
+  static const double _shadowMediumOpacity = 0.24;
   
   // 容器透明度 - 視覺層次優化
-  static const double _containerLightOpacity = 0.15;  // 輕微容器 - 柔和背景
-  static const double _containerMediumOpacity = 0.25; // 中等容器 - 明確區域
+  static const double _containerLightOpacity = 0.20;
+  static const double _containerMediumOpacity = 0.32;
   
   // 主要文字顏色
   static Color getPrimaryTextColor(BuildContext context) {
@@ -360,6 +363,88 @@ class AnimationUtils {
           duration: MotionConstants.listItemAnimation,
           child: child,
         ),
+      ),
+    );
+  }
+}
+
+/// Merged LightRail page that exposes two tabs: Schedule and Routes
+class _LightRailPage extends StatefulWidget {
+  final StationProvider stationProvider;
+  final ScheduleProvider scheduleProvider;
+  final ValueNotifier<int> tabIndexNotifier;
+
+  const _LightRailPage({
+    super.key,
+    required this.stationProvider,
+    required this.scheduleProvider,
+    required this.tabIndexNotifier,
+  });
+
+  @override
+  State<_LightRailPage> createState() => _LightRailPageState();
+}
+
+class _LightRailPageState extends State<_LightRailPage> with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this, initialIndex: widget.tabIndexNotifier.value);
+    // Sync notifier -> controller
+    widget.tabIndexNotifier.addListener(_onNotifierChanged);
+    // Sync controller -> notifier
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        widget.tabIndexNotifier.value = _tabController.index;
+      }
+    });
+  }
+
+  void _onNotifierChanged() {
+    final idx = widget.tabIndexNotifier.value;
+    if (mounted && _tabController.index != idx) {
+      _tabController.animateTo(idx);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.tabIndexNotifier.removeListener(_onNotifierChanged);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lang = context.watch<LanguageProvider>();
+    return DefaultTabController(
+      length: 2,
+      initialIndex: _tabController.index,
+      child: Column(
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: TabBar(
+              controller: _tabController,
+              tabs: [
+                Tab(icon: const Icon(Icons.schedule), text: lang.schedule),
+                Tab(icon: const Icon(Icons.route), text: lang.routes),
+              ],
+              indicatorColor: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _SchedulePage(stationProvider: widget.stationProvider, scheduleProvider: widget.scheduleProvider),
+                const _RoutesPage(),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -957,15 +1042,15 @@ class UIConstants {
     return TextStyle(
       fontSize: fontSizeL * accessibility.textScale,
       fontWeight: FontWeight.w600,
-      color: Theme.of(context).brightness == Brightness.dark 
-          ? Colors.white.withOpacity(0.87)
-          : null,
+      // Use the app-level primary text color for slightly stronger contrast
+      color: AppColors.getPrimaryTextColor(context),
     );
   }
   
   static TextStyle scheduleSubtitleStyle(BuildContext context, AccessibilityProvider accessibility) {
     return TextStyle(
       fontSize: fontSizeM * accessibility.textScale,
+      // Slightly increased contrast for subtitle
       color: AppColors.getPrimaryTextColor(context),
     );
   }
@@ -973,16 +1058,16 @@ class UIConstants {
   static TextStyle scheduleBodyStyle(BuildContext context, AccessibilityProvider accessibility) {
     return TextStyle(
       fontSize: fontSizeM * accessibility.textScale,
-      color: Theme.of(context).brightness == Brightness.dark 
-          ? Colors.white.withOpacity(0.70)
-          : null,
+      // Use secondary text color to keep hierarchy but with slightly improved contrast
+      color: AppColors.getSecondaryTextColor(context),
     );
   }
   
   static TextStyle scheduleCaptionStyle(BuildContext context, AccessibilityProvider accessibility) {
     return TextStyle(
       fontSize: fontSizeS * accessibility.textScale,
-      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+      // Slightly stronger caption contrast
+      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
     );
   }
   
@@ -998,17 +1083,13 @@ class UIConstants {
     return TextStyle(
       fontSize: fontSizeXXL * accessibility.textScale,
       fontWeight: FontWeight.w600,
-      color: Theme.of(context).brightness == Brightness.dark 
-          ? Colors.white.withOpacity(0.87)
-          : null,
+      color: AppColors.getPrimaryTextColor(context),
     );
   }
   
   static TextStyle scheduleStationNameStyle(BuildContext context, AccessibilityProvider accessibility) {
     return Theme.of(context).textTheme.titleMedium?.copyWith(
-      color: Theme.of(context).brightness == Brightness.dark 
-          ? Colors.white.withOpacity(0.87)
-          : null,
+      color: AppColors.getPrimaryTextColor(context),
       fontWeight: FontWeight.w600,
       fontSize: fontSizeL * accessibility.textScale,
     ) ?? TextStyle(
@@ -1021,9 +1102,7 @@ class UIConstants {
     return TextStyle(
       fontWeight: FontWeight.w500,
       fontSize: fontSizeL * accessibility.textScale,
-      color: Theme.of(context).brightness == Brightness.dark 
-          ? Colors.white.withOpacity(0.87)
-          : null,
+      color: AppColors.getPrimaryTextColor(context),
     );
   }
   
@@ -2005,6 +2084,7 @@ class LanguageProvider extends ChangeNotifier {
   // Labels
   String get appTitle => _isEnglish ? 'LRT Next Train' : '輕鐵班次';
   String get schedule => _isEnglish ? 'Schedule' : '班次表';
+  String get lrt => _isEnglish ? 'Light Rail' : '輕鐵';
   String get mtr => _isEnglish ? 'MTR' : '港鐵';
   String get routes => _isEnglish ? 'Routes' : '路綫';
   String get settings => _isEnglish ? 'Settings' : '設定';
@@ -3154,6 +3234,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
   int _pageIndex = 0;
   bool _reverse = false;
   bool? _prevShowKmbInNav;
+  // Tab index notifier for merged LightRail page (0 = Schedule, 1 = Routes)
+  late final ValueNotifier<int> _lightRailTabIndex;
   // Animation controller for live refresh indicator
   late final AnimationController _refreshAnimController;
   late final Animation<double> _rotationAnim;
@@ -3168,13 +3250,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _lightRailTabIndex = ValueNotifier<int>(0);
     // Initialize refresh animation controller
     _refreshAnimController = AnimationController(
       vsync: this,
       // slower base rotation to reduce visual busyness
       duration: const Duration(milliseconds: 1200),
     );
-  _rotationAnim = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _refreshAnimController, curve: Curves.linear));
+  // Use a smoother easeInOut curve for rotation to reduce abruptness and make
+  // the auto-refresh indicator feel less busy. Keep the tween from 0 to 1 so
+  // RotationTransition can use it directly.
+  _rotationAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+    CurvedAnimation(
+      parent: _refreshAnimController,
+      curve: Curves.easeInOut,
+    ),
+  );
   // Neutral, low-amplitude pulse: subtle scaling from 0.97 to 1.03 using a smooth sine-like curve
   _pulseAnim = Tween<double>(begin: 0.97, end: 1.03).animate(CurvedAnimation(parent: _refreshAnimController, curve: Curves.easeInOutSine));
   // Subtle opacity animation for dot appearing/disappearing during transitions
@@ -3315,6 +3406,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _lightRailTabIndex.dispose();
     super.dispose();
   }
 
@@ -3351,7 +3443,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
 
   final devSettings = context.watch<DeveloperSettingsProvider>();
     // Detect change in KMB visibility to adjust _pageIndex predictably
-    const int kmbIndex = 3; // desired insertion index: after MTR and before Settings
+  const int kmbIndex = 2; // desired insertion index: after merged LightRail and before Settings
     if (_prevShowKmbInNav != null && _prevShowKmbInNav != devSettings.showKmbInNav) {
       // KMB was visible and now hidden (5->4)
       if (_prevShowKmbInNav == true && devSettings.showKmbInNav == false) {
@@ -3375,10 +3467,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
       _prevShowKmbInNav = devSettings.showKmbInNav;
     }
 
-    // Build base pages: Schedule, Routes, MTR
+    // Build base pages: merged LightRail (Schedule+Routes), MTR
     final List<Widget> pages = [
-      _SchedulePage(stationProvider: station, scheduleProvider: sched, key: const ValueKey('schedule')),
-      const _RoutesPage(key: ValueKey('routes')),
+      _LightRailPage(
+        stationProvider: station,
+        scheduleProvider: sched,
+        tabIndexNotifier: _lightRailTabIndex,
+        key: const ValueKey('lightrail'),
+      ),
       const MtrSchedulePage(key: ValueKey('mtr')),
     ];
 
@@ -3405,6 +3501,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
     }
 
     return Scaffold(
+      extendBody: true,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: AnnotatedRegion<SystemUiOverlayStyle>(
@@ -3700,47 +3797,173 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
           ),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _pageIndex,
-        onDestinationSelected: _goTo,
-        destinations: [
-          // Schedule
-          Consumer<AccessibilityProvider>(
-            builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.schedule, size: 24 * accessibility.iconScale),
-              label: lang.schedule,
-            ),
-          ),
-          // Routes
-          Consumer<AccessibilityProvider>(
-            builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.route, size: 24 * accessibility.iconScale),
-              label: lang.routes,
-            ),
-          ),
-          // MTR
-          Consumer<AccessibilityProvider>(
-            builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.train, size: 24 * accessibility.iconScale),
-              label: lang.mtr,
-            ),
-          ),
-          // Conditionally insert KMB here (before Settings)
-          if (devSettings.showKmbInNav)
-            Consumer<AccessibilityProvider>(
-              builder: (context, accessibility, _) => NavigationDestination(
-                icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
-                label: 'KMB',
+      // Liquid-glass floating navigation bar
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
+        child: Builder(builder: (context) {
+          final colorScheme = Theme.of(context).colorScheme;
+          // Use a surface-dominant, light frosted appearance (light-first design)
+          final surface = Theme.of(context).colorScheme.surface;
+          // Platform-agnostic sizing for floating navbar
+          final double navCornerRadius = 14.0;
+          final double navHorizontalPadding = 10.0;
+          final double navVerticalPadding = 6.0;
+          final double navHeight = 60.0;
+          // Keep the surface mostly visible; small translucency to show blur
+          // containerColor is not needed directly; gradient uses surface opacities
+
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: navHorizontalPadding, vertical: navVerticalPadding),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(navCornerRadius),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    // light-dominant sheen using surface tints
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        surface.withOpacity(0.98),
+                        surface.withOpacity(0.86),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(navCornerRadius),
+                    border: Border.all(
+                      color: colorScheme.onSurface.withOpacity(0.06),
+                      width: 1.0,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Theme.of(context).colorScheme.shadow.withOpacity(0.08),
+                        blurRadius: 8.0,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  // Keep a consistent layout: sub-navbar above main NavigationBar
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Sub-navbar: compact quick-switch for Schedule and Routes
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: ValueListenableBuilder<int>(
+                                valueListenable: _lightRailTabIndex,
+                                builder: (context, tabIndex, _) {
+                                  return Consumer<AccessibilityProvider>(
+                                    builder: (context, accessibility, _) {
+                                      final selected = _pageIndex == 0 && tabIndex == 0;
+                                      final fg = selected
+                                          ? AppColors.getPrimaryColor(context)
+                                          : Theme.of(context).colorScheme.onSurface;
+                                      return TextButton(
+                                        style: TextButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(vertical: 10.0),
+                                          backgroundColor: selected
+                                              ? Theme.of(context).colorScheme.primary.withOpacity(0.10)
+                                              : Colors.transparent,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+                                          foregroundColor: fg,
+                                        ),
+                                        onPressed: () { _lightRailTabIndex.value = 0; _goTo(0); },
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.schedule, size: 18 * accessibility.iconScale, color: fg),
+                                            const SizedBox(width: 8),
+                                            Text(lang.schedule, style: TextStyle(fontSize: 14, color: fg)),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ValueListenableBuilder<int>(
+                                valueListenable: _lightRailTabIndex,
+                                builder: (context, tabIndex, _) {
+                                  return Consumer<AccessibilityProvider>(
+                                    builder: (context, accessibility, _) {
+                                      final selected = _pageIndex == 0 && tabIndex == 1;
+                                      final fg = selected
+                                          ? AppColors.getPrimaryColor(context)
+                                          : Theme.of(context).colorScheme.onSurface;
+                                      return TextButton(
+                                        style: TextButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(vertical: 10.0),
+                                          backgroundColor: selected
+                                              ? Theme.of(context).colorScheme.primary.withOpacity(0.10)
+                                              : Colors.transparent,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+                                          foregroundColor: fg,
+                                        ),
+                                        onPressed: () { _lightRailTabIndex.value = 1; _goTo(0); },
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.route, size: 18 * accessibility.iconScale, color: fg),
+                                            const SizedBox(width: 8),
+                                            Text(lang.routes, style: TextStyle(fontSize: 14, color: fg)),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Main navigation bar (merged LightRail item)
+                      NavigationBar(
+                        backgroundColor: Colors.transparent,
+                        height: navHeight,
+                        selectedIndex: _pageIndex,
+                        onDestinationSelected: _goTo,
+                        destinations: [
+                          Consumer<AccessibilityProvider>(
+                            builder: (context, accessibility, _) => NavigationDestination(
+                              icon: Icon(Icons.directions_railway, size: 24 * accessibility.iconScale),
+                              label: lang.lrt,
+                            ),
+                          ),
+                          Consumer<AccessibilityProvider>(
+                            builder: (context, accessibility, _) => NavigationDestination(
+                              icon: Icon(Icons.train, size: 24 * accessibility.iconScale),
+                              label: lang.mtr,
+                            ),
+                          ),
+                          if (devSettings.showKmbInNav)
+                            Consumer<AccessibilityProvider>(
+                              builder: (context, accessibility, _) => NavigationDestination(
+                                icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
+                                label: 'KMB',
+                              ),
+                            ),
+                          Consumer<AccessibilityProvider>(
+                            builder: (context, accessibility, _) => NavigationDestination(
+                              icon: Icon(Icons.settings, size: 24 * accessibility.iconScale),
+                              label: lang.settings,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          // Settings
-          Consumer<AccessibilityProvider>(
-            builder: (context, accessibility, _) => NavigationDestination(
-              icon: Icon(Icons.settings, size: 24 * accessibility.iconScale),
-              label: lang.settings,
-            ),
-          ),
-        ],
+          );
+        }),
       ),
     );
   }
