@@ -3132,7 +3132,7 @@ class _MtrScheduleBody extends StatelessWidget {
     if (loading) {
       content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.only(bottom: 80 + MediaQuery.of(context).padding.bottom),
+        padding: const EdgeInsets.all(8),
         children: [
           const SizedBox(height: 20),
           // Modern shimmer loading cards
@@ -3142,7 +3142,7 @@ class _MtrScheduleBody extends StatelessWidget {
     } else if (error != null) {
       content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.only(top: 8, bottom: 80 + MediaQuery.of(context).padding.bottom),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
         children: [
           Icon(Icons.error_outline, size: 64, color: Theme.of(context).colorScheme.error),
           const SizedBox(height: 16),
@@ -3161,7 +3161,6 @@ class _MtrScheduleBody extends StatelessWidget {
     } else if (data == null) {
       content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.only(top: 8, bottom: 80 + MediaQuery.of(context).padding.bottom),
         children: [
           const SizedBox(height: 160),
           Center(child: Text(lang.isEnglish ? 'Select a line and station' : '選擇綫路及車站')),
@@ -3170,7 +3169,6 @@ class _MtrScheduleBody extends StatelessWidget {
     } else if (data!.directionTrains.isEmpty) {
       content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.only(top: 8, bottom: 80 + MediaQuery.of(context).padding.bottom),
         children: [
           const SizedBox(height: 160),
           Center(child: Text(lang.isEnglish ? 'No schedule data available' : '沒有班次資料')),
@@ -3205,7 +3203,7 @@ class _MtrScheduleBody extends StatelessWidget {
         );
       } else {
         content = ListView.builder(
-        padding: EdgeInsets.only(top: 8, bottom: 80 + MediaQuery.of(context).padding.bottom),
+        padding: const EdgeInsets.all(8),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: directionEntries.length,
         itemBuilder: (context, index) {
