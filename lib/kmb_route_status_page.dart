@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'kmb.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'settings_page.dart';
+import 'package:provider/provider.dart';
+import 'main.dart' show LanguageProvider;
 import 'widgets/saved_files_list.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -39,6 +41,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   bool _combinedLoading = false;
   String? _combinedError;
   Map<String, dynamic>? _combinedData;
+  
 
   Future<void> _fetch() async {
     setState(() {
@@ -323,6 +326,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       // Route-stop list (contains seq and stop)
       if (first.containsKey('seq') && first.containsKey('stop')) {
         sections.add(_buildStopsList(payload.cast<Map<String, dynamic>>()));
+        sections.add(_buildOptimizedStationList());
       }
 
       // ETA entries (contains etaseq or eta)
@@ -629,6 +633,77 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           );
         }).toList(),
       ),
+    );
+  }
+
+  Widget _buildOptimizedStationList() {
+    // Use the cached/compute helpers in Kmb to get both route->stops and stop metadata maps.
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
+        if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Colors.red))));
+
+        final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
+        final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
+
+        final r = widget.route.trim().toUpperCase();
+        final base = RegExp(r'^(\\d+)').firstMatch(r)?.group(1) ?? r;
+        final entries = routeMap[r] ?? routeMap[base] ?? [];
+        if (entries.isEmpty) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('No station data for route')));
+
+        // Language preference
+        final lang = context.watch<LanguageProvider>();
+        final isEnglish = lang.isEnglish;
+
+        // Filter by bound O/I (keep all if not present) and sort by seq
+        final stops = List<Map<String, dynamic>>.from(entries.where((e) => e.containsKey('seq')));
+        stops.sort((a, b) {
+          final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
+          final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
+          return ai.compareTo(bi);
+        });
+
+        return Card(
+          child: ExpansionTile(
+            title: Text('User-Friendly Station List (${stops.length})'),
+            children: stops.map((s) {
+              final seq = s['seq']?.toString() ?? '';
+              final stopId = s['stop']?.toString() ?? '';
+              final bound = s['bound'] ?? '';
+
+              // prefer stop metadata from stopMap
+              final meta = stopMap[stopId];
+              final nameEn = meta != null ? (meta['name_en'] ?? meta['nameen'] ?? meta['nameen_us'] ?? '')?.toString() ?? '' : (s['nameen']?.toString() ?? '');
+              final nameTc = meta != null ? (meta['name_tc'] ?? meta['nametc'] ?? meta['name_tc_tw'] ?? '')?.toString() ?? '' : (s['nametc']?.toString() ?? '');
+              final displayName = isEnglish
+                  ? (nameEn.isNotEmpty ? nameEn : (nameTc.isNotEmpty ? nameTc : stopId))
+                  : (nameTc.isNotEmpty ? nameTc : (nameEn.isNotEmpty ? nameEn : stopId));
+
+              return ExpansionTile(
+                title: Text('$seq · $displayName ${bound != '' ? '· $bound' : ''}'),
+                children: [
+                  ListTile(
+                    title: Text('Stop details'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if ((meta?['lat'] ?? s['lat']) != null) Text('Lat: ${meta?['lat'] ?? s['lat']}'),
+                        if ((meta?['long'] ?? meta?['lng'] ?? s['long'] ?? s['lng']) != null) Text('Lng: ${meta?['long'] ?? meta?['lng'] ?? s['long'] ?? s['lng']}'),
+                        Text('ID: $stopId'),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: StopEtaTile(stopId: stopId),
+                        ),
+                      ],
+                    ),
+                  )
+                ],
+              );
+            }).toList(),
+          ),
+        );
+      },
     );
   }
 

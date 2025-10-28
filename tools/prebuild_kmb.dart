@@ -96,6 +96,51 @@ Future<void> main(List<String> args) async {
   stopsOutTmp.renameSync(stopsOut.path);
   print('Wrote ${stopsOut.path} (${stopsMap.length} stops)');
 
+  // Build combined stop -> routes mapping with localized names
+  // Structure: list of objects { stop, name_en, name_tc, routes: [route,...] }
+  final Map<String, Map<String, dynamic>> stopRoutes = {};
+  for (final route in routeMap.keys) {
+    final entries = routeMap[route]!;
+    for (final e in entries) {
+      try {
+        final sid = (e['stop'] ?? '').toString();
+        if (sid.isEmpty) continue;
+        final existing = stopRoutes.putIfAbsent(sid, () => {
+          'stop': sid,
+          'name_en': '',
+          'name_tc': '',
+          'routes': <String>[],
+        });
+        // get names from stopsMap preferentially, then route entry
+        final stopMeta = stopsMap[sid];
+        String nameEn = '';
+        String nameTc = '';
+        if (stopMeta != null) {
+          nameEn = (stopMeta['name_en'] ?? stopMeta['nameen'] ?? stopMeta['nameen_us'] ?? '')?.toString() ?? '';
+          nameTc = (stopMeta['name_tc'] ?? stopMeta['nametc'] ?? stopMeta['name_tc_tw'] ?? '')?.toString() ?? '';
+        }
+        // fallback to route entry fields
+        nameEn = nameEn.isNotEmpty ? nameEn : ((e['nameen'] ?? e['name_en'])?.toString() ?? '');
+        nameTc = nameTc.isNotEmpty ? nameTc : ((e['nametc'] ?? e['name_tc'])?.toString() ?? '');
+
+        if ((existing['name_en'] as String).isEmpty && nameEn.isNotEmpty) existing['name_en'] = nameEn;
+        if ((existing['name_tc'] as String).isEmpty && nameTc.isNotEmpty) existing['name_tc'] = nameTc;
+
+        final routesList = existing['routes'] as List;
+        if (!routesList.contains(route)) routesList.add(route);
+      } catch (_) {}
+    }
+  }
+
+  // Write stopRoutes as an array for simplicity
+  final stopRoutesList = stopRoutes.values.toList();
+  final stopRoutesOutTmp = File('${outDir.path}/kmb_stop_routes.json.tmp');
+  stopRoutesOutTmp.writeAsStringSync(json.encode(stopRoutesList));
+  final stopRoutesOut = File('${outDir.path}/kmb_stop_routes.json');
+  if (stopRoutesOut.existsSync()) stopRoutesOut.deleteSync();
+  stopRoutesOutTmp.renameSync(stopRoutesOut.path);
+  print('Wrote ${stopRoutesOut.path} (${stopRoutesList.length} stops with routes)');
+
   print('Prebuild complete');
 }
 
