@@ -424,16 +424,18 @@ class _LightRailPageState extends State<_LightRailPage> with SingleTickerProvide
       initialIndex: _tabController.index,
       child: Column(
         children: [
-          Material(
-            color: Colors.transparent,
-            child: TabBar(
-              controller: _tabController,
-              tabs: [
-                Tab(icon: const Icon(Icons.schedule), text: lang.schedule),
-                Tab(icon: const Icon(Icons.route), text: lang.routes),
-              ],
-              indicatorColor: Theme.of(context).colorScheme.primary,
-            ),
+          Consumer<DeveloperSettingsProvider>(
+            builder: (context, devSettings, _) => devSettings.showSubNav ? Material(
+              color: Colors.transparent,
+              child: TabBar(
+                controller: _tabController,
+                tabs: [
+                  Tab(icon: const Icon(Icons.schedule), text: lang.schedule),
+                  Tab(icon: const Icon(Icons.route), text: lang.routes),
+                ],
+                indicatorColor: Theme.of(context).colorScheme.primary,
+              ),
+            ) : const SizedBox.shrink(),
           ),
           Expanded(
             child: TabBarView(
@@ -1861,6 +1863,7 @@ class ThemeProvider extends ChangeNotifier {
     static const String _showMtrArrivalDetailsKey = 'show_mtr_arrival_details';
     static const String _mtrAutoLoadCachedSelectionKey = 'mtr_auto_load_cached_selection';
   static const String _showKmbInNavKey = 'show_kmb_in_nav';
+  static const String _showSubNavKey = 'show_sub_nav';
     
     bool _hideStationId = false;
     bool _showGridDebug = false;
@@ -1868,6 +1871,7 @@ class ThemeProvider extends ChangeNotifier {
     bool _showMtrArrivalDetails = false; // Default to hidden for cleaner UI
     bool _mtrAutoLoadCachedSelection = true; // Default to true for convenience
   bool _showKmbInNav = true; // Default to visible
+  bool _showSubNav = true; // Default to visible
     SharedPreferences? _prefs;
 
     bool get hideStationId => _hideStationId;
@@ -1876,6 +1880,7 @@ class ThemeProvider extends ChangeNotifier {
     bool get showMtrArrivalDetails => _showMtrArrivalDetails;
     bool get mtrAutoLoadCachedSelection => _mtrAutoLoadCachedSelection;
   bool get showKmbInNav => _showKmbInNav;
+  bool get showSubNav => _showSubNav;
 
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
@@ -1885,6 +1890,7 @@ class ThemeProvider extends ChangeNotifier {
       _showMtrArrivalDetails = _prefs!.getBool(_showMtrArrivalDetailsKey) ?? false;
       _mtrAutoLoadCachedSelection = _prefs!.getBool(_mtrAutoLoadCachedSelectionKey) ?? true;
       _showKmbInNav = _prefs!.getBool(_showKmbInNavKey) ?? true;
+      _showSubNav = _prefs!.getBool(_showSubNavKey) ?? true;
       notifyListeners();
     }
 
@@ -1927,6 +1933,13 @@ class ThemeProvider extends ChangeNotifier {
       _showKmbInNav = show;
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool(_showKmbInNavKey, show);
+      notifyListeners();
+    }
+
+    Future<void> setShowSubNav(bool show) async {
+      _showSubNav = show;
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool(_showSubNavKey, show);
       notifyListeners();
     }
   }
@@ -3845,82 +3858,81 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Sub-navbar (visible only when LightRail is active)
-                      if (_pageIndex == 0)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: ValueListenableBuilder<int>(
-                                  valueListenable: _lightRailTabIndex,
-                                  builder: (context, tabIndex, _) {
-                                    return Consumer<AccessibilityProvider>(
-                                      builder: (context, accessibility, _) {
-                                        final selected = _pageIndex == 0 && tabIndex == 0;
-                                        final fg = selected ? AppColors.getPrimaryColor(context) : Theme.of(context).colorScheme.onSurface;
-                                        return TextButton(
-                                          style: TextButton.styleFrom(
-                                            padding: const EdgeInsets.symmetric(vertical: 10.0),
-                                            backgroundColor: selected ? Theme.of(context).colorScheme.primary.withOpacity(0.10) : Theme.of(context).colorScheme.secondary.withOpacity(0.20),//Colors.transparent//,
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
-                                            foregroundColor: fg,
-                                          ),
-                                          onPressed: () {
-                                            _lightRailTabIndex.value = 0;
-                                            _goTo(0);
-                                          },
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.schedule, size: 18 * accessibility.iconScale, color: fg),
-                                              const SizedBox(width: 8),
-                                              Text(lang.schedule, style: TextStyle(fontSize: 14, color: fg)),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    );
-                                  },
+                      // Sub-navbar (animated show/hide when LightRail is active)
+                      AnimatedSwitcher(
+                        duration: MotionConstants.pageTransition,
+                        switchInCurve: MotionConstants.standardEasing,
+                        switchOutCurve: MotionConstants.deceleratedEasing,
+                        transitionBuilder: (child, animation) {
+                          final curved = CurvedAnimation(parent: animation, curve: MotionConstants.standardEasing);
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(begin: const Offset(0, -0.12), end: Offset.zero).animate(curved),
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: _pageIndex == 0
+                            ? Padding(
+                                key: const ValueKey('subnav_on'),
+                                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: ValueListenableBuilder<int>(
+                                        valueListenable: _lightRailTabIndex,
+                                        builder: (context, tabIndex, _) {
+                                          return Consumer<AccessibilityProvider>(
+                                            builder: (context, accessibility, _) {
+                                              final selected = _pageIndex == 0 && tabIndex == 0;
+                                              final fg = selected ? AppColors.getPrimaryColor(context) : Theme.of(context).colorScheme.onSurface;
+                                              return _LiquidPill(
+                                                selected: selected,
+                                                icon: Icons.schedule,
+                                                label: lang.schedule,
+                                                iconScale: accessibility.iconScale,
+                                                fg: fg,
+                                                onTap: () {
+                                                  _lightRailTabIndex.value = 0;
+                                                  _goTo(0);
+                                                },
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: ValueListenableBuilder<int>(
+                                        valueListenable: _lightRailTabIndex,
+                                        builder: (context, tabIndex, _) {
+                                          return Consumer<AccessibilityProvider>(
+                                            builder: (context, accessibility, _) {
+                                              final selected = _pageIndex == 0 && tabIndex == 1;
+                                              final fg = selected ? AppColors.getPrimaryColor(context) : Theme.of(context).colorScheme.onSurface;
+                                              return _LiquidPill(
+                                                selected: selected,
+                                                icon: Icons.route,
+                                                label: lang.routes,
+                                                iconScale: accessibility.iconScale,
+                                                fg: fg,
+                                                onTap: () {
+                                                  _lightRailTabIndex.value = 1;
+                                                  _goTo(0);
+                                                },
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: ValueListenableBuilder<int>(
-                                  valueListenable: _lightRailTabIndex,
-                                  builder: (context, tabIndex, _) {
-                                    return Consumer<AccessibilityProvider>(
-                                      builder: (context, accessibility, _) {
-                                        final selected = _pageIndex == 0 && tabIndex == 1;
-                                        final fg = selected ? AppColors.getPrimaryColor(context) : Theme.of(context).colorScheme.onSurface;
-                                        return TextButton(
-                                          style: TextButton.styleFrom(
-                                            padding: const EdgeInsets.symmetric(vertical: 10.0),
-                                            backgroundColor: selected ? Theme.of(context).colorScheme.primary.withOpacity(0.10) : Theme.of(context).colorScheme.secondary.withOpacity(0.20),//Colors.transparent//,
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
-                                            foregroundColor: fg,
-                                          ),
-                                          onPressed: () {
-                                            _lightRailTabIndex.value = 1;
-                                            _goTo(0);
-                                          },
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.route, size: 18 * accessibility.iconScale, color: fg),
-                                              const SizedBox(width: 8),
-                                              Text(lang.routes, style: TextStyle(fontSize: 14, color: fg)),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                              )
+                            : const SizedBox.shrink(key: ValueKey('subnav_off')),
+                      ),
                       // Main navigation bar (merged LightRail item) themed with Material3 roles
                       Theme(
                         data: Theme.of(context).copyWith(
@@ -4037,6 +4049,122 @@ class _CachedDataBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Text(lang.usingCachedData, style: TextStyle(color: textColor, fontSize: 12)),
         ],
+      ),
+    );
+  }
+}
+
+/// Reusable liquid/glass-styled pill used in the bottom sub-navbar.
+class _LiquidPill extends StatelessWidget {
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final double iconScale;
+  final Color fg;
+  final VoidCallback onTap;
+
+  const _LiquidPill({
+    Key? key,
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.iconScale,
+    required this.fg,
+    required this.onTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12.0),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0),
+          child: AnimatedContainer(
+            duration: MotionConstants.contentTransition,
+            curve: MotionConstants.standardEasing,
+            padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 8.0),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: selected
+                    ? [theme.colorScheme.primary.withOpacity(0.14), theme.colorScheme.primaryContainer.withOpacity(0.06)]
+                    : [theme.colorScheme.surface.withOpacity(0.06), theme.colorScheme.surfaceVariant.withOpacity(0.02)],
+              ),
+              borderRadius: BorderRadius.circular(10.0),
+              border: Border.all(
+                color: selected ? theme.colorScheme.primary.withOpacity(0.18) : theme.colorScheme.outline.withOpacity(0.06),
+                width: 1.0,
+              ),
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                        color: theme.colorScheme.onSurface.withOpacity(0.06),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                      BoxShadow(
+                        color: theme.colorScheme.primary.withOpacity(0.03),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ]
+                  : [],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(icon, size: 18 * iconScale, color: fg),
+                        const SizedBox(width: 8),
+                        Text(label, style: TextStyle(fontSize: 14, color: fg)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    AnimatedContainer(
+                      duration: MotionConstants.contentTransition,
+                      curve: MotionConstants.standardEasing,
+                      height: 3,
+                      width: selected ? 48 : 0,
+                      decoration: BoxDecoration(
+                        color: selected ? theme.colorScheme.primary : Colors.transparent,
+                        borderRadius: BorderRadius.circular(2.0),
+                      ),
+                    ),
+                  ],
+                ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 16,
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10.0),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: selected
+                              ? [Colors.white.withOpacity(0.06), Colors.white.withOpacity(0.00)]
+                              : [Colors.white.withOpacity(0.03), Colors.white.withOpacity(0.00)],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -8795,6 +8923,25 @@ class _SettingsPage extends StatelessWidget {
         ),
         
         const SizedBox(height: UIConstants.spacingXS),
+
+        // Show Sub Navigation setting
+        Consumer<DeveloperSettingsProvider>(
+          builder: (context, devSettings, _) => _buildCompactCard(
+            context,
+            icon: Icons.tab,
+            title: lang.isEnglish ? 'Show Top Tabs' : '顯示頂部標籤',
+            subtitle: devSettings.showSubNav
+                ? (lang.isEnglish ? 'Schedule/Routes tabs are visible' : '時間表/路線標籤已顯示')
+                : (lang.isEnglish ? 'Top tabs are hidden' : '頂部標籤已隱藏'),
+            trailing: Switch(
+              value: devSettings.showSubNav,
+              onChanged: (value) {
+                devSettings.setShowSubNav(value);
+              },
+            ),
+          ),
+        ),
+
         
         // 快取警告設定
         Consumer<ScheduleProvider>(
