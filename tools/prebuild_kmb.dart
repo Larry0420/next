@@ -5,8 +5,46 @@ import 'package:http/http.dart' as http;
 
 Future<void> main(List<String> args) async {
   print('prebuild_kmb: starting');
-  final outDir = Directory('assets/prebuilt');
+  // Ensure we write to the project-root `assets/prebuilt` directory
+  // (script may be invoked from tools/ or elsewhere, so resolve from the
+  // script file location to reliably place files at the repository root).
+  final scriptDir = File(Platform.script.toFilePath()).parent;
+  final projectRoot = scriptDir.parent;
+  final outDir = Directory('${projectRoot.path}/assets/prebuilt');
   if (!outDir.existsSync()) outDir.createSync(recursive: true);
+
+  // Fetch route list for destinations
+  final routeUrls = [
+    'https://data.etabus.gov.hk/v1/transport/kmb/route/',
+    'https://data.etabus.gov.hk/v1/transport/kmb/route',
+  ];
+  Map<String, Map<String, dynamic>> routeInfo = {};
+  bool routeInfoOk = false;
+  for (final u in routeUrls) {
+    try {
+      final response = await http.get(Uri.parse(u)).timeout(Duration(seconds: 30));
+      print('GET $u -> ${response.statusCode}');
+      if (response.statusCode != 200) continue;
+      final jsonData = json.decode(response.body);
+      final data = jsonData['data'] as List<dynamic>;
+      for (final item in data) {
+        final route = (item['route'] ?? '').toString().toUpperCase();
+        final destEn = (item['dest_en'] ?? item['desten'] ?? '').toString();
+        final destTc = (item['dest_tc'] ?? item['desttc'] ?? '').toString();
+        routeInfo[route] = {'dest_en': destEn, 'dest_tc': destTc};
+      }
+      routeInfoOk = routeInfo.isNotEmpty;
+      print('Fetched ${routeInfo.length} routes with destinations');
+      if (routeInfoOk) break;
+    } catch (e) {
+      stderr.writeln('failed $u: $e');
+    }
+  }
+
+  if (!routeInfoOk) {
+    stderr.writeln('Failed to fetch route info');
+    exit(1);
+  }
 
   // stream-parse route-stops using json_stream (efficient streaming of large arrays)
   final routeStopsUrls = [
@@ -44,14 +82,6 @@ Future<void> main(List<String> args) async {
     stderr.writeln('Failed to fetch route-stops');
     exit(1);
   }
-
-  // write atomically
-  final routeStopsOutTmp = File('${outDir.path}/kmb_route_stops.json.tmp');
-  routeStopsOutTmp.writeAsStringSync(json.encode(routeMap));
-  final routeStopsOut = File('${outDir.path}/kmb_route_stops.json');
-  if (routeStopsOut.existsSync()) routeStopsOut.deleteSync();
-  routeStopsOutTmp.renameSync(routeStopsOut.path);
-  print('Wrote ${routeStopsOut.path} (${routeMap.length} routes)');
 
   // stream-parse stops list using json_stream
   final stopsUrls = [
@@ -95,6 +125,63 @@ Future<void> main(List<String> args) async {
   if (stopsOut.existsSync()) stopsOut.deleteSync();
   stopsOutTmp.renameSync(stopsOut.path);
   print('Wrote ${stopsOut.path} (${stopsMap.length} stops)');
+
+  // Build optimized route stops with bound-specific destinations
+  Map<String, Map<String, Map<String, dynamic>>> optimizedRouteMap = {};
+  for (final route in routeMap.keys) {
+    final entries = routeMap[route]!;
+    // Group by bound
+    Map<String, List<Map<String, dynamic>>> boundStops = {};
+    for (final e in entries) {
+      final bound = (e['bound'] ?? '').toString();
+      boundStops.putIfAbsent(bound, () => []).add(e);
+    }
+    Map<String, Map<String, dynamic>> routeData = {};
+    for (final bound in boundStops.keys) {
+      final stops = boundStops[bound]!;
+      // Find the stop with max seq
+      Map<String, dynamic>? lastStop;
+      int maxSeq = -1;
+      for (final s in stops) {
+        final seq = int.tryParse((s['seq'] ?? '').toString()) ?? 0;
+        if (seq > maxSeq) {
+          maxSeq = seq;
+          lastStop = s;
+        }
+      }
+      String destEn = '';
+      String destTc = '';
+      if (lastStop != null) {
+        final sid = (lastStop['stop'] ?? '').toString();
+        final stopMeta = stopsMap[sid];
+        if (stopMeta != null) {
+          destEn = (stopMeta['name_en'] ?? stopMeta['nameen'] ?? stopMeta['nameen_us'] ?? '')?.toString() ?? '';
+          destTc = (stopMeta['name_tc'] ?? stopMeta['nametc'] ?? stopMeta['name_tc_tw'] ?? '')?.toString() ?? '';
+        }
+        // fallback to route entry
+        destEn = destEn.isNotEmpty ? destEn : ((lastStop['nameen'] ?? lastStop['name_en'])?.toString() ?? '');
+        destTc = destTc.isNotEmpty ? destTc : ((lastStop['nametc'] ?? lastStop['name_tc'])?.toString() ?? '');
+      }
+      routeData[bound] = {
+        'dest_en': destEn,
+        'dest_tc': destTc,
+        'stops': stops.map((s) => {
+          'seq': s['seq'],
+          'stop': s['stop'],
+          'service_type': s['service_type'],
+        }).toList(),
+      };
+    }
+    optimizedRouteMap[route] = routeData;
+  }
+
+  // write atomically
+  final routeStopsOutTmp = File('${outDir.path}/kmb_route_stops.json.tmp');
+  routeStopsOutTmp.writeAsStringSync(json.encode(optimizedRouteMap));
+  final routeStopsOut = File('${outDir.path}/kmb_route_stops.json');
+  if (routeStopsOut.existsSync()) routeStopsOut.deleteSync();
+  routeStopsOutTmp.renameSync(routeStopsOut.path);
+  print('Wrote ${routeStopsOut.path} (${optimizedRouteMap.length} routes with bound-specific destinations)');
 
   // Build combined stop -> routes mapping with localized names
   // Structure: list of objects { stop, name_en, name_tc, routes: [route,...] }

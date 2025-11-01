@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'kmb.dart';
+// Conditional import: use IO implementation when dart:io is available,
+// otherwise import a stub that indicates the action isn't supported.
+import 'prebuild_runner_stub.dart' if (dart.library.io) 'prebuild_runner_io.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({Key? key}) : super(key: key);
@@ -75,6 +78,30 @@ class _SettingsPageState extends State<SettingsPage> {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Regeneration failed: ${result.error}')));
                   }
                 }
+              }
+            },
+          ),
+          ListTile(
+            title: Text('Run prebuild script (dev)'),
+            subtitle: Text('Invoke tools/prebuild_kmb.dart (desktop/dev only).'),
+            trailing: Icon(Icons.build),
+            onTap: () async {
+              // If not supported, the stub will return a message.
+              // Show a progress indicator while the script runs.
+              showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) {
+                return const Center(child: CircularProgressIndicator());
+              });
+              final out = await runPrebuildScript();
+              if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+              // Show output in a dialog (scrollable)
+              if (mounted) {
+                await showDialog<void>(context: context, builder: (ctx) {
+                  return AlertDialog(
+                    title: const Text('Prebuild output'),
+                    content: SingleChildScrollView(child: SelectableText(out)),
+                    actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
+                  );
+                });
               }
             },
           ),

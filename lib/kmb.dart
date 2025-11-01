@@ -40,19 +40,183 @@ class Kmb {
     return dictionary.values.toList();
   }
 
-  /// Fetches KMB routes from API
-  static Future<List<String>> fetchRoutes() async {
-    final url = Uri.parse('https://data.etabus.gov.hk/v1/transport/kmb/route/');
-    final response = await http.get(url);
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final routes = (data['data'] as List)
-          .map<String>((route) => route['route'] as String)
-          .toList();
-      return routes;
-    } else {
-      throw Exception('Failed to load KMB routes');
+  /// Fetches KMB routes from API with caching support
+  static Future<List<String>> fetchRoutes({Duration ttl = const Duration(hours: 24)}) async {
+    // Check in-memory cache first
+    if (_routesCache != null && _routesCacheAt != null) {
+      if (DateTime.now().difference(_routesCacheAt!) < ttl) {
+        return _routesCache!;
+      }
     }
+
+    // Try to load from SharedPreferences cache
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedJson = prefs.getString(_routesCachePrefKey);
+      if (cachedJson != null) {
+        final cachedRoutes = (json.decode(cachedJson) as List).map((e) => e as String).toList();
+        _routesCache = cachedRoutes;
+        _routesCacheAt = DateTime.now();
+        return cachedRoutes;
+      }
+    } catch (e) {
+      // Ignore cache loading errors, proceed to fetch fresh data
+    }
+
+    final url = Uri.parse('https://data.etabus.gov.hk//v1/transport/kmb/route/');
+    try {
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final payload = data['data'];
+        if (payload is List && payload.isNotEmpty) {
+          final routes = payload
+              .map<String>((route) => (route as Map<String, dynamic>)['route'] as String)
+              .toList();
+
+          // Cache the results
+          _routesCache = routes;
+          _routesCacheAt = DateTime.now();
+
+          // Persist to SharedPreferences
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(_routesCachePrefKey, json.encode(routes));
+          } catch (_) {
+            // Ignore persistence errors
+          }
+
+          return routes;
+        } else {
+          throw Exception('Invalid response: empty or missing data array');
+        }
+      } else if (response.statusCode == 422) {
+        throw Exception('API validation error: Invalid request parameters');
+      } else {
+        throw Exception('HTTP ${response.statusCode}: Failed to load KMB routes');
+      }
+    } catch (e) {
+      if (e is FormatException) {
+        throw Exception('Invalid JSON response from routes API');
+      }
+      rethrow;
+    }
+  }
+
+  /// Fetches KMB routes from API with full route details for enhanced display
+  static Future<List<Map<String, dynamic>>> fetchRoutesWithDetails({Duration ttl = const Duration(hours: 24)}) async {
+    // Check in-memory cache first
+    if (_routesDetailsCache != null && _routesDetailsCacheAt != null) {
+      if (DateTime.now().difference(_routesDetailsCacheAt!) < ttl) {
+        return _routesDetailsCache!;
+      }
+    }
+
+    // Try to load from SharedPreferences cache
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Check cache version - clear old caches if version mismatch
+      final cachedVersion = prefs.getInt(_cacheVersionKey) ?? 0;
+      if (cachedVersion != _currentCacheVersion) {
+        // Clear all old caches
+        await prefs.remove(_routesDetailsCachePrefKey);
+        await prefs.remove(_routeIndexPrefKey);
+        await prefs.setInt(_cacheVersionKey, _currentCacheVersion);
+      } else {
+        final cachedJson = prefs.getString(_routesDetailsCachePrefKey);
+        if (cachedJson != null) {
+          final cachedRoutes = (json.decode(cachedJson) as List).map((e) => Map<String, dynamic>.from(e)).toList();
+          _routesDetailsCache = cachedRoutes;
+          _routesDetailsCacheAt = DateTime.now();
+          return cachedRoutes;
+        }
+      }
+    } catch (e) {
+      // Ignore cache loading errors, proceed to fetch fresh data
+    }
+
+    final url = Uri.parse('https://data.etabus.gov.hk//v1/transport/kmb/route/');
+    try {
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final payload = data['data'];
+        if (payload is List && payload.isNotEmpty) {
+          final routes = payload
+              .map<Map<String, dynamic>>((route) => Map<String, dynamic>.from(route as Map<String, dynamic>))
+              .toList();
+
+          // Cache the detailed results
+          _routesDetailsCache = routes;
+          _routesDetailsCacheAt = DateTime.now();
+
+          // Persist to SharedPreferences
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(_routesDetailsCachePrefKey, json.encode(routes));
+          } catch (_) {
+            // Ignore persistence errors
+          }
+
+          return routes;
+        } else {
+          throw Exception('Invalid response: empty or missing data array');
+        }
+      } else if (response.statusCode == 422) {
+        throw Exception('API validation error: Invalid request parameters');
+      } else {
+        throw Exception('HTTP ${response.statusCode}: Failed to load KMB routes');
+      }
+    } catch (e) {
+      if (e is FormatException) {
+        throw Exception('Invalid JSON response from routes API');
+      }
+      rethrow;
+    }
+  }
+
+  // Enhanced route details cache
+  static List<Map<String, dynamic>>? _routesDetailsCache;
+  static DateTime? _routesDetailsCacheAt;
+  static const String _routesDetailsCachePrefKey = 'kmb_routes_details_cache_json';
+  static const String _cacheVersionKey = 'kmb_cache_version';
+  static const int _currentCacheVersion = 2; // Increment when API URL changes
+
+  /// Groups routes by their origin and destination for enhanced display
+  static Future<Map<String, List<Map<String, dynamic>>>> groupRoutesByDestinations() async {
+    final routes = await fetchRoutesWithDetails();
+
+    final grouped = <String, List<Map<String, dynamic>>>{};
+
+    for (final route in routes) {
+      final routeNum = route['route'] as String;
+      final bound = route['bound'] as String;
+      final origEn = route['orig_en'] as String? ?? '';
+      final destEn = route['dest_en'] as String? ?? '';
+      final origTc = route['orig_tc'] as String? ?? '';
+      final destTc = route['dest_tc'] as String? ?? '';
+
+      // Create a key that combines route number with origin->destination
+      final direction = bound == 'O' ? 'outbound' : 'inbound';
+      final key = '$routeNum: $origEn → $destEn';
+
+      // Also create a Traditional Chinese version
+      final keyTc = '$routeNum: $origTc → $destTc';
+
+      // Use English key as primary, but include both languages
+      if (!grouped.containsKey(key)) {
+        grouped[key] = [];
+      }
+      grouped[key]!.add({
+        ...route,
+        'display_key': key,
+        'display_key_tc': keyTc,
+        'direction': direction,
+      });
+    }
+
+    return grouped;
   }
 
   /// Fetch status/info for a specific route. Returns the raw JSON map or throws on error.
@@ -84,7 +248,7 @@ class Kmb {
 
     // Try each candidate against the canonical route-stop public API
     for (final cand in candidateRoutes) {
-      final urlStr = 'https://data.etabus.gov.hk/v1/transport/kmb/route/route-stop/${Uri.encodeComponent(cand)}';
+      final urlStr = 'https://data.etabus.gov.hk//v1/transport/kmb/route/route-stop/${Uri.encodeComponent(cand)}';
       try {
         final url = Uri.parse(urlStr);
         final response = await http.get(url);
@@ -113,9 +277,9 @@ class Kmb {
   /// Returns an array of route-stop objects as maps.
   static Future<List<Map<String, dynamic>>> fetchRouteStopsAll() async {
     final urlCandidates = [
-      'https://data.etabus.gov.hk/v1/transport/kmb/route/route-stop',
-      'https://data.etabus.gov.hk/v1/transport/kmb/route-stop',
-      'https://data.etabus.gov.hk/v1/transport/kmb/route/route-stop/',
+      'https://data.etabus.gov.hk//v1/transport/kmb/route/route-stop',
+      'https://data.etabus.gov.hk//v1/transport/kmb/route-stop',
+      'https://data.etabus.gov.hk//v1/transport/kmb/route/route-stop/',
     ];
     String? lastError;
     for (final u in urlCandidates) {
@@ -140,11 +304,58 @@ class Kmb {
     throw Exception('Failed to fetch route-stop list. Last error: ${lastError ?? 'no response'}');
   }
 
+  /// Fetch route-stops for a specific route, direction, and service type.
+  /// Uses the Route-Stop API: /v1/transport/kmb/route-stop/{route}/{direction}/{service_type}
+  /// 
+  /// Parameters:
+  /// - route: Case-sensitive route number (e.g., "1", "276B")
+  /// - direction: "inbound" or "outbound" (lowercase)
+  /// - serviceType: Service type number as string (e.g., "1", "2", "3")
+  /// 
+  /// Returns ordered list of stop sequence objects with co, route, bound, service_type, seq, stop, data_timestamp.
+  static Future<List<Map<String, dynamic>>> fetchRouteStops(
+    String route,
+    String direction,
+    String serviceType,
+  ) async {
+    // Validate direction parameter
+    final dir = direction.toLowerCase();
+    if (dir != 'inbound' && dir != 'outbound') {
+      throw ArgumentError('Direction must be "inbound" or "outbound", got: $direction');
+    }
+
+    final url = 'https://data.etabus.gov.hk//v1/transport/kmb/route-stop/${Uri.encodeComponent(route)}/$dir/$serviceType';
+    
+    try {
+      final resp = await http.get(Uri.parse(url));
+      
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        final payload = data['data'];
+        
+        if (payload is List) {
+          return List<Map<String, dynamic>>.from(
+            payload.map((e) => Map<String, dynamic>.from(e))
+          );
+        } else {
+          throw Exception('Unexpected payload type: ${payload.runtimeType}');
+        }
+      } else if (resp.statusCode == 422) {
+        throw Exception('Invalid route parameters: route=$route, direction=$direction, service_type=$serviceType');
+      } else {
+        final snippet = resp.body.length > 200 ? resp.body.substring(0, 200) + '...' : resp.body;
+        throw Exception('HTTP ${resp.statusCode}: $snippet');
+      }
+    } catch (e) {
+      throw Exception('Failed to fetch route stops for $route/$direction/$serviceType: ${e.toString()}');
+    }
+  }
+
   /// Fetch the full stop list (all bus stops) from the public endpoints.
   static Future<List<Map<String, dynamic>>> fetchStopsAll() async {
     final urlCandidates = [
-      'https://data.etabus.gov.hk/v1/transport/kmb/stop',
-      'https://data.etabus.gov.hk/v1/transport/kmb/stop/',
+      'https://data.etabus.gov.hk//v1/transport/kmb/stop',
+      'https://data.etabus.gov.hk//v1/transport/kmb/stop/',
     ];
     String? lastError;
     for (final u in urlCandidates) {
@@ -154,10 +365,28 @@ class Kmb {
           final data = json.decode(resp.body) as Map<String, dynamic>;
           final payload = data['data'];
           if (payload is List) {
-            return List<Map<String, dynamic>>.from(payload.map((e) => Map<String, dynamic>.from(e)));
+            // Validate and filter stops with valid coordinates
+            final validStops = payload.where((stop) {
+              final stopMap = stop as Map<String, dynamic>;
+              final lat = stopMap['lat'];
+              final long = stopMap['long'];
+              // Skip stops without valid coordinates
+              if (lat == null || long == null) return false;
+              try {
+                double.parse(lat.toString());
+                double.parse(long.toString());
+                return true;
+              } catch (_) {
+                return false;
+              }
+            }).map((e) => Map<String, dynamic>.from(e)).toList();
+
+            return validStops;
           } else {
             lastError = 'Unexpected payload type at $u: ${payload.runtimeType}';
           }
+        } else if (resp.statusCode == 422) {
+          lastError = 'API validation error at $u: Invalid request parameters';
         } else {
           final snippet = resp.body.length > 200 ? resp.body.substring(0, 200) + '...' : resp.body;
           lastError = 'HTTP ${resp.statusCode} from $u: $snippet';
@@ -166,8 +395,187 @@ class Kmb {
         lastError = 'Error fetching $u: ${e.toString()}';
       }
     }
+
+    // If all network requests fail, try to return cached data
+    try {
+      if (_stopsCache != null && _stopsCache!.isNotEmpty) {
+        return _stopsCache!.values.toList();
+      }
+      // Try loading from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final cachedJson = prefs.getString(_stopsCachePrefKey);
+      if (cachedJson != null) {
+        final cachedMap = json.decode(cachedJson) as Map<String, dynamic>;
+        final stops = cachedMap.values.map((e) => Map<String, dynamic>.from(e)).toList();
+        return stops;
+      }
+    } catch (e) {
+      lastError = '${lastError ?? 'Network failed'}; cache fallback also failed: ${e.toString()}';
+    }
+
     throw Exception('Failed to fetch stop list. Last error: ${lastError ?? 'no response'}');
   }
+
+  // In-memory cache for routes and timestamp
+  static List<String>? _routesCache;
+  static DateTime? _routesCacheAt;
+
+  /// Force refresh the routes cache by fetching from API again.
+  static Future<void> refreshRoutesCache() async {
+    _routesCache = null;
+    _routesCacheAt = null;
+    await fetchRoutes(ttl: Duration.zero);
+  }
+
+  // Enhanced route index with full route details for searching
+  static Map<String, Map<String, dynamic>>? _routeIndex;
+  static DateTime? _routeIndexAt;
+
+  static const String _routeIndexPrefKey = 'kmb_route_index_json';
+
+  /// Build comprehensive route index with full route details for enhanced searching
+  static Future<Map<String, Map<String, dynamic>>> buildRouteIndex({Duration ttl = const Duration(hours: 24)}) async {
+    // Check in-memory cache first
+    if (_routeIndex != null && _routeIndexAt != null) {
+      if (DateTime.now().difference(_routeIndexAt!) < ttl) return _routeIndex!;
+    }
+
+    // Try to load from SharedPreferences cache
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Check cache version - if mismatch, skip cache loading
+      final cachedVersion = prefs.getInt(_cacheVersionKey) ?? 0;
+      if (cachedVersion == _currentCacheVersion) {
+        final cachedJson = prefs.getString(_routeIndexPrefKey);
+        if (cachedJson != null) {
+          final cachedIndex = json.decode(cachedJson) as Map<String, dynamic>;
+          final index = cachedIndex.map((k, v) => MapEntry(k, Map<String, dynamic>.from(v)));
+          _routeIndex = index;
+          _routeIndexAt = DateTime.now();
+          return index;
+        }
+      }
+    } catch (e) {
+      // Ignore cache loading errors, proceed to fetch fresh data
+    }
+
+    // Fetch all routes from route list API
+    final routes = await fetchRoutesWithDetails(ttl: Duration.zero);
+    final index = <String, Map<String, dynamic>>{};
+
+    // Group routes by route number and direction
+    final routeGroups = <String, Map<String, List<Map<String, dynamic>>>>{};
+
+    for (final route in routes) {
+      final routeNum = route['route'] as String;
+      final bound = route['bound'] as String;
+
+      if (!routeGroups.containsKey(routeNum)) {
+        routeGroups[routeNum] = {};
+      }
+      if (!routeGroups[routeNum]!.containsKey(bound)) {
+        routeGroups[routeNum]![bound] = [];
+      }
+      routeGroups[routeNum]![bound]!.add(route);
+    }
+
+    // For each route, create index entries for each direction/service type combination
+    for (final routeEntry in routeGroups.entries) {
+      final routeNum = routeEntry.key;
+      final boundGroups = routeEntry.value;
+
+      for (final boundEntry in boundGroups.entries) {
+        final bound = boundEntry.key;
+        final routeVariants = boundEntry.value;
+
+        for (final route in routeVariants) {
+          // Keep bound as I/O from API, but add human-readable direction
+          final direction = bound == 'O' ? 'outbound' : bound == 'I' ? 'inbound' : 'unknown';
+
+          // Create searchable index entry
+          final indexEntry = {
+            'route': routeNum,
+            'direction': direction,  // Human-readable for display
+            'service_type': route['service_type'] ?? '',
+            'orig_en': route['orig_en'] ?? '',
+            'orig_tc': route['orig_tc'] ?? '',
+            'orig_sc': route['orig_sc'] ?? '',
+            'dest_en': route['dest_en'] ?? '',
+            'dest_tc': route['dest_tc'] ?? '',
+            'dest_sc': route['dest_sc'] ?? '',
+            'bound': bound,  // Original API value (I/O)
+            'co': route['co'] ?? 'KMB',
+            'data_timestamp': route['data_timestamp'] ?? '',
+            // Add searchable text combining all names
+            'search_text': [
+              routeNum,
+              route['orig_en'] ?? '',
+              route['orig_tc'] ?? '',
+              route['orig_sc'] ?? '',
+              route['dest_en'] ?? '',
+              route['dest_tc'] ?? '',
+              route['dest_sc'] ?? '',
+            ].join(' ').toLowerCase(),
+          };
+
+          // Use route-bound-serviceType as key (using I/O from API)
+          final indexKey = '${routeNum}_${bound}_${route['service_type'] ?? ''}';
+          index[indexKey] = indexEntry;
+        }
+      }
+    }
+
+    // Cache the index
+    _routeIndex = index;
+    _routeIndexAt = DateTime.now();
+
+    // Persist to SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_routeIndexPrefKey, json.encode(index));
+    } catch (_) {
+      // Ignore persistence errors
+    }
+
+    return index;
+  }
+
+  /// Search routes using enhanced index with origin/destination matching
+  static Future<List<Map<String, dynamic>>> searchRoutes(String query, {int? maxResults}) async {
+    if (query.trim().isEmpty) return [];
+
+    final index = await buildRouteIndex();
+    final searchTerm = query.toLowerCase().trim();
+
+    // Find matches
+    final matches = index.values.where((route) {
+      final searchText = route['search_text'] as String? ?? '';
+      return searchText.contains(searchTerm);
+    }).toList();
+
+    // Sort by relevance (exact route matches first, then substring matches)
+    matches.sort((a, b) {
+      final routeA = (a['route'] as String).toLowerCase();
+      final routeB = (b['route'] as String).toLowerCase();
+
+      // Exact route matches get highest priority
+      if (routeA == searchTerm && routeB != searchTerm) return -1;
+      if (routeB == searchTerm && routeA != searchTerm) return 1;
+
+      // Route starts with search term
+      if (routeA.startsWith(searchTerm) && !routeB.startsWith(searchTerm)) return -1;
+      if (routeB.startsWith(searchTerm) && !routeA.startsWith(searchTerm)) return 1;
+
+      // Otherwise maintain original order
+      return 0;
+    });
+
+    // Return all matches if maxResults is null, otherwise limit
+    return maxResults != null ? matches.take(maxResults).toList() : matches;
+  }
+
+  static const String _routesCachePrefKey = 'kmb_routes_cache_json';
 
   // In-memory cache for stops and timestamp
   static Map<String, Map<String, dynamic>>? _stopsCache;
@@ -272,9 +680,9 @@ class Kmb {
   static Future<List<Map<String, dynamic>>> fetchStopEta(String stopId) async {
     final s = stopId.trim();
     final urlCandidates = [
-      'https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${Uri.encodeComponent(s)}',
-      'https://data.etabus.gov.hk/v1/transport/kmb/stop/${Uri.encodeComponent(s)}/eta',
-      'https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${Uri.encodeComponent(s)}/',
+      'https://data.etabus.gov.hk//v1/transport/kmb/stop-eta/${Uri.encodeComponent(s)}',
+      'https://data.etabus.gov.hk//v1/transport/kmb/stop/${Uri.encodeComponent(s)}/eta',
+      'https://data.etabus.gov.hk//v1/transport/kmb/stop-eta/${Uri.encodeComponent(s)}/',
     ];
 
     for (final u in urlCandidates) {
@@ -300,7 +708,7 @@ class Kmb {
     final s = stopId.trim();
     final r = route.trim();
     final svc = serviceType.trim();
-    final url = Uri.parse('https://data.etabus.gov.hk/v1/transport/kmb/eta/${Uri.encodeComponent(s)}/${Uri.encodeComponent(r)}/${Uri.encodeComponent(svc)}');
+    final url = Uri.parse('https://data.etabus.gov.hk//v1/transport/kmb/eta/${Uri.encodeComponent(s)}/${Uri.encodeComponent(r)}/${Uri.encodeComponent(svc)}');
     final resp = await http.get(url);
     if (resp.statusCode == 200) {
       final data = json.decode(resp.body) as Map<String, dynamic>;
@@ -315,18 +723,42 @@ class Kmb {
   static Future<List<Map<String, dynamic>>> fetchRouteEta(String route, String serviceType) async {
     final r = route.trim();
     final svc = serviceType.trim();
-    final url = Uri.parse('https://data.etabus.gov.hk/v1/transport/kmb/route-eta/${Uri.encodeComponent(r)}/${Uri.encodeComponent(svc)}');
+    final url = Uri.parse('https://data.etabus.gov.hk//v1/transport/kmb/route-eta/${Uri.encodeComponent(r)}/${Uri.encodeComponent(svc)}');
+    
+    print('=== FETCHING ROUTE-ETA API ===');
+    print('URL: $url');
+    print('Route: $r, Service Type: $svc');
+    
     final resp = await http.get(url);
+    print('Response status: ${resp.statusCode}');
+    
     if (resp.statusCode == 200) {
       final data = json.decode(resp.body) as Map<String, dynamic>;
+      print('Response keys: ${data.keys.toList()}');
+      
       final payload = data['data'];
-      if (payload is List) return List<Map<String, dynamic>>.from(payload.map((e) => Map<String, dynamic>.from(e)));
+      print('Data type: ${payload.runtimeType}');
+      
+      if (payload is List) {
+        print('Data is List with ${payload.length} entries');
+        if (payload.isNotEmpty) {
+          print('First entry keys: ${(payload.first as Map).keys.toList()}');
+          print('First entry: ${payload.first}');
+        }
+        print('==============================');
+        return List<Map<String, dynamic>>.from(payload.map((e) => Map<String, dynamic>.from(e)));
+      }
     }
+    print('API call failed!');
+    print('==============================');
     throw Exception('Failed to fetch route ETA for $route service $serviceType');
   }
 
   // Preference key for using per-route API for route stops
   static const String _useRouteApiKey = 'useRouteApiForRouteStops';
+  static const String _pinnedRoutesKey = 'pinnedKmbRoutes';
+  static const String _pinnedStopsKey = 'pinnedKmbStops';
+  static const String _routeHistoryKey = 'kmbRouteHistory';
 
   /// Read the persisted 'use per-route API' setting.
   static Future<bool> getUseRouteApiSetting() async {
@@ -338,6 +770,161 @@ class Kmb {
   static Future<void> setUseRouteApiSetting(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_useRouteApiKey, value);
+  }
+
+  /// Pin a route for quick access
+  static Future<void> pinRoute(String route, String direction, String serviceType, String label) async {
+    final prefs = await SharedPreferences.getInstance();
+    final pinnedJson = prefs.getString(_pinnedRoutesKey) ?? '[]';
+    final List<dynamic> pinned = json.decode(pinnedJson);
+    
+    // Avoid duplicates
+    pinned.removeWhere((item) => 
+      item['route'] == route && 
+      item['direction'] == direction && 
+      item['serviceType'] == serviceType
+    );
+    
+    pinned.add({
+      'route': route,
+      'direction': direction,
+      'serviceType': serviceType,
+      'label': label,
+      'pinnedAt': DateTime.now().toIso8601String(),
+    });
+    
+    await prefs.setString(_pinnedRoutesKey, json.encode(pinned));
+  }
+
+  /// Get all pinned routes
+  static Future<List<Map<String, dynamic>>> getPinnedRoutes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pinnedJson = prefs.getString(_pinnedRoutesKey) ?? '[]';
+    final List<dynamic> pinned = json.decode(pinnedJson);
+    return pinned.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  /// Unpin a route
+  static Future<void> unpinRoute(String route, String direction, String serviceType) async {
+    final prefs = await SharedPreferences.getInstance();
+    final pinnedJson = prefs.getString(_pinnedRoutesKey) ?? '[]';
+    final List<dynamic> pinned = json.decode(pinnedJson);
+    
+    pinned.removeWhere((item) => 
+      item['route'] == route && 
+      item['direction'] == direction && 
+      item['serviceType'] == serviceType
+    );
+    
+    await prefs.setString(_pinnedRoutesKey, json.encode(pinned));
+  }
+
+  /// Pin a specific stop on a route
+  static Future<void> pinStop({
+    required String route,
+    required String stopId,
+    required String seq,
+    required String stopName,
+    String? latitude,
+    String? longitude,
+    String? direction,
+    String? serviceType,
+    String? destEn,
+    String? destTc,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final pinnedJson = prefs.getString(_pinnedStopsKey) ?? '[]';
+    final List<dynamic> pinned = json.decode(pinnedJson);
+    
+    // Avoid duplicates
+    pinned.removeWhere((item) => 
+      item['route'] == route && 
+      item['stopId'] == stopId && 
+      item['seq'] == seq
+    );
+    
+    pinned.add({
+      'route': route,
+      'stopId': stopId,
+      'seq': seq,
+      'stopName': stopName,
+      'latitude': latitude,
+      'longitude': longitude,
+      'direction': direction,
+      'serviceType': serviceType,
+      'destEn': destEn,
+      'destTc': destTc,
+      'pinnedAt': DateTime.now().toIso8601String(),
+    });
+    
+    await prefs.setString(_pinnedStopsKey, json.encode(pinned));
+  }
+
+  /// Get all pinned stops
+  static Future<List<Map<String, dynamic>>> getPinnedStops() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pinnedJson = prefs.getString(_pinnedStopsKey) ?? '[]';
+    final List<dynamic> pinned = json.decode(pinnedJson);
+    return pinned.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  /// Unpin a specific stop
+  static Future<void> unpinStop(String route, String stopId, String seq) async {
+    final prefs = await SharedPreferences.getInstance();
+    final pinnedJson = prefs.getString(_pinnedStopsKey) ?? '[]';
+    final List<dynamic> pinned = json.decode(pinnedJson);
+    
+    pinned.removeWhere((item) => 
+      item['route'] == route && 
+      item['stopId'] == stopId && 
+      item['seq'] == seq
+    );
+    
+    await prefs.setString(_pinnedStopsKey, json.encode(pinned));
+  }
+
+  /// Add a route to history (automatically called when viewing a route)
+  static Future<void> addToHistory(String route, String direction, String serviceType, String label) async {
+    final prefs = await SharedPreferences.getInstance();
+    final historyJson = prefs.getString(_routeHistoryKey) ?? '[]';
+    final List<dynamic> history = json.decode(historyJson);
+    
+    // Remove existing entry to avoid duplicates (will re-add with new timestamp)
+    history.removeWhere((item) => 
+      item['route'] == route && 
+      item['direction'] == direction && 
+      item['serviceType'] == serviceType
+    );
+    
+    // Add to front (most recent first)
+    history.insert(0, {
+      'route': route,
+      'direction': direction,
+      'serviceType': serviceType,
+      'label': label,
+      'accessedAt': DateTime.now().toIso8601String(),
+    });
+    
+    // Keep only last 50 entries
+    if (history.length > 50) {
+      history.removeRange(50, history.length);
+    }
+    
+    await prefs.setString(_routeHistoryKey, json.encode(history));
+  }
+
+  /// Get route history
+  static Future<List<Map<String, dynamic>>> getRouteHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final historyJson = prefs.getString(_routeHistoryKey) ?? '[]';
+    final List<dynamic> history = json.decode(historyJson);
+    return history.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  /// Clear all route history
+  static Future<void> clearRouteHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_routeHistoryKey, '[]');
   }
 
   /// Build and cache a map of route -> ordered list of route-stop entries.
@@ -433,6 +1020,39 @@ class Kmb {
     return extended;
   }
 
+  // In-memory cache for stop -> routes mapping
+  static Map<String, List<String>>? _stopToRoutesCache;
+  static DateTime? _stopToRoutesCacheAt;
+
+  /// Build and cache a map of stopId -> list of routes that serve the stop.
+  /// TTL default 24 hours.
+  static Future<Map<String, List<String>>> buildStopToRoutesMap({Duration ttl = const Duration(hours: 24)}) async {
+    if (_stopToRoutesCache != null && _stopToRoutesCacheAt != null) {
+      if (DateTime.now().difference(_stopToRoutesCacheAt!) < ttl) return _stopToRoutesCache!;
+    }
+
+    final routeMap = await buildRouteToStopsMap();
+    final Map<String, List<String>> out = {};
+    routeMap.forEach((route, entries) {
+      for (final e in entries) {
+        final sid = e['stop']?.toString() ?? '';
+        if (sid.isEmpty) continue;
+        out.putIfAbsent(sid, () => []);
+        if (!out[sid]!.contains(route)) out[sid]!.add(route);
+      }
+    });
+
+    _stopToRoutesCache = out;
+    _stopToRoutesCacheAt = DateTime.now();
+    return out;
+  }
+
+  /// Returns the list of routes serving a stop id (cached). Returns empty list when none.
+  static Future<List<String>> getRoutesForStop(String stopId) async {
+    final map = await buildStopToRoutesMap();
+    return List<String>.from(map[stopId] ?? []);
+  }
+
   /// Validate a saved snapshot that might be restored into the route/status page.
   /// Returns null when valid, otherwise returns an error message describing why
   /// the snapshot is not acceptable.
@@ -484,17 +1104,40 @@ class Kmb {
 
   /// Fetch route data for a specific route + direction + service type.
   /// Endpoint: /v1/transport/kmb/route/{route}/{direction}/{service_type}
+  /// Fetch detailed route metadata for route verification and display
   static Future<Map<String, dynamic>> fetchRouteWithParams(String route, String direction, String serviceType) async {
     final r = route.trim().toUpperCase();
-    final dir = direction.trim().toUpperCase();
+    final dir = direction.trim().toLowerCase(); // API expects lowercase direction
     final svc = serviceType.trim();
-    final url = Uri.parse('https://data.etabus.gov.hk/v1/transport/kmb/route/${Uri.encodeComponent(r)}/${Uri.encodeComponent(dir)}/${Uri.encodeComponent(svc)}');
-    final resp = await http.get(url);
-    if (resp.statusCode == 200) {
-      final data = json.decode(resp.body) as Map<String, dynamic>;
-      return data;
+
+    // Validate direction parameter
+    if (dir != 'outbound' && dir != 'inbound') {
+      throw Exception('Invalid direction: must be "outbound" or "inbound"');
     }
-    throw Exception('Failed to fetch route data for $route/$direction/$serviceType');
+
+    final url = Uri.parse('https://data.etabus.gov.hk//v1/transport/kmb/route/${Uri.encodeComponent(r)}/${Uri.encodeComponent(dir)}/${Uri.encodeComponent(svc)}');
+
+    try {
+      final resp = await http.get(url);
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        final payload = data['data'];
+        if (payload != null && payload is Map<String, dynamic>) {
+          return data;
+        } else {
+          throw Exception('Invalid response: missing or invalid route data');
+        }
+      } else if (resp.statusCode == 422) {
+        throw Exception('Route validation error: Invalid route "$r", direction "$dir", or service type "$svc"');
+      } else {
+        throw Exception('HTTP ${resp.statusCode}: Failed to fetch route data for $r/$dir/$svc');
+      }
+    } catch (e) {
+      if (e is FormatException) {
+        throw Exception('Invalid JSON response from route API for $r/$dir/$svc');
+      }
+      rethrow;
+    }
   }
 
   /// Fetch a combined route status that merges route-stop list, stop metadata and route-level ETA entries.
@@ -895,18 +1538,66 @@ Map<String, dynamic> _normalizeRouteStopEntry(Map<String, dynamic> src) {
 }
 
 // Top-level helper for compute() to parse a raw JSON asset string into route->stops map.
+// Supports two asset shapes:
+// 1) legacy: { "<route>": [ {route-stop-entry}, ... ], ... }
+// 2) optimized: { "<route>": { "O": { dest_en.., dest_tc.., stops: [...] }, "I": { ... } }, ... }
+// The returned map is normalized to Map<route, List<entry>> where each entry contains
+// at minimum: 'seq', 'stop', 'servicetype' (or 'service_type' normalized) and we also
+// inject 'bound' and per-bound 'dest_en'/'dest_tc' when available so callers (UI) can
+// easily show direction and destination metadata.
 Map<String, List<Map<String, dynamic>>> _parseRouteStopsAsset(String raw) {
   final decoded = json.decode(raw) as Map<String, dynamic>;
   final Map<String, List<Map<String, dynamic>>> map = {};
-  decoded.forEach((k, v) {
+
+  decoded.forEach((routeKey, value) {
     try {
-      final list = (v as List).map((e) => _normalizeRouteStopEntry(Map<String, dynamic>.from(e))).toList();
-      map[k] = List<Map<String, dynamic>>.from(list);
+      // Case A: legacy list-of-entries
+      if (value is List) {
+        final list = value.map((e) {
+          final entry = _normalizeRouteStopEntry(Map<String, dynamic>.from(e as Map));
+          // preserve bound if present (some legacy entries already include it)
+          return entry;
+        }).toList();
+        map[routeKey] = List<Map<String, dynamic>>.from(list);
+        return;
+      }
+
+      // Case B: optimized per-bound structure
+      if (value is Map) {
+        final routeObj = value as Map<String, dynamic>;
+        final List<Map<String, dynamic>> combined = [];
+        routeObj.forEach((boundKey, boundVal) {
+          try {
+            final boundObj = boundVal as Map<String, dynamic>;
+            final destEn = (boundObj['dest_en'] ?? boundObj['desten'] ?? '')?.toString() ?? '';
+            final destTc = (boundObj['dest_tc'] ?? boundObj['desttc'] ?? '')?.toString() ?? '';
+            final stopsList = boundObj['stops'];
+            if (stopsList is List) {
+              for (final rawEntry in stopsList) {
+                try {
+                  final entry = _normalizeRouteStopEntry(Map<String, dynamic>.from(rawEntry as Map));
+                  // inject bound and dest fields for convenience
+                  entry['bound'] = boundKey;
+                  if (destEn.isNotEmpty) entry['dest_en'] = destEn;
+                  if (destTc.isNotEmpty) entry['dest_tc'] = destTc;
+                  combined.add(entry);
+                } catch (_) {}
+              }
+            }
+          } catch (_) {}
+        });
+        map[routeKey] = combined;
+        return;
+      }
+
+      // Unknown shape: try to coerce as list
+      map[routeKey] = List<Map<String, dynamic>>.from((value as List).map((e) => Map<String, dynamic>.from(e as Map)));
     } catch (_) {
-      // fallback: try to coerce without normalization
-      map[k] = List<Map<String, dynamic>>.from((v as List).map((e) => Map<String, dynamic>.from(e)));
+      // If any coercion failed, ensure route exists with empty list
+      map[routeKey] = map[routeKey] ?? <Map<String, dynamic>>[];
     }
   });
+
   return map;
 }
 

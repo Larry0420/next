@@ -26,6 +26,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 //Tailor Made .dart imported
 import 'mtr_schedule_page.dart';
 import 'kmb_dialer.dart';
+import 'kmb_nearby_page.dart';
+import 'kmb_pinned_page.dart';
 
 // ========================= Station Grouping (Top-level) =========================
 class _StationGroupInfo {
@@ -2157,6 +2159,29 @@ class LanguageProvider extends ChangeNotifier {
   String get noScheduleDataDescription => _isEnglish ? 'Choose a route from the list above to view schedules' : '從上方列表中選擇路綫以查看班次';
   String get noTrainsDescription => _isEnglish ? 'No trains available for this route' : '該路綫目前沒有班次信息';
   String get totalTrains => _isEnglish ? 'trains' : '列車';
+  
+  // KMB-specific labels
+  String get nearby => _isEnglish ? 'Nearby' : '附近';
+  String get pinned => _isEnglish ? 'Pinned' : '固定';
+  String get history => _isEnglish ? 'History' : '歷史記錄';
+  String get pinnedRoutes => _isEnglish ? 'Pinned Routes' : '固定路線';
+  String get routeHistory => _isEnglish ? 'Route History' : '路線歷史';
+  String get noPinnedRoutes => _isEnglish ? 'No pinned routes' : '沒有固定路線';
+  String get pinRoutesToSeeThemHere => _isEnglish ? 'Pin routes to see them here' : '固定路線以在此顯示';
+  String get noHistory => _isEnglish ? 'No history' : '沒有歷史記錄';
+  String get viewedRoutesWillAppearHere => _isEnglish ? 'Viewed routes will appear here' : '已查看的路線將顯示在此';
+  String get clearHistory => _isEnglish ? 'Clear History' : '清除歷史';
+  String get clearAllHistory => _isEnglish ? 'Clear all history?' : '清除所有歷史記錄？';
+  String get thisActionCannotBeUndone => _isEnglish ? 'This action cannot be undone.' : '此操作無法撤銷。';
+  String get cancel => _isEnglish ? 'Cancel' : '取消';
+  String get clear => _isEnglish ? 'Clear' : '清除';
+  String get justNow => _isEnglish ? 'Just now' : '剛剛';
+  String get outbound => _isEnglish ? 'Outbound' : '往程';
+  String get inbound => _isEnglish ? 'Inbound' : '返程';
+  String get pinRoute => _isEnglish ? 'Pin route' : '固定路線';
+  String get routePinned => _isEnglish ? 'Route pinned' : '已固定路線';
+  String get type => _isEnglish ? 'Type' : '類型';
+  String get kmb => _isEnglish ? 'KMB' : '巴士'; // KMB is a brand name, same in both languages
 }
 
 /* ========================= API Models ========================= */
@@ -3481,9 +3506,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
 
     // Insert KMB before Settings at index 3 if enabled
     if (devSettings.showKmbInNav) {
-      pages.insert(kmbIndex, Scaffold(
-        appBar: AppBar(title: Text('KMB Routes')),
-        body: KmbDialer(),
+      pages.insert(kmbIndex, DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          appBar: TabBar(tabs: [
+            Tab(icon: Icon(Icons.dialpad), text: lang.routes),
+            Tab(icon: Icon(Icons.location_on), text: lang.nearby),
+            Tab(icon: Icon(Icons.push_pin), text: lang.pinned),
+          ]),
+          body: TabBarView(children: [KmbDialer(), KmbNearbyPage(), KmbPinnedPage()]),
+        ),
       ));
     }
 
@@ -3971,7 +4003,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                                 Consumer<AccessibilityProvider>(
                                   builder: (context, accessibility, _) => NavigationDestination(
                                     icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
-                                    label: 'KMB',
+                                    label: lang.kmb,
                                   ),
                                 ),
                               Consumer<AccessibilityProvider>(

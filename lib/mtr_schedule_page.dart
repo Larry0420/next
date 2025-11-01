@@ -5,12 +5,161 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:flutter/foundation.dart' show compute;
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ui_constants.dart';
-
 // Import LanguageProvider, DeveloperSettingsProvider and AppColors from main.dart
 import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, AppColors;
+
+// Cached SharedPreferences future to avoid repeated platform channel lookups
+final Future<SharedPreferences> _sharedPrefsInstance = SharedPreferences.getInstance();
+
+// Top-level isolate helpers --------------------------------------------------
+/// Parse raw MTR schedule JSON (string) and return a serialized Map matching
+/// the shape produced by `_scheduleToJson` so it can be consumed on the main
+/// isolate without performing heavy json parsing there.
+Map<String, dynamic> _parseAndSerializeMtrResponse(String raw) {
+  final decoded = jsonDecode(raw);
+  final out = <String, dynamic>{
+    'status': 0,
+    'message': '',
+    'lineStationKey': null,
+    'currentTime': null,
+    'systemTime': null,
+    'isDelay': false,
+    'directionTrains': <String, dynamic>{},
+  };
+
+  try {
+    final statusRaw = decoded['status'];
+    final status = statusRaw is int ? statusRaw : int.tryParse('$statusRaw') ?? 0;
+    out['status'] = status;
+    out['message'] = decoded['message']?.toString() ?? '';
+
+    final data = decoded['data'];
+    if (data is Map<String, dynamic>) {
+      String? lineStationKey;
+      DateTime? parsedTime;
+      DateTime? parsedSysTime;
+      bool isDelay = false;
+
+      for (final entry in data.entries) {
+        lineStationKey ??= entry.key;
+        final stationData = entry.value;
+        if (stationData is Map<String, dynamic>) {
+          final currTime = stationData['curr_time']?.toString();
+          parsedTime ??= (currTime != null && currTime.isNotEmpty)
+              ? DateTime.tryParse(currTime.replaceFirst(' ', 'T'))
+              : null;
+          final sysTime = stationData['sys_time']?.toString();
+          parsedSysTime ??= (sysTime != null && sysTime.isNotEmpty)
+              ? DateTime.tryParse(sysTime.replaceFirst(' ', 'T'))
+              : null;
+          final delayRaw = stationData['isdelay']?.toString();
+          if (delayRaw != null && delayRaw.toUpperCase() == 'Y') isDelay = true;
+
+          for (final dirEntry in stationData.entries) {
+            final dirKey = dirEntry.key;
+            if (dirKey == 'curr_time' || dirKey == 'sys_time' || dirKey == 'tcg') continue;
+            final trainListRaw = dirEntry.value;
+            if (trainListRaw is List) {
+              final trainsOut = <Map<String, dynamic>>[];
+              for (final train in trainListRaw) {
+                if (train is Map) {
+                  trainsOut.add({
+                    'dest': train['dest']?.toString() ?? '',
+                    'plat': train['plat']?.toString() ?? '',
+                    'time': train['time']?.toString() ?? '',
+                    'ttnt': train['ttnt'] is int ? train['ttnt'] : int.tryParse('${train['ttnt'] ?? ''}'),
+                    'seq': train['seq'] is int ? train['seq'] : int.tryParse('${train['seq'] ?? ''}'),
+                    'timetype': train['timetype']?.toString(),
+                    'route': train['route']?.toString(),
+                  });
+                }
+              }
+              if (trainsOut.isNotEmpty) {
+                (out['directionTrains'] as Map<String, dynamic>)[dirKey.toString()] = trainsOut;
+              }
+            }
+          }
+        }
+      }
+
+      out['lineStationKey'] = lineStationKey;
+      out['currentTime'] = parsedTime?.toIso8601String();
+      out['systemTime'] = parsedSysTime?.toIso8601String();
+      out['isDelay'] = isDelay;
+    }
+  } catch (_) {
+    // Swallow and return as best-effort parsed structure
+  }
+
+  return out;
+}
+
+/// Build a lightweight serializable lines structure from the catalog raw JSON
+/// This will be executed in an isolate to avoid heavy main-thread parsing.
+List<Map<String, dynamic>> _buildLinesFromCatalogRaw(String raw) {
+  final decoded = jsonDecode(raw) as Map<String, dynamic>;
+  final stationGroupsRaw = decoded['station_groups'];
+  final Map<String, Set<String>> interchangeMatrix = {};
+  if (stationGroupsRaw is List) {
+    for (final item in stationGroupsRaw) {
+      if (item is Map<String, dynamic>) {
+        final stationCode = item['station_code']?.toString();
+        if (stationCode == null || stationCode.isEmpty) continue;
+        final lines = (item['lines'] as List?)?.map((e) => e.toString()).where((e) => e.isNotEmpty).toSet() ?? <String>{};
+        interchangeMatrix[stationCode] = lines;
+      }
+    }
+  }
+
+  final List<Map<String, dynamic>> outLines = [];
+  final lineGroups = decoded['line_groups'];
+  if (lineGroups is List) {
+    for (final entry in lineGroups) {
+      if (entry is! Map<String, dynamic>) continue;
+      final lineCode = entry['line_code']?.toString() ?? '';
+      if (lineCode.isEmpty) continue;
+
+      final stations = <Map<String, dynamic>>[];
+      final stationCodes = entry['stations'];
+      if (stationCodes is List) {
+        for (final codeRaw in stationCodes) {
+          final code = codeRaw?.toString() ?? '';
+          if (code.isEmpty) continue;
+          final interchangeLines = <String>{...(interchangeMatrix[code] ?? const <String>{})};
+          interchangeLines.remove(lineCode);
+          stations.add({
+            'stationCode': code,
+            'interchangeLines': interchangeLines.toList()..sort(),
+          });
+        }
+      }
+
+      final directionMap = <String, List<String>>{};
+      final directions = entry['directions'];
+      if (directions is Map<String, dynamic>) {
+        for (final dirEntry in directions.entries) {
+          final dirKey = dirEntry.key.toString().toUpperCase();
+          final codes = (dirEntry.value as List?)?.map((e) => e.toString()).where((code) => code.isNotEmpty).toList() ?? <String>[];
+          if (codes.isNotEmpty) directionMap[dirKey] = codes;
+        }
+      }
+
+      outLines.add({
+        'lineCode': lineCode,
+        'name': entry['line_name']?.toString() ?? '',
+        'stations': stations,
+        'directions': directionMap,
+      });
+    }
+  }
+
+  return outLines;
+}
+
 
 // ========================= MTR API Service =========================
 
@@ -32,6 +181,8 @@ class MtrApiService {
   
   // Request deduplication - prevent duplicate simultaneous requests
   static final Map<String, Future<MtrScheduleResponse>> _inflightRequests = {};
+
+  // (SharedPreferences cached future is stored in file-scope `_sharedPrefsInstance`)
   
   // Network retry configuration
   static const int _maxRetries = 3;
@@ -150,10 +301,13 @@ class MtrApiService {
     debugPrint('MTR API: Fetching from network (attempt ${attemptNumber + 1}, timeout: ${timeout.inSeconds}s)');
     
     final response = await http.get(url).timeout(timeout);
-    
+
     if (response.statusCode == 200) {
-      final json = jsonDecode(response.body);
-      return MtrScheduleResponse.fromJson(json);
+      // Parse and serialize the heavy JSON work in a background isolate
+      final parsed = await compute(_parseAndSerializeMtrResponse, response.body);
+      // Convert the serialized parsed map into the typed response using
+      // the existing helper that expects the same shape as _scheduleToJson
+      return _scheduleFromJson(parsed);
     } else {
       throw Exception('MTR API Error: HTTP ${response.statusCode}');
     }
@@ -185,7 +339,7 @@ class MtrApiService {
   /// Save to SharedPreferences for offline support
   Future<void> _saveToPersistentCache(String cacheKey, MtrScheduleResponse response) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _sharedPrefsInstance;
       
       // Ensure cache version is current
       final version = prefs.getInt(_cacheVersionKey) ?? 0;
@@ -208,7 +362,7 @@ class MtrApiService {
   /// Load from SharedPreferences
   Future<MtrScheduleResponse?> _loadFromPersistentCache(String cacheKey) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       
       final jsonStr = prefs.getString('$_persistentCachePrefix$cacheKey');
       if (jsonStr == null) return null;
@@ -243,7 +397,7 @@ class MtrApiService {
   /// Clear all caches (memory + persistent)
   Future<void> clearAllCaches() async {
     _memoryCache.clear();
-    final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
     await _clearPersistentCache(prefs);
     debugPrint('MTR API: Cleared all caches');
   }
@@ -872,8 +1026,54 @@ class MtrCatalogProvider extends ChangeNotifier {
   Future<void> _loadMtrData({bool loadCachedSelection = true}) async {
     try {
       final raw = await rootBundle.loadString(_catalogAssetPath);
-      final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      _lines = _buildLinesFromJson(decoded);
+      // Parse heavy catalog JSON in background
+      final parsedLines = await compute(_buildLinesFromCatalogRaw, raw);
+      final List<MtrLine> built = [];
+      for (final entry in parsedLines) {
+        try {
+          final lineCode = entry['lineCode'] as String? ?? '';
+          if (lineCode.isEmpty) continue;
+          final meta = _lineMetadata[lineCode];
+          final nameEn = meta?.nameEn ?? (entry['name'] as String? ?? lineCode);
+          final nameZh = meta?.nameZh ?? (entry['name'] as String? ?? lineCode);
+          final color = meta?.color ?? const Color(0xFF607D8B);
+
+          final stationsRaw = entry['stations'] as List<dynamic>? ?? const [];
+          final stations = <MtrStation>[];
+          for (final s in stationsRaw) {
+            final code = s['stationCode']?.toString() ?? '';
+            if (code.isEmpty) continue;
+            final interchangeLines = (s['interchangeLines'] as List<dynamic>? ?? const []).map((e) => e.toString()).toList();
+            final nameEnglish = stationNameResolver.nameEn(code);
+            final nameChinese = stationNameResolver.nameZh(code);
+            stations.add(MtrStation(
+              stationCode: code,
+              nameEn: nameEnglish,
+              nameZh: nameChinese,
+              interchangeLines: interchangeLines..sort(),
+            ));
+          }
+
+          final directionsRaw = entry['directions'] as Map<String, dynamic>? ?? {};
+          final directionMap = <String, List<String>>{};
+          directionsRaw.forEach((k, v) {
+            try {
+              final list = (v as List).map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+              if (list.isNotEmpty) directionMap[k.toString()] = list;
+            } catch (_) {}
+          });
+
+          built.add(MtrLine(
+            lineCode: lineCode,
+            nameEn: nameEn,
+            nameZh: nameZh,
+            lineColor: color,
+            stations: stations,
+            directionTermini: directionMap,
+          ));
+        } catch (_) {}
+      }
+      _lines = built;
     } catch (e) {
       debugPrint('Failed to load MTR catalog from JSON: $e');
       _lines = const [];
@@ -894,85 +1094,11 @@ class MtrCatalogProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<MtrLine> _buildLinesFromJson(Map<String, dynamic> json) {
-    final stationGroupsRaw = json['station_groups'];
-    final Map<String, Set<String>> interchangeMatrix = {};
-    if (stationGroupsRaw is List) {
-      for (final item in stationGroupsRaw) {
-        if (item is Map<String, dynamic>) {
-          final stationCode = item['station_code']?.toString();
-          if (stationCode == null || stationCode.isEmpty) continue;
-          final lines = (item['lines'] as List?)?.map((e) => e.toString()).where((e) => e.isNotEmpty).toSet() ?? <String>{};
-          interchangeMatrix[stationCode] = lines;
-        }
-      }
-    }
-
-    final List<MtrLine> lines = [];
-    final lineGroups = json['line_groups'];
-    if (lineGroups is List) {
-      for (final entry in lineGroups) {
-        if (entry is! Map<String, dynamic>) continue;
-        final lineCode = entry['line_code']?.toString() ?? '';
-        if (lineCode.isEmpty) continue;
-
-        final meta = _lineMetadata[lineCode];
-        final nameEn = meta?.nameEn ?? entry['line_name']?.toString() ?? lineCode;
-        final nameZh = meta?.nameZh ?? entry['line_name']?.toString() ?? lineCode;
-        final color = meta?.color ?? const Color(0xFF607D8B);
-
-        final stations = <MtrStation>[];
-        final stationCodes = entry['stations'];
-        if (stationCodes is List) {
-          for (final codeRaw in stationCodes) {
-            final code = codeRaw?.toString() ?? '';
-            if (code.isEmpty) continue;
-            final nameEnglish = stationNameResolver.nameEn(code);
-            final nameChinese = stationNameResolver.nameZh(code);
-            final interchangeLines = <String>{...(interchangeMatrix[code] ?? const <String>{})};
-            interchangeLines.remove(lineCode);
-            stations.add(MtrStation(
-              stationCode: code,
-              nameEn: nameEnglish,
-              nameZh: nameChinese,
-              interchangeLines: interchangeLines.toList()..sort(),
-            ));
-          }
-        }
-
-        final directionMap = <String, List<String>>{};
-        final directions = entry['directions'];
-        if (directions is Map<String, dynamic>) {
-          for (final dirEntry in directions.entries) {
-            final dirKey = dirEntry.key.toString().toUpperCase();
-            final codes = (dirEntry.value as List?)
-                ?.map((e) => e.toString())
-                .where((code) => code.isNotEmpty)
-                .toList() ??
-                <String>[];
-            if (codes.isNotEmpty) {
-              directionMap[dirKey] = codes;
-            }
-          }
-        }
-
-        lines.add(MtrLine(
-          lineCode: lineCode,
-          nameEn: nameEn,
-          nameZh: nameZh,
-          lineColor: color,
-          stations: stations,
-          directionTermini: directionMap,
-        ));
-      }
-    }
-
-    return lines;
-  }
+  
   
   Future<void> _loadSavedSelection() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _sharedPrefsInstance;
       final savedLineCode = prefs.getString('mtr_selected_line');
       final savedStationCode = prefs.getString('mtr_selected_station');
       final savedDirection = prefs.getString('mtr_selected_direction');
@@ -1028,7 +1154,7 @@ class MtrCatalogProvider extends ChangeNotifier {
     
     // Save selection
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       await prefs.setString('mtr_selected_line', line.lineCode);
       if (_selectedStation != null) {
         await prefs.setString('mtr_selected_station', _selectedStation!.stationCode);
@@ -1046,7 +1172,7 @@ class MtrCatalogProvider extends ChangeNotifier {
     
     // Save selection
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       await prefs.setString('mtr_selected_station', station.stationCode);
       // Also save line code to ensure consistency
       if (_selectedLine != null) {
@@ -1067,7 +1193,7 @@ class MtrCatalogProvider extends ChangeNotifier {
     
     // Save selection
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _sharedPrefsInstance;
       await prefs.setString('mtr_selected_direction', direction);
       // Also ensure line and station are saved
       if (_selectedLine != null) {
@@ -1104,7 +1230,7 @@ class MtrCatalogProvider extends ChangeNotifier {
     
     // Save selection
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       await prefs.setString('mtr_selected_line', line.lineCode);
       await prefs.setString('mtr_selected_station', station.stationCode);
       // Clear saved direction when changing line
@@ -1151,7 +1277,7 @@ class MtrScheduleProvider extends ChangeNotifier {
 
   Future<void> loadAutoRefreshPref() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       _autoRefreshEnabled = prefs.getBool(_autoRefreshPrefKey) ?? true;
       notifyListeners();
     } catch (_) {
@@ -1163,7 +1289,7 @@ class MtrScheduleProvider extends ChangeNotifier {
     _autoRefreshEnabled = enabled;
     notifyListeners();
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       await prefs.setBool(_autoRefreshPrefKey, enabled);
     } catch (_) {}
   }
@@ -1188,7 +1314,8 @@ class MtrScheduleProvider extends ChangeNotifier {
   Timer? _autoRefreshTimer;
   Duration? _currentRefreshInterval;
   // Use a fixed 10s auto-refresh interval as requested (avoid multiplicative backoff)
-  static const Duration _defaultRefreshInterval = Duration(seconds: 10); // Fixed once interval
+  // Use a slightly larger default refresh interval to reduce parse frequency
+  static const Duration _defaultRefreshInterval = Duration(seconds: 30); // Fixed once interval
   // No offline/adaptive intervals — auto-refresh uses fixed interval.
   
   DateTime? _lastSuccessfulRefreshTime;
@@ -2193,7 +2320,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
 
   Future<void> _loadExpandPrefs() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       final stationExpanded = prefs.getBool(_stationExpandPrefKey) ?? true;
       final lineExpanded = prefs.getBool(_lineExpandPrefKey) ?? true;
       
@@ -2216,7 +2343,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     // UI animation handled declaratively in build via AnimatedSize/AnimatedSwitcher.
     
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       await prefs.setBool(_stationExpandPrefKey, expanded);
     } catch (_) {}
   }
@@ -2229,7 +2356,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     // UI animation handled declaratively in build via AnimatedSize/AnimatedSwitcher.
     
     try {
-      final prefs = await SharedPreferences.getInstance();
+  final prefs = await _sharedPrefsInstance;
       await prefs.setBool(_lineExpandPrefKey, expanded);
     } catch (_) {}
   }
@@ -2511,7 +2638,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                     onTap: () {
                       HapticFeedback.selectionClick();
                       catalog.selectDirection('');
-                      SharedPreferences.getInstance().then((prefs) {
+                      _sharedPrefsInstance.then((prefs) {
                         prefs.remove('mtr_selected_direction');
                       });
                     },
