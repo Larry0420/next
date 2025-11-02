@@ -361,16 +361,64 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     
-    // Get stops for scroll-to-nearest feature
-    List<Map<String, dynamic>> stopsForScroll = [];
-    if (_variantStops != null) {
-      stopsForScroll = _variantStops!;
-    }
-    
     return Scaffold(
       appBar: AppBar(
         title: Text('${lang.route} ${widget.route}'),
         actions: [
+          // Location-based scroll button
+          if (_scrollController.hasClients)
+            IconButton(
+              icon: _locationLoading 
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Icon(
+                    _userPosition != null ? Icons.my_location : Icons.location_searching,
+                  ),
+              tooltip: isEnglish ? 'Scroll to nearest stop' : '捲動至最近站點',
+              onPressed: _locationLoading ? null : () async {
+                // Get current stops from the list
+                List<Map<String, dynamic>> stops = [];
+                if (_variantStops != null && _variantStops!.isNotEmpty) {
+                  stops = _variantStops!;
+                } else {
+                  // Try to get from cached data
+                  try {
+                    final routeMap = await Kmb.buildRouteToStopsMap();
+                    final r = widget.route.trim().toUpperCase();
+                    final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
+                    final entries = routeMap[r] ?? routeMap[base] ?? [];
+                    
+                    // Filter by selected direction/service
+                    stops = entries.where((e) {
+                      if (!e.containsKey('seq')) return false;
+                      if (_selectedDirection != null) {
+                        final bound = e['bound']?.toString().trim().toUpperCase() ?? '';
+                        if (bound.isNotEmpty && _selectedDirection!.isNotEmpty && 
+                            bound[0] != _selectedDirection![0]) return false;
+                      }
+                      if (_selectedServiceType != null) {
+                        final st = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
+                        if (st != _selectedServiceType) return false;
+                      }
+                      return true;
+                    }).toList();
+                    
+                    stops.sort((a, b) {
+                      final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
+                      final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
+                      return ai.compareTo(bi);
+                    });
+                  } catch (_) {}
+                }
+                
+                if (stops.isNotEmpty) {
+                  await _getUserLocationAndScrollToNearest(stops);
+                }
+              },
+            ),
           IconButton(
             icon: Icon(Icons.push_pin_outlined),
             tooltip: lang.pinRoute,
@@ -398,22 +446,6 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                         ],
                       ))),
       ),
-      floatingActionButton: stopsForScroll.isNotEmpty 
-        ? FloatingActionButton(
-            mini: true,
-            onPressed: _locationLoading 
-              ? null 
-              : () => _getUserLocationAndScrollToNearest(stopsForScroll),
-            tooltip: isEnglish ? 'Find nearest stop' : '尋找最近的站點',
-            child: _locationLoading 
-              ? SizedBox(
-                  width: 20, 
-                  height: 20, 
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
-                )
-              : Icon(Icons.my_location, size: 20),
-          )
-        : null,
     );
   }
 
@@ -1195,6 +1227,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
 
     // Build optimized stop cards using cached data
+    // Auto-scroll to nearest stop when data first loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_userPosition == null && !_locationLoading && sortedStops.isNotEmpty) {
+        _getUserLocationAndScrollToNearest(sortedStops);
+      }
+    });
+    
     return Column(
       children: [
         // Independent Route Destination Widget
@@ -1349,6 +1388,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         }
 
         // Build optimized stop cards using cached data - no redundant API calls!
+        // Auto-scroll to nearest stop when data first loads
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_userPosition == null && !_locationLoading && stops.isNotEmpty) {
+            _getUserLocationAndScrollToNearest(stops);
+          }
+        });
+        
         return Column(
           children: [
             // Independent Route Destination Widget
@@ -1614,8 +1660,8 @@ class ExpandableStopCard extends StatefulWidget {
 
 class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticKeepAliveClientMixin {
   bool _isExpanded = false;
-  Timer? _etaRefreshTimer;
-  List<Map<String, dynamic>> _currentEtas = [];
+  // Removed: Timer? _etaRefreshTimer; - Parent handles refresh, not individual cards
+  // Removed: bool _etaLoading = false; - No individual loading state needed
 
   @override
   bool get wantKeepAlive => true; // Keep state alive during parent rebuilds
@@ -1623,61 +1669,20 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   @override
   void initState() {
     super.initState();
-    _currentEtas = List.from(widget.etas);
-    _startEtaRefresh();
+    // No need to start refresh timer - parent provides updated ETAs via widget.etas
   }
 
   @override
   void dispose() {
-    _etaRefreshTimer?.cancel();
+    // No timer to cancel anymore
     super.dispose();
   }
 
   @override
   void didUpdateWidget(ExpandableStopCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Update ETAs when parent provides new data
-    if (oldWidget.etas != widget.etas) {
-      setState(() {
-        _currentEtas = List.from(widget.etas);
-      });
-    }
-  }
-
-  void _startEtaRefresh() {
-    // Each stop card refreshes its own ETAs every 30 seconds independently
-    _etaRefreshTimer = Timer.periodic(Duration(seconds: 30), (timer) async {
-      if (!mounted) return;
-      
-      try {
-        // Fetch fresh ETA data for this specific stop
-        final route = widget.route.trim().toUpperCase();
-        final serviceType = widget.selectedServiceType ?? '1';
-        
-        final entries = await Kmb.fetchRouteEta(route, serviceType);
-        
-        // Filter for this specific stop sequence
-        final freshEtas = entries
-            .where((e) => e['seq']?.toString() == widget.seq)
-            .toList();
-        
-        // Sort by eta_seq
-        freshEtas.sort((a, b) {
-          final ai = int.tryParse(a['eta_seq']?.toString() ?? '') ?? 0;
-          final bi = int.tryParse(b['eta_seq']?.toString() ?? '') ?? 0;
-          return ai.compareTo(bi);
-        });
-        
-        if (mounted) {
-          setState(() {
-            _currentEtas = freshEtas;
-          });
-        }
-      } catch (e) {
-        // Silently fail - keep showing old data
-        print('Stop ${widget.seq} ETA refresh failed: $e');
-      }
-    });
+    // Widget already receives updated ETAs from parent via widget.etas
+    // No need to manually copy - just trigger rebuild
   }
 
   Future<void> _pinStop(BuildContext context) async {
@@ -1793,18 +1798,21 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // ETA times in a row
-                        if (_currentEtas.isEmpty)
-                          Text(
-                            widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 12,
-                            ),
-                          )
-                        else
-                          Row(
-                            children: [
-                              ..._currentEtas.take(3).expand((e) sync* {
+                        AnimatedSwitcher(
+                          duration: Duration(milliseconds: 300),
+                          child: widget.etas.isEmpty
+                              ? Text(
+                                  key: ValueKey('empty'),
+                                  widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                )
+                              : Row(
+                                  key: ValueKey('etas'),
+                                  children: [
+                                    ...widget.etas.take(3).expand((e) sync* {
                                 final etaRaw = e['eta'] ?? e['eta_time'];
                                 final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
                                 final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
@@ -1888,6 +1896,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                               }).toList(),
                             ],
                           ),
+                        ),
                         
                         SizedBox(height: 8),
                         
@@ -1939,9 +1948,9 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
               ),
               
               // Expanded details
-              if (_isExpanded && _currentEtas.isNotEmpty) ...[
+              if (_isExpanded && widget.etas.isNotEmpty) ...[
                 Divider(height: 20),
-                ..._currentEtas.map((e) {
+                ...widget.etas.map((e) {
                   final etaRaw = e['eta'] ?? e['eta_time'];
                   final etaSeq = e['eta_seq']?.toString() ?? '';
                   final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';

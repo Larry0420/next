@@ -27,6 +27,35 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   // Range selection
   double _rangeMeters = 100.0; // Default 100m
   final TextEditingController _customRangeController = TextEditingController();
+  
+  // Spatial index cache for O(1) nearby lookup
+  static Map<String, Map<String, dynamic>>? _globalStopMap;
+  static List<_StopDistance>? _allStopsWithCoords;
+  static Map<String, List<_StopDistance>>? _spatialGrid; // Grid-based spatial index
+  
+  // Grid configuration: ~1km cells for Hong Kong (lat/lng ~0.009 degrees ≈ 1km)
+  static const double _gridSize = 0.01; // Approximately 1km grid cells
+  
+  static String _getGridKey(double lat, double lng) {
+    final gridLat = (lat / _gridSize).floor();
+    final gridLng = (lng / _gridSize).floor();
+    return '$gridLat,$gridLng';
+  }
+  
+  static List<String> _getNearbyCells(double lat, double lng, double rangeMeters) {
+    // Calculate how many grid cells we need to check based on range
+    final cellsToCheck = (rangeMeters / 1000.0 / _gridSize).ceil() + 1;
+    final gridLat = (lat / _gridSize).floor();
+    final gridLng = (lng / _gridSize).floor();
+    
+    final List<String> cells = [];
+    for (int dLat = -cellsToCheck; dLat <= cellsToCheck; dLat++) {
+      for (int dLng = -cellsToCheck; dLng <= cellsToCheck; dLng++) {
+        cells.add('${gridLat + dLat},${gridLng + dLng}');
+      }
+    }
+    return cells;
+  }
 
   @override
   void initState() {
@@ -69,40 +98,80 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
       _position = pos;
 
-      // Build stop map and compute distances
-      // This will automatically fetch from API if prebuilt JSON is not available (e.g., web builds)
-      final stopMap = await Kmb.buildStopMap();
-      
-      if (stopMap.isEmpty) {
-        setState(() {
-          _error = langProv?.isEnglish ?? true 
-            ? 'No stops data available. Please check your internet connection.' 
-            : '沒有站點資料。請檢查您的網路連線。';
-          _loading = false;
+      // O(1) optimization: Build stop map and coordinates list once globally
+      if (_globalStopMap == null || _allStopsWithCoords == null || _spatialGrid == null) {
+        final stopMap = await Kmb.buildStopMap();
+        
+        if (stopMap.isEmpty) {
+          setState(() {
+            _error = langProv?.isEnglish ?? true 
+              ? 'No stops data available. Please check your internet connection.' 
+              : '沒有站點資料。請檢查您的網路連線。';
+            _loading = false;
+          });
+          return;
+        }
+        
+        _globalStopMap = stopMap;
+        
+        // Pre-compute all stop coordinates once and build spatial grid index
+        final List<_StopDistance> allStops = [];
+        final Map<String, List<_StopDistance>> grid = {};
+        
+        stopMap.forEach((stopId, meta) {
+          try {
+            final latRaw = meta['lat'] ?? meta['latitude'];
+            final lngRaw = meta['long'] ?? meta['lng'] ?? meta['longitude'];
+            if (latRaw == null || lngRaw == null) return;
+            final lat = double.tryParse(latRaw.toString());
+            final lng = double.tryParse(lngRaw.toString());
+            if (lat == null || lng == null) return;
+            
+            final stop = _StopDistance(stopId: stopId, lat: lat, lng: lng, distanceMeters: 0, meta: meta);
+            allStops.add(stop);
+            
+            // Add to spatial grid for O(1) lookup
+            final gridKey = _getGridKey(lat, lng);
+            grid.putIfAbsent(gridKey, () => []).add(stop);
+          } catch (_) {}
         });
-        return;
+        
+        _allStopsWithCoords = allStops;
+        _spatialGrid = grid;
       }
       
-      final List<_StopDistance> list = [];
-      stopMap.forEach((stopId, meta) {
-        try {
-          final latRaw = meta['lat'] ?? meta['latitude'];
-          final lngRaw = meta['long'] ?? meta['lng'] ?? meta['longitude'];
-          if (latRaw == null || lngRaw == null) return;
-          final lat = double.tryParse(latRaw.toString());
-          final lng = double.tryParse(lngRaw.toString());
-          if (lat == null || lng == null) return;
-          final dist = Geolocator.distanceBetween(pos.latitude, pos.longitude, lat, lng);
-          list.add(_StopDistance(stopId: stopId, lat: lat, lng: lng, distanceMeters: dist, meta: meta));
-        } catch (_) {}
-      });
-
-      list.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+      // O(1) spatial lookup: Only check stops in nearby grid cells
+      final nearbyCells = _getNearbyCells(pos.latitude, pos.longitude, _rangeMeters);
+      final List<_StopDistance> candidates = [];
       
-      // Filter by range and cap results to 50 nearby stops to avoid too many API calls
-      final filtered = list.where((s) => s.distanceMeters <= _rangeMeters).toList();
+      for (final cellKey in nearbyCells) {
+        final cellStops = _spatialGrid![cellKey];
+        if (cellStops != null) {
+          candidates.addAll(cellStops);
+        }
+      }
+      
+      // O(k) where k = stops in nearby cells (typically 10-50 instead of 5000+)
+      final List<_StopDistance> nearbyList = [];
+      for (final stop in candidates) {
+        final dist = Geolocator.distanceBetween(pos.latitude, pos.longitude, stop.lat, stop.lng);
+        
+        if (dist <= _rangeMeters) {
+          nearbyList.add(_StopDistance(
+            stopId: stop.stopId,
+            lat: stop.lat,
+            lng: stop.lng,
+            distanceMeters: dist,
+            meta: stop.meta,
+          ));
+        }
+      }
+
+      // O(k log k) where k is typically 10-50 (constant time in practice)
+      nearbyList.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+      
       setState(() {
-        _nearby = filtered.take(50).toList();
+        _nearby = nearbyList.take(50).toList();
         _loading = false;
       });
 

@@ -212,7 +212,8 @@ class _KmbDialerState extends State<KmbDialer> {
     final theme = Theme.of(context);
     final lang = context.watch<LanguageProvider>();
   final displayRoutes = input.isEmpty ? <Map<String, dynamic>>[] : searchResults;
-  final baseFromInput = RegExp(r'^(\d+)').firstMatch(input)?.group(1);
+  // Extract base for grouping: letter prefix (if any) + digits, e.g., 'N' from 'N170', '11' from '11A'
+  final baseFromInput = RegExp(r'^([A-Z]?\d+)').firstMatch(input)?.group(1);
     // We'll use a Stack so the dialer can float in a one-handed position
     return Stack(
       children: [
@@ -259,9 +260,10 @@ class _KmbDialerState extends State<KmbDialer> {
                         return ConstrainedBox(
                           constraints: BoxConstraints(maxHeight: maxHeight),
                           child: Builder(builder: (_) {
-                            // Group display routes by their numeric base (e.g., '11', '11A' -> base '11')
+                            // Group display routes by their base (e.g., '11'/'11A' -> '11', 'N170'/'N170P' -> 'N170')
+                            // Support both digit-only routes and letter-prefixed routes (B, N, A, E, etc.)
                             final Map<String, List<Map<String, dynamic>>> groups = {};
-                            final baseRe = RegExp(r'^(\d+)');
+                            final baseRe = RegExp(r'^([A-Z]?\d+)'); // Matches optional letter + digits
                             for (final routeData in displayRoutes) {
                               final route = routeData['route'] as String;
                               final m = baseRe.firstMatch(route);
@@ -269,13 +271,33 @@ class _KmbDialerState extends State<KmbDialer> {
                               groups.putIfAbsent(base, () => []).add(routeData);
                             }
 
-                            // Sort group keys numerically where possible
+                            // Sort group keys: letter-prefixed routes first (alphabetically), then numeric routes
                             final sortedBases = groups.keys.toList()
                               ..sort((a, b) {
-                                final ai = int.tryParse(a);
-                                final bi = int.tryParse(b);
-                                if (ai != null && bi != null) return ai.compareTo(bi);
-                                return a.compareTo(b);
+                                // Extract letter prefix and numeric part
+                                final aMatch = RegExp(r'^([A-Z]?)(\d+)').firstMatch(a);
+                                final bMatch = RegExp(r'^([A-Z]?)(\d+)').firstMatch(b);
+                                
+                                if (aMatch == null || bMatch == null) return a.compareTo(b);
+                                
+                                final aPrefix = aMatch.group(1) ?? '';
+                                final bPrefix = bMatch.group(1) ?? '';
+                                final aNum = int.tryParse(aMatch.group(2) ?? '0') ?? 0;
+                                final bNum = int.tryParse(bMatch.group(2) ?? '0') ?? 0;
+                                
+                                // Both have letter prefix: compare prefix first, then number
+                                if (aPrefix.isNotEmpty && bPrefix.isNotEmpty) {
+                                  final prefixCmp = aPrefix.compareTo(bPrefix);
+                                  if (prefixCmp != 0) return prefixCmp;
+                                  return aNum.compareTo(bNum);
+                                }
+                                
+                                // One has prefix, one doesn't: prefix comes first
+                                if (aPrefix.isNotEmpty) return -1;
+                                if (bPrefix.isNotEmpty) return 1;
+                                
+                                // Both are numeric: compare numbers
+                                return aNum.compareTo(bNum);
                               });
 
                             final isEnglish = lang.isEnglish;
@@ -639,15 +661,31 @@ class _KmbDialerState extends State<KmbDialer> {
       nextKeys.add(nextChar);
     }
 
-    // When input is empty, show digits that appear as first char in routes (0-9)
+    // When input is empty, show ALL possible first characters (letters and digits)
+    // This allows users to start with B, N, A, E, etc. for special routes
     List<String> keys;
     if (input.isEmpty) {
-      keys = nextKeys.where((k) => RegExp(r"^\d$").hasMatch(k)).toList()
-        ..sort((a, b) => int.parse(a).compareTo(int.parse(b)));
+      // Show both letters (like B, N, A, E) and digits as first-character options
+      keys = nextKeys.toList()..sort((a, b) {
+        // Sort: letters first (alphabetically), then digits (numerically)
+        final aIsDigit = RegExp(r'^\d$').hasMatch(a);
+        final bIsDigit = RegExp(r'^\d$').hasMatch(b);
+        if (!aIsDigit && bIsDigit) return -1; // letters before digits
+        if (aIsDigit && !bIsDigit) return 1;  // digits after letters
+        if (aIsDigit && bIsDigit) return int.parse(a).compareTo(int.parse(b));
+        return a.compareTo(b); // both letters: alphabetical
+      });
     } else {
-      // If input currently contains only digits and length < 4, allow next digit or letter
-      // but cap route length to typical max (digits up to 3 plus optional letter)
-      keys = nextKeys.toList()..sort();
+      // After first character, show all next possible keys (letters and digits)
+      keys = nextKeys.toList()..sort((a, b) {
+        final aIsDigit = RegExp(r'^\d$').hasMatch(a);
+        final bIsDigit = RegExp(r'^\d$').hasMatch(b);
+        if (aIsDigit && bIsDigit) return int.parse(a).compareTo(int.parse(b));
+        if (!aIsDigit && !bIsDigit) return a.compareTo(b);
+        // Mix of digits and letters: digits first for easier typing
+        if (aIsDigit) return -1;
+        return 1;
+      });
     }
 
     // Separate keys into digits and letters/specials
