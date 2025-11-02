@@ -839,7 +839,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       }
       
       // Sort each ETA list by eta_seq once during cache build
-      for (final k in etaBySeq.keys) {
+      // Use toList() to avoid concurrent modification during iteration
+      for (final k in etaBySeq.keys.toList()) {
         etaBySeq[k]!.sort((a, b) {
           final ai = int.tryParse(a['eta_seq']?.toString() ?? '') ?? 0;
           final bi = int.tryParse(b['eta_seq']?.toString() ?? '') ?? 0;
@@ -1382,11 +1383,13 @@ List<Map<String, dynamic>> _enrichEntriesForStopMap(Map<String, dynamic> arg) {
   final rawEntries = arg['entries'] as List<dynamic>? ?? [];
   final rawStopMap = arg['stopMap'] as Map<dynamic, dynamic>? ?? {};
   final stopMap = <String, Map<String, dynamic>>{};
-  rawStopMap.forEach((k, v) {
+  
+  // Use for-loop instead of forEach to avoid concurrent modification
+  for (final entry in rawStopMap.entries) {
     try {
-      stopMap[k.toString()] = Map<String, dynamic>.from(v as Map);
+      stopMap[entry.key.toString()] = Map<String, dynamic>.from(entry.value as Map);
     } catch (_) {}
-  });
+  }
 
   final out = <Map<String, dynamic>>[];
   for (final re in rawEntries) {
