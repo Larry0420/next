@@ -10,6 +10,8 @@ import 'dart:io';
 import 'dart:ui';
 import 'dart:async';
 import 'package:path_provider/path_provider.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class KmbRouteStatusPage extends StatefulWidget {
   final String route;
@@ -42,6 +44,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   Map<String, dynamic>? _routeDetails;
   bool _routeDetailsLoading = false;
   String? _routeDetailsError;
+  
+  // Scroll controller for auto-scroll to nearest stop
+  final ScrollController _scrollController = ScrollController();
+  
+  // User location for finding nearest stop
+  Position? _userPosition;
+  bool _locationLoading = false;
 
   @override
   void initState() {
@@ -52,6 +61,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -351,6 +361,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     
+    // Get stops for scroll-to-nearest feature
+    List<Map<String, dynamic>> stopsForScroll = [];
+    if (_variantStops != null) {
+      stopsForScroll = _variantStops!;
+    }
+    
     return Scaffold(
       appBar: AppBar(
         title: Text('${lang.route} ${widget.route}'),
@@ -382,6 +398,22 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                         ],
                       ))),
       ),
+      floatingActionButton: stopsForScroll.isNotEmpty 
+        ? FloatingActionButton(
+            mini: true,
+            onPressed: _locationLoading 
+              ? null 
+              : () => _getUserLocationAndScrollToNearest(stopsForScroll),
+            tooltip: isEnglish ? 'Find nearest stop' : '尋找最近的站點',
+            child: _locationLoading 
+              ? SizedBox(
+                  width: 20, 
+                  height: 20, 
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+                )
+              : Icon(Icons.my_location, size: 20),
+          )
+        : null,
     );
   }
 
@@ -500,46 +532,100 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   Widget _buildSelectorsCard() {
+    final lang = context.watch<LanguageProvider>();
+    final isEnglish = lang.isEnglish;
+    
     return Card(
+      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_directions.isNotEmpty) ...[
-              Text('Direction'),
-              DropdownButton<String>(
-                value: _selectedDirection,
-                items: _directions.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
-                onChanged: (v) {
-                  setState(() {
-                    _selectedDirection = v;
-                    // Fetch route details and stops if both direction and service type are selected
-                    if (v != null && _selectedServiceType != null) {
-                      _fetchRouteDetails(widget.route.trim().toUpperCase(), v, _selectedServiceType!);
-                    }
-                  });
-                },
+              Row(
+                children: [
+                  Icon(Icons.alt_route, size: 18, color: Colors.grey[700]),
+                  SizedBox(width: 8),
+                  Text(
+                    isEnglish ? 'Direction' : '方向',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: _directions.map((d) {
+                  final isSelected = _selectedDirection == d;
+                  final isOutbound = d.toUpperCase().startsWith('O');
+                  final label = isEnglish 
+                    ? (isOutbound ? 'Outbound' : 'Inbound')
+                    : (isOutbound ? '去程' : '回程');
+                  
+                  return FilterChip(
+                    label: Text(label),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() {
+                          _selectedDirection = d;
+                          if (_selectedServiceType != null) {
+                            _fetchRouteDetails(widget.route.trim().toUpperCase(), d, _selectedServiceType!);
+                          }
+                        });
+                      }
+                    },
+                    selectedColor: isOutbound 
+                      ? Colors.green.withOpacity(0.2) 
+                      : Colors.orange.withOpacity(0.2),
+                    checkmarkColor: isOutbound ? Colors.green[700] : Colors.orange[700],
+                    avatar: isSelected 
+                      ? Icon(
+                          isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
+                          size: 18,
+                          color: isOutbound ? Colors.green[700] : Colors.orange[700],
+                        )
+                      : null,
+                  );
+                }).toList(),
               ),
             ],
             if (_serviceTypes.isNotEmpty) ...[
+              SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.route, size: 18, color: Colors.grey[700]),
+                  SizedBox(width: 8),
+                  Text(
+                    isEnglish ? 'Service Type' : '服務類型',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
               SizedBox(height: 8),
-              Text('Service Type'),
-              DropdownButton<String>(
-                value: _selectedServiceType,
-                items: _serviceTypes.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                onChanged: (v) {
-                  setState(() {
-                    _selectedServiceType = v;
-                    if (v != null) {
-                      _fetchRouteEta(widget.route.trim().toUpperCase(), v);
-                      // Also fetch route details and stops if direction is selected
-                      if (_selectedDirection != null) {
-                        _fetchRouteDetails(widget.route.trim().toUpperCase(), _selectedDirection!, v);
+              Wrap(
+                spacing: 8,
+                children: _serviceTypes.map((s) {
+                  final isSelected = _selectedServiceType == s;
+                  return FilterChip(
+                    label: Text(isEnglish ? 'Type $s' : '類型 $s'),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() {
+                          _selectedServiceType = s;
+                          _fetchRouteEta(widget.route.trim().toUpperCase(), s);
+                          if (_selectedDirection != null) {
+                            _fetchRouteDetails(widget.route.trim().toUpperCase(), _selectedDirection!, s);
+                          }
+                        });
                       }
-                    }
-                  });
-                },
+                    },
+                    selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                    checkmarkColor: Theme.of(context).colorScheme.primary,
+                  );
+                }).toList(),
               ),
             ],
           ],
@@ -1025,6 +1111,62 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     );
   }
 
+  /// Get user location and find nearest stop index
+  Future<void> _getUserLocationAndScrollToNearest(List<Map<String, dynamic>> stops) async {
+    if (_locationLoading || _userPosition != null) return; // Already loading or loaded
+    
+    setState(() => _locationLoading = true);
+    
+    try {
+      final status = await Permission.location.request();
+      if (!status.isGranted) {
+        setState(() => _locationLoading = false);
+        return;
+      }
+      
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
+      setState(() => _userPosition = pos);
+      
+      // Find nearest stop
+      double minDistance = double.infinity;
+      int nearestIndex = -1;
+      
+      for (int i = 0; i < stops.length; i++) {
+        final s = stops[i];
+        final latRaw = s['lat'] ?? s['latitude'];
+        final lngRaw = s['long'] ?? s['lng'] ?? s['longitude'];
+        
+        if (latRaw == null || lngRaw == null) continue;
+        
+        final lat = double.tryParse(latRaw.toString());
+        final lng = double.tryParse(lngRaw.toString());
+        
+        if (lat == null || lng == null) continue;
+        
+        final distance = Geolocator.distanceBetween(pos.latitude, pos.longitude, lat, lng);
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestIndex = i;
+        }
+      }
+      
+      // Scroll to nearest stop with animation
+      if (nearestIndex >= 0 && _scrollController.hasClients) {
+        await Future.delayed(Duration(milliseconds: 300)); // Wait for list to build
+        final position = nearestIndex * 120.0; // Approximate card height
+        _scrollController.animateTo(
+          position,
+          duration: Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+      }
+    } catch (e) {
+      // Silently fail - location is optional
+    } finally {
+      setState(() => _locationLoading = false);
+    }
+  }
+
   /// Build station list for a specific route variant using Route-Stop API data
   Widget _buildVariantStationList(List<Map<String, dynamic>> stops) {
     final lang = context.watch<LanguageProvider>();
@@ -1064,6 +1206,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         SizedBox(height: 8),
         Expanded(
           child: ListView.builder(
+            controller: _scrollController,
             shrinkWrap: false,
             itemCount: sortedStops.length,
             itemBuilder: (context, index) {
@@ -1084,6 +1227,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               
               // O(1) HashMap lookup - instant access!
               final List<Map<String, dynamic>> etas = etaByStop[seq] ?? [];
+              
+              // Highlight nearest stop if location is available
+              final isNearby = _userPosition != null && lat != null && lng != null
+                ? _isNearbyStop(lat, lng)
+                : false;
 
               return _buildCompactStopCard(
                 context: context,
@@ -1096,12 +1244,22 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 isEnglish: isEnglish,
                 latitude: lat,
                 longitude: lng,
+                isNearby: isNearby,
               );
             },
           ),
         ),
       ],
     );
+  }
+  
+  bool _isNearbyStop(String? latStr, String? lngStr) {
+    if (_userPosition == null || latStr == null || lngStr == null) return false;
+    final lat = double.tryParse(latStr);
+    final lng = double.tryParse(lngStr);
+    if (lat == null || lng == null) return false;
+    final distance = Geolocator.distanceBetween(_userPosition!.latitude, _userPosition!.longitude, lat, lng);
+    return distance <= 200.0; // Within 200m
   }
 
   Widget _buildOptimizedStationList() {
@@ -1202,6 +1360,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             SizedBox(height: 8),
             // Use shrinkWrap instead of Expanded since we're inside a SingleChildScrollView
             ListView.builder(
+              controller: _scrollController,
               shrinkWrap: true,
               physics: NeverScrollableScrollPhysics(),
               itemCount: stops.length,
@@ -1224,6 +1383,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
                   // O(1) HashMap lookup - instant access to ETAs!
                   final List<Map<String, dynamic>> etas = etaByStop[seq] ?? [];
+                  
+                  // Highlight nearby stops
+                  final isNearby = _userPosition != null && lat != null && lng != null
+                    ? _isNearbyStop(lat, lng)
+                    : false;
 
                   return _buildCompactStopCard(
                     context: context,
@@ -1234,6 +1398,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                     isEnglish: isEnglish,
                     latitude: lat,
                     longitude: lng,
+                    isNearby: isNearby,
                   );
                 },
             ),
@@ -1342,6 +1507,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     required bool isEnglish,
     String? latitude,
     String? longitude,
+    bool isNearby = false,
   }) {
     // Get destination from route details
     String? destEn;
@@ -1374,6 +1540,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       destEn: destEn,
       destTc: destTc,
       direction: _selectedDirection,
+      isNearby: isNearby,
     );
   }
 
@@ -1420,6 +1587,7 @@ class ExpandableStopCard extends StatefulWidget {
   final String? destEn;
   final String? destTc;
   final String? direction;
+  final bool isNearby;
 
   const ExpandableStopCard({
     Key? key,
@@ -1437,6 +1605,7 @@ class ExpandableStopCard extends StatefulWidget {
     this.destEn,
     this.destTc,
     this.direction,
+    this.isNearby = false,
   }) : super(key: key);
 
   @override
@@ -1580,7 +1749,13 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       elevation: _isExpanded ? 2 : 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      color: widget.isNearby ? Colors.green.withOpacity(0.05) : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: widget.isNearby 
+          ? BorderSide(color: Colors.green.withOpacity(0.5), width: 2)
+          : BorderSide.none,
+      ),
       child: InkWell(
         onTap: () {
           setState(() {

@@ -23,6 +23,10 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   // Cache for stop ETAs to avoid repeated fetches
   final Map<String, List<Map<String, dynamic>>> _stopEtaCache = {};
   Timer? _refreshTimer;
+  
+  // Range selection
+  double _rangeMeters = 100.0; // Default 100m
+  final TextEditingController _customRangeController = TextEditingController();
 
   @override
   void initState() {
@@ -33,6 +37,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _customRangeController.dispose();
     super.dispose();
   }
 
@@ -93,9 +98,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       });
 
       list.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
-      // Cap results to 50 nearby stops to avoid too many API calls
+      
+      // Filter by range and cap results to 50 nearby stops to avoid too many API calls
+      final filtered = list.where((s) => s.distanceMeters <= _rangeMeters).toList();
       setState(() {
-        _nearby = list.take(50).toList();
+        _nearby = filtered.take(50).toList();
         _loading = false;
       });
 
@@ -142,6 +149,82 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     return '${(meters / 1000).toStringAsFixed(2)} km';
   }
 
+  Widget _buildRangeChip(String label, double meters, LanguageProvider langProv) {
+    final isSelected = _rangeMeters == meters;
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        if (selected) {
+          setState(() {
+            _rangeMeters = meters;
+          });
+          _init(); // Re-fetch with new range
+        }
+      },
+      selectedColor: Theme.of(context).colorScheme.primaryContainer,
+      checkmarkColor: Theme.of(context).colorScheme.primary,
+    );
+  }
+
+  Widget _buildCustomRangeChip(LanguageProvider langProv) {
+    final isCustom = ![100.0, 200.0, 400.0].contains(_rangeMeters);
+    return FilterChip(
+      label: Text(
+        isCustom 
+          ? '${_rangeMeters.toInt()}m'
+          : (langProv.isEnglish ? 'Custom' : '自訂')
+      ),
+      selected: isCustom,
+      onSelected: (selected) {
+        if (selected) {
+          _showCustomRangeDialog(langProv);
+        }
+      },
+      selectedColor: Theme.of(context).colorScheme.secondaryContainer,
+      checkmarkColor: Theme.of(context).colorScheme.secondary,
+    );
+  }
+
+  void _showCustomRangeDialog(LanguageProvider langProv) {
+    _customRangeController.text = _rangeMeters.toInt().toString();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(langProv.isEnglish ? 'Custom Range' : '自訂範圍'),
+        content: TextField(
+          controller: _customRangeController,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: langProv.isEnglish ? 'Range (meters)' : '範圍（米）',
+            hintText: '100',
+            suffixText: 'm',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(langProv.isEnglish ? 'Cancel' : '取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              final value = double.tryParse(_customRangeController.text);
+              if (value != null && value > 0) {
+                setState(() {
+                  _rangeMeters = value;
+                });
+                Navigator.pop(context);
+                _init(); // Re-fetch with custom range
+              }
+            },
+            child: Text(langProv.isEnglish ? 'OK' : '確定'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final langProv = context.watch<LanguageProvider>();
@@ -174,6 +257,47 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                 )
               : Column(
                   children: [
+                    // Range selector
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                        border: Border(
+                          bottom: BorderSide(
+                            color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                            width: 1,
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.straighten, size: 18),
+                          SizedBox(width: 8),
+                          Text(
+                            langProv.isEnglish ? 'Range:' : '範圍:',
+                            style: TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  _buildRangeChip('100m', 100, langProv),
+                                  SizedBox(width: 8),
+                                  _buildRangeChip('200m', 200, langProv),
+                                  SizedBox(width: 8),
+                                  _buildRangeChip('400m', 400, langProv),
+                                  SizedBox(width: 8),
+                                  _buildCustomRangeChip(langProv),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     // Location header
                     Container(
                       width: double.infinity,
