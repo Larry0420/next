@@ -615,20 +615,28 @@ class Kmb {
 
     // Next, try bundled asset (works for APK, web, Windows, all platforms)
     try {
+      print('→ Attempting to load bundled asset: assets/prebuilt/kmb_stops.json');
       final raw = await rootBundle.loadString('assets/prebuilt/kmb_stops.json');
+      print('→ Asset loaded, size: ${raw.length} bytes');
       if (raw.isNotEmpty) {
         final map = await compute(_parseStopsAsset, raw);
         _stopsCache = map;
         _stopsCacheAt = DateTime.now();
         print('✓ Loaded stops from bundled asset (${map.length} stops)');
+        if (map.isNotEmpty) {
+          // Debug: show first stop to verify structure
+          final firstKey = map.keys.first;
+          print('→ Sample stop: $firstKey = ${map[firstKey]}');
+        }
         try {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_stopsCachePrefKey, json.encode(map));
         } catch (_) {}
         return map;
       }
-    } catch (e) {
-      print('→ Bundled asset not available: $e');
+    } catch (e, stack) {
+      print('→ Bundled asset load failed: $e');
+      print('→ Stack trace: $stack');
     }
 
     // Fallback to API if bundled asset is not available
@@ -1521,16 +1529,20 @@ Map<String, List<Map<String, dynamic>>> _buildRouteMapFromList(List<dynamic> rou
 // Top-level helper for compute() to parse a raw stops JSON asset into a stopId->stopInfo map.
 Map<String, Map<String, dynamic>> _parseStopsAsset(String raw) {
   final decoded = json.decode(raw) as Map<String, dynamic>;
-  final payload = decoded['data'];
+  
+  // Check if data is wrapped in 'data' key or is a direct map
+  final payload = decoded.containsKey('data') ? decoded['data'] : decoded;
+  
   final Map<String, Map<String, dynamic>> map = {};
   if (payload is List) {
+    // Array format: [{"stop": "id1", "name_en": "..."}, ...]
     for (final s in payload) {
       final id = s['stop']?.toString() ?? '';
       if (id.isEmpty) continue;
       map[id] = Map<String, dynamic>.from(s);
     }
   } else if (payload is Map) {
-    // Possibly the asset is already a map keyed by stop id
+    // Map format: {"id1": {"name_en": "...", ...}, "id2": {...}}
     payload.forEach((k, v) {
       try {
         map[k.toString()] = Map<String, dynamic>.from(v as Map);

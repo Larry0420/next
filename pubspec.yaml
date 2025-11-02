@@ -1,7 +1,7 @@
 name: lrt_next_train
 description: Hong Kong MTR Light Rail Next Train Flutter app with Material motion
 publish_to: "none"
-version: 1.4.2+7
+version: 1.4.3+8
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
