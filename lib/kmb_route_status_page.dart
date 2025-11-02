@@ -1089,6 +1089,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 seq: seq,
                 stopId: stopId,
                 displayName: displayName,
+                nameEn: nameEn,
+                nameTc: nameTc,
                 etas: etas,
                 isEnglish: isEnglish,
                 latitude: lat,
@@ -1333,6 +1335,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     required String seq,
     required String stopId,
     required String displayName,
+    String? nameEn,
+    String? nameTc,
     required List<Map<String, dynamic>> etas,
     required bool isEnglish,
     String? latitude,
@@ -1358,6 +1362,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       seq: seq,
       stopId: stopId,
       displayName: displayName,
+      nameEn: nameEn,
+      nameTc: nameTc,
       etas: etas,
       isEnglish: isEnglish,
       route: widget.route,
@@ -1399,6 +1405,8 @@ List<Map<String, dynamic>> _enrichEntriesForStopMap(Map<String, dynamic> arg) {
 class ExpandableStopCard extends StatefulWidget {
   final String seq;
   final String displayName;
+  final String? nameEn;
+  final String? nameTc;
   final List<Map<String, dynamic>> etas;
   final bool isEnglish;
   final String route;
@@ -1414,6 +1422,8 @@ class ExpandableStopCard extends StatefulWidget {
     Key? key,
     required this.seq,
     required this.displayName,
+    this.nameEn,
+    this.nameTc,
     required this.etas,
     required this.isEnglish,
     required this.route,
@@ -1505,6 +1515,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         stopId: widget.stopId ?? '',
         seq: widget.seq,
         stopName: widget.displayName,
+        stopNameEn: widget.nameEn,
+        stopNameTc: widget.nameTc,
         latitude: widget.latitude,
         longitude: widget.longitude,
         direction: widget.direction,

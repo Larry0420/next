@@ -589,7 +589,8 @@ class Kmb {
     if (_stopsCache != null && _stopsCacheAt != null) {
       if (DateTime.now().difference(_stopsCacheAt!) < ttl) return _stopsCache!;
     }
-    // First, try to load a prebuilt stops asset from app documents, then from bundled assets.
+    
+    // First, try to load a prebuilt stops asset from app documents (mobile apps with updated data)
     try {
       final doc = await getApplicationDocumentsDirectory();
       final prebuiltFile = File('${doc.path}/prebuilt/kmb_stops.json');
@@ -599,6 +600,7 @@ class Kmb {
           final map = await compute(_parseStopsAsset, raw);
           _stopsCache = map;
           _stopsCacheAt = DateTime.now();
+          print('✓ Loaded stops from app documents (${map.length} stops)');
           // persist to shared_prefs for fallback
           try {
             final prefs = await SharedPreferences.getInstance();
@@ -607,24 +609,31 @@ class Kmb {
           return map;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      print('→ App documents not available: $e');
+    }
 
-    // Next, try bundled asset
+    // Next, try bundled asset (works for APK, web, Windows, all platforms)
     try {
       final raw = await rootBundle.loadString('assets/prebuilt/kmb_stops.json');
       if (raw.isNotEmpty) {
         final map = await compute(_parseStopsAsset, raw);
         _stopsCache = map;
         _stopsCacheAt = DateTime.now();
+        print('✓ Loaded stops from bundled asset (${map.length} stops)');
         try {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_stopsCachePrefKey, json.encode(map));
         } catch (_) {}
         return map;
       }
-    } catch (_) {}
+    } catch (e) {
+      print('→ Bundled asset not available: $e');
+    }
 
+    // Fallback to API if bundled asset is not available
     try {
+      print('→ Fetching stops from API...');
       final stops = await fetchStopsAll();
       final Map<String, Map<String, dynamic>> map = {};
       for (final s in stops) {
@@ -635,6 +644,7 @@ class Kmb {
 
       _stopsCache = map;
       _stopsCacheAt = DateTime.now();
+      print('✓ Loaded stops from API (${map.length} stops)');
 
       // persist to shared_prefs for fallback
       try {
@@ -644,6 +654,7 @@ class Kmb {
 
       return map;
     } catch (e) {
+      print('✗ API fetch failed: $e');
       // attempt to read from persisted snapshot
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -656,6 +667,7 @@ class Kmb {
           });
           _stopsCache = map;
           _stopsCacheAt = DateTime.now();
+          print('✓ Loaded stops from SharedPreferences cache (${map.length} stops)');
           return map;
         }
       } catch (_) {}
@@ -825,6 +837,8 @@ class Kmb {
     required String stopId,
     required String seq,
     required String stopName,
+    String? stopNameEn,
+    String? stopNameTc,
     String? latitude,
     String? longitude,
     String? direction,
@@ -848,6 +862,8 @@ class Kmb {
       'stopId': stopId,
       'seq': seq,
       'stopName': stopName,
+      'stopNameEn': stopNameEn ?? stopName,
+      'stopNameTc': stopNameTc ?? stopName,
       'latitude': latitude,
       'longitude': longitude,
       'direction': direction,

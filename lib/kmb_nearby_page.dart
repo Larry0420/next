@@ -65,12 +65,24 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       _position = pos;
 
       // Build stop map and compute distances
+      // This will automatically fetch from API if prebuilt JSON is not available (e.g., web builds)
       final stopMap = await Kmb.buildStopMap();
+      
+      if (stopMap.isEmpty) {
+        setState(() {
+          _error = langProv?.isEnglish ?? true 
+            ? 'No stops data available. Please check your internet connection.' 
+            : '沒有站點資料。請檢查您的網路連線。';
+          _loading = false;
+        });
+        return;
+      }
+      
       final List<_StopDistance> list = [];
       stopMap.forEach((stopId, meta) {
         try {
-          final latRaw = meta['lat'] ?? meta['latitude'] ?? meta['latitud'] ?? meta['lat'];
-          final lngRaw = meta['long'] ?? meta['lng'] ?? meta['lon'] ?? meta['longitude'] ?? meta['long'];
+          final latRaw = meta['lat'] ?? meta['latitude'];
+          final lngRaw = meta['long'] ?? meta['lng'] ?? meta['longitude'];
           if (latRaw == null || lngRaw == null) return;
           final lat = double.tryParse(latRaw.toString());
           final lng = double.tryParse(lngRaw.toString());
@@ -104,17 +116,24 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   }
 
   Future<void> _fetchEtasForNearbyStops() async {
-    for (final stop in _nearby) {
+    // Fetch all ETAs in parallel for better performance
+    final futures = _nearby.map((stop) async {
       try {
         final etas = await Kmb.fetchStopEta(stop.stopId);
-        if (mounted) {
-          setState(() {
-            _stopEtaCache[stop.stopId] = etas;
-          });
-        }
+        return MapEntry(stop.stopId, etas);
       } catch (_) {
-        // Silently ignore ETA fetch failures for individual stops
+        return MapEntry(stop.stopId, <Map<String, dynamic>>[]);
       }
+    }).toList();
+    
+    final results = await Future.wait(futures);
+    
+    if (mounted) {
+      setState(() {
+        for (final entry in results) {
+          _stopEtaCache[entry.key] = entry.value;
+        }
+      });
     }
   }
 
@@ -127,92 +146,89 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   Widget build(BuildContext context) {
     final langProv = context.watch<LanguageProvider>();
     
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: _loading
+    return Scaffold(
+      body: _loading
           ? const Center(child: CircularProgressIndicator())
           : (_error != null
-              ? Center(child: Text('${langProv.isEnglish ? "Error" : "錯誤"}: $_error', style: const TextStyle(color: Colors.red)))
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                      SizedBox(height: 16),
+                      Text(
+                        '${langProv.isEnglish ? "Error" : "錯誤"}',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                        child: Text(
+                          _error!,
+                          style: TextStyle(color: Colors.red[700]),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
               : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
-                      child: Text('${langProv.isEnglish ? "Location" : "位置"}: ${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}'),
+                    // Location header
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                        border: Border(
+                          bottom: BorderSide(
+                            color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                            width: 1,
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.my_location,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  langProv.isEnglish ? 'Current Location' : '目前位置',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  '${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    
+                    // Stops list
                     Expanded(
                       child: ListView.builder(
+                        padding: EdgeInsets.symmetric(vertical: 8),
                         itemCount: _nearby.length,
-                        itemBuilder: (context, idx) {
-                          final s = _nearby[idx];
-                          final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? s.meta['nameen_us'] ?? s.meta['name_en_us'] ?? '';
-                          final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? s.meta['name_tc_tw'] ?? '';
-                          final displayName = langProv.isEnglish
-                              ? ((nameEn?.toString().isNotEmpty ?? false) ? nameEn.toString() : (nameTc?.toString().isNotEmpty ?? false ? nameTc.toString() : s.stopId))
-                              : ((nameTc?.toString().isNotEmpty ?? false) ? nameTc.toString() : (nameEn?.toString().isNotEmpty ?? false ? nameEn.toString() : s.stopId));
-                          
-                          // Get ETAs for this stop
-                          final etas = _stopEtaCache[s.stopId] ?? [];
-                          
-                          // Group ETAs by route
-                          final Map<String, List<Map<String, dynamic>>> etasByRoute = {};
-                          for (final eta in etas) {
-                            final route = eta['route']?.toString() ?? '';
-                            if (route.isEmpty) continue;
-                            etasByRoute.putIfAbsent(route, () => []).add(eta);
-                          }
-                          
-                          // Build subtitle with upcoming ETAs
-                          final List<String> etaLines = [];
-                          etasByRoute.forEach((route, routeEtas) {
-                            // Sort by eta time
-                            routeEtas.sort((a, b) {
-                              final etaA = a['eta']?.toString() ?? '';
-                              final etaB = b['eta']?.toString() ?? '';
-                              return etaA.compareTo(etaB);
-                            });
-                            
-                            // Get first 2 ETAs for this route
-                            final nextEtas = routeEtas.take(2).map((e) {
-                              final etaStr = e['eta']?.toString() ?? '';
-                              if (etaStr.isEmpty) return '—';
-                              try {
-                                final dt = DateTime.parse(etaStr).toLocal();
-                                final now = DateTime.now();
-                                final diff = dt.difference(now);
-                                if (diff.inMinutes <= 0) return langProv.isEnglish ? 'Due' : '即到';
-                                if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-                                return DateFormat.Hm().format(dt);
-                              } catch (_) {
-                                return '—';
-                              }
-                            }).join(', ');
-                            
-                            final destEn = routeEtas.first['dest_en'] ?? routeEtas.first['desten'] ?? '';
-                            final destTc = routeEtas.first['dest_tc'] ?? routeEtas.first['desttc'] ?? '';
-                            final displayDest = langProv.isEnglish 
-                                ? (destEn.toString().isNotEmpty ? destEn : (destTc.toString().isNotEmpty ? destTc : '?'))
-                                : (destTc.toString().isNotEmpty ? destTc : (destEn.toString().isNotEmpty ? destEn : '?'));
-                            etaLines.add('$route → $displayDest: $nextEtas');
-                          });
-                          
-                          final subtitleText = etaLines.isEmpty 
-                            ? '${s.stopId} · ${_fmtDistance(s.distanceMeters)}'
-                            : '${_fmtDistance(s.distanceMeters)} · ${etaLines.take(2).join(' | ')}';
-                          
-                          return Card(
-                            margin: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                            child: ListTile(
-                              dense: true,
-                              leading: CircleAvatar(child: Text('${idx + 1}', style: TextStyle(fontSize: 12))),
-                              title: Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: Text(subtitleText, style: TextStyle(fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
-                              onTap: () {
-                                _showStopDetails(context, s, etas);
-                              },
-                            ),
-                          );
-                        },
+                        itemBuilder: (context, idx) => _buildStopCard(context, idx, langProv),
                       ),
                     ),
                   ],
@@ -220,8 +236,253 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     );
   }
 
+  Widget _buildStopCard(BuildContext context, int idx, LanguageProvider langProv) {
+    final s = _nearby[idx];
+    
+    // Extract stop names from metadata
+    // Fields come from API (/v1/transport/kmb/stop) or prebuilt JSON
+    // API returns: name_en, name_tc, lat, long
+    final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
+    final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
+    final displayName = langProv.isEnglish
+        ? ((nameEn?.toString().isNotEmpty ?? false) ? nameEn.toString() : (nameTc?.toString().isNotEmpty ?? false ? nameTc.toString() : s.stopId))
+        : ((nameTc?.toString().isNotEmpty ?? false) ? nameTc.toString() : (nameEn?.toString().isNotEmpty ?? false ? nameEn.toString() : s.stopId));
+    
+    // Get ETAs for this stop
+    final etas = _stopEtaCache[s.stopId] ?? [];
+    
+    // Group ETAs by route
+    final Map<String, List<Map<String, dynamic>>> etasByRoute = {};
+    for (final eta in etas) {
+      final route = eta['route']?.toString() ?? '';
+      if (route.isEmpty) continue;
+      etasByRoute.putIfAbsent(route, () => []).add(eta);
+    }
+    
+    return Card(
+      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () => _showStopDetails(context, s, etas),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Stop header
+              Row(
+                children: [
+                  // Rank badge
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${idx + 1}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 10),
+                  
+                  // Stop name and info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(Icons.location_on, size: 11, color: Colors.grey[600]),
+                            SizedBox(width: 3),
+                            Text(
+                              _fmtDistance(s.distanceMeters),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              s.stopId,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey[500],
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  Icon(Icons.chevron_right, size: 20, color: Colors.grey[400]),
+                ],
+              ),
+              
+              // Routes
+              if (etasByRoute.isNotEmpty) ...[
+                SizedBox(height: 12),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: etasByRoute.entries.take(6).map((entry) {
+                    return _buildRouteChip(context, entry.key, entry.value, langProv);
+                  }).toList(),
+                ),
+              ] else if (_stopEtaCache.containsKey(s.stopId))
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    langProv.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey[500],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: SizedBox(
+                    height: 14,
+                    width: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRouteChip(BuildContext context, String route, List<Map<String, dynamic>> routeEtas, LanguageProvider langProv) {
+    // Sort by eta time
+    routeEtas.sort((a, b) {
+      final etaA = a['eta']?.toString() ?? '';
+      final etaB = b['eta']?.toString() ?? '';
+      return etaA.compareTo(etaB);
+    });
+    
+    final dir = routeEtas.first['dir']?.toString() ?? '';
+    
+    // Get first ETA
+    final firstEta = routeEtas.isNotEmpty ? routeEtas.first : null;
+    String etaText = '—';
+    Color etaColor = Colors.grey;
+    
+    if (firstEta != null) {
+      final etaStr = firstEta['eta']?.toString() ?? '';
+      if (etaStr.isNotEmpty) {
+        try {
+          final dt = DateTime.parse(etaStr).toLocal();
+          final now = DateTime.now();
+          final diff = dt.difference(now);
+          
+          if (diff.inMinutes <= 0) {
+            etaText = langProv.isEnglish ? 'Due' : '即到';
+            etaColor = Colors.green;
+          } else if (diff.inMinutes <= 2) {
+            etaText = '${diff.inMinutes}′';
+            etaColor = Colors.red;
+          } else if (diff.inMinutes <= 5) {
+            etaText = '${diff.inMinutes}′';
+            etaColor = Colors.orange;
+          } else if (diff.inMinutes < 60) {
+            etaText = '${diff.inMinutes}′';
+            etaColor = Colors.blue;
+          } else {
+            etaText = DateFormat.Hm().format(dt);
+            etaColor = Colors.grey[700]!;
+          }
+        } catch (_) {}
+      }
+    }
+    
+    // Direction icon and color
+    IconData dirIcon = Icons.arrow_forward;
+    Color dirColor = Colors.blue;
+    if (dir.toUpperCase().startsWith('O')) {
+      dirIcon = Icons.arrow_circle_right_outlined;
+      dirColor = Colors.green;
+    } else if (dir.toUpperCase().startsWith('I')) {
+      dirIcon = Icons.arrow_circle_left_outlined;
+      dirColor = Colors.orange;
+    }
+    
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+      decoration: BoxDecoration(
+        color: dirColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: dirColor.withOpacity(0.25),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Route number
+          Text(
+            route,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: dirColor,
+            ),
+          ),
+          SizedBox(width: 3),
+          Icon(dirIcon, size: 11, color: dirColor),
+          SizedBox(width: 5),
+          // ETA
+          Text(
+            etaText,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: etaColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showStopDetails(BuildContext context, _StopDistance stop, List<Map<String, dynamic>> etas) {
     final langProv = context.read<LanguageProvider>();
+    
+    // Extract stop names (same as _buildStopCard for consistency)
     final nameEn = stop.meta['name_en'] ?? stop.meta['nameen'] ?? '';
     final nameTc = stop.meta['name_tc'] ?? stop.meta['nametc'] ?? '';
     final displayName = langProv.isEnglish

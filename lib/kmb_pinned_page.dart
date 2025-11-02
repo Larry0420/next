@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:ui';
 import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'kmb.dart';
 import 'kmb_route_status_page.dart';
 import 'main.dart' show LanguageProvider;
@@ -42,14 +40,102 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
       final pinnedStops = await Kmb.getPinnedStops();
       final history = await Kmb.getRouteHistory();
       
+      // Enrich pinned routes with destination info
+      final enrichedRoutes = await _enrichWithDestination(pinned);
+      
+      // Enrich pinned stops with destination info
+      final enrichedStops = await _enrichStopsWithDestination(pinnedStops);
+      
       setState(() {
-        _pinnedRoutes = pinned;
-        _pinnedStops = pinnedStops;
+        _pinnedRoutes = enrichedRoutes;
+        _pinnedStops = enrichedStops;
         _historyRoutes = history;
         _loading = false;
       });
     } catch (e) {
       setState(() => _loading = false);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _enrichWithDestination(List<Map<String, dynamic>> items) async {
+    try {
+      // Build route index from cached API data
+      final routeIndex = await Kmb.buildRouteIndex();
+      
+      final enriched = <Map<String, dynamic>>[];
+      
+      for (final item in items) {
+        final route = item['route']?.toString().trim().toUpperCase();
+        final direction = item['direction']?.toString() ?? 'O';
+        final serviceType = item['serviceType']?.toString() ?? '1';
+        
+        if (route != null && route.isNotEmpty) {
+          // Look up in route index
+          final indexKey = '${route}_${direction}_$serviceType';
+          final routeData = routeIndex[indexKey];
+          
+          if (routeData != null) {
+            // Add destination info to the item
+            final enrichedItem = Map<String, dynamic>.from(item);
+            enrichedItem['destEn'] = routeData['dest_en'];
+            enrichedItem['destTc'] = routeData['dest_tc'];
+            enrichedItem['origEn'] = routeData['orig_en'];
+            enrichedItem['origTc'] = routeData['orig_tc'];
+            enriched.add(enrichedItem);
+            continue;
+          }
+        }
+        
+        enriched.add(item);
+      }
+      
+      return enriched;
+    } catch (e) {
+      // Return items as-is if enrichment fails
+      return items;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _enrichStopsWithDestination(List<Map<String, dynamic>> stops) async {
+    try {
+      // Build route index from cached API data
+      final routeIndex = await Kmb.buildRouteIndex();
+      
+      final enriched = <Map<String, dynamic>>[];
+      
+      for (final stop in stops) {
+        final route = stop['route']?.toString().trim().toUpperCase();
+        final direction = stop['direction']?.toString() ?? 'O';
+        final serviceType = stop['serviceType']?.toString() ?? '1';
+        
+        // If destination is already cached, skip lookup
+        if (stop['destEn'] != null || stop['destTc'] != null) {
+          enriched.add(stop);
+          continue;
+        }
+        
+        if (route != null && route.isNotEmpty) {
+          // Look up in route index
+          final indexKey = '${route}_${direction}_$serviceType';
+          final routeData = routeIndex[indexKey];
+          
+          if (routeData != null) {
+            // Add destination info to the stop
+            final enrichedStop = Map<String, dynamic>.from(stop);
+            enrichedStop['destEn'] = routeData['dest_en'];
+            enrichedStop['destTc'] = routeData['dest_tc'];
+            enriched.add(enrichedStop);
+            continue;
+          }
+        }
+        
+        enriched.add(stop);
+      }
+      
+      return enriched;
+    } catch (e) {
+      // Return stops as-is if enrichment fails
+      return stops;
     }
   }
 
@@ -287,6 +373,32 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     final direction = route['direction'] ?? '';
     final serviceType = route['serviceType'] ?? '1';
     
+    // Get destination from enriched data
+    final destEn = route['destEn'];
+    final destTc = route['destTc'];
+    final origEn = route['origEn'];
+    final origTc = route['origTc'];
+    
+    // Format destination text
+    String destinationText = '';
+    if (lang.isEnglish) {
+      final orig = origEn ?? origTc ?? '';
+      final dest = destEn ?? destTc ?? '';
+      if (orig.isNotEmpty && dest.isNotEmpty) {
+        destinationText = '$orig → $dest';
+      } else {
+        destinationText = label.replaceFirst('$routeNum: ', '');
+      }
+    } else {
+      final orig = origTc ?? origEn ?? '';
+      final dest = destTc ?? destEn ?? '';
+      if (orig.isNotEmpty && dest.isNotEmpty) {
+        destinationText = '$orig → $dest';
+      } else {
+        destinationText = label.replaceFirst('$routeNum: ', '');
+      }
+    }
+    
     // Parse timestamp
     String? timeText;
     if (showTimestamp && route['accessedAt'] != null) {
@@ -407,9 +519,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                               ],
                             ),
                             SizedBox(height: 4),
-                            // Route label
+                            // Route destination
                             Text(
-                              label.replaceFirst('$routeNum: ', ''),
+                              destinationText,
                               style: TextStyle(
                                 fontSize: 12, 
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -549,12 +661,10 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
   Timer? _etaRefreshTimer;
   List<Map<String, dynamic>> _etas = [];
   bool _loading = true;
-  String? _liveStopName; // Fetched stop name in current language
 
   @override
   void initState() {
     super.initState();
-    _fetchStopName();
     _fetchEtas();
     _startAutoRefresh();
   }
@@ -562,9 +672,8 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
   @override
   void didUpdateWidget(PinnedStopCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Refresh ETAs and stop name when language changes
+    // Refresh ETAs when language changes
     if (oldWidget.lang.isEnglish != widget.lang.isEnglish) {
-      _fetchStopName();
       _fetchEtas(silent: true);
     }
   }
@@ -583,53 +692,6 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     });
   }
 
-  Future<void> _fetchStopName() async {
-    try {
-      final route = widget.stop['route']?.toString().trim().toUpperCase() ?? '';
-      final stopId = widget.stop['stopId']?.toString() ?? '';
-      final direction = widget.stop['direction']?.toString() ?? 'O';
-      final serviceType = widget.stop['serviceType']?.toString() ?? '1';
-
-      if (route.isEmpty || stopId.isEmpty) return;
-
-      // Fetch route-stop to get the stop name
-      final url = 'https://data.etabus.gov.hk/v1/transport/kmb/route-stop/$route/$direction/$serviceType';
-      final resp = await http.get(Uri.parse(url));
-      
-      if (resp.statusCode == 200) {
-        final json = jsonDecode(resp.body);
-        final List<dynamic> data = json['data'] ?? [];
-        
-        // Find matching stop
-        final stopEntry = data.firstWhere(
-          (s) => s['stop']?.toString() == stopId,
-          orElse: () => null,
-        );
-        
-        if (stopEntry != null) {
-          // Fetch stop details for name
-          final stopUrl = 'https://data.etabus.gov.hk/v1/transport/kmb/stop/$stopId';
-          final stopResp = await http.get(Uri.parse(stopUrl));
-          
-          if (stopResp.statusCode == 200) {
-            final stopJson = jsonDecode(stopResp.body);
-            final stopData = stopJson['data'];
-            
-            if (stopData != null && mounted) {
-              setState(() {
-                _liveStopName = widget.lang.isEnglish
-                  ? (stopData['name_en'] ?? stopData['name_tc'])
-                  : (stopData['name_tc'] ?? stopData['name_en']);
-              });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Silent fail - keep cached name
-    }
-  }
-
   Future<void> _fetchEtas({bool silent = false}) async {
     if (!silent) {
       setState(() => _loading = true);
@@ -639,6 +701,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       final route = widget.stop['route']?.toString().trim().toUpperCase() ?? '';
       final serviceType = widget.stop['serviceType']?.toString() ?? '1';
       final seq = widget.stop['seq']?.toString() ?? '';
+      final direction = widget.stop['direction']?.toString().trim().toUpperCase() ?? '';
 
       if (route.isEmpty) {
         setState(() {
@@ -650,10 +713,22 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
 
       final entries = await Kmb.fetchRouteEta(route, serviceType);
       
-      // Filter for this specific stop sequence
-      final freshEtas = entries
-          .where((e) => e['seq']?.toString() == seq)
-          .toList();
+      // Get the first character of direction for matching (I or O)
+      final directionChar = direction.isNotEmpty ? direction[0] : '';
+      
+      // Filter for this specific stop sequence AND direction
+      final freshEtas = entries.where((e) {
+        // Match sequence number
+        if (e['seq']?.toString() != seq) return false;
+        
+        // Match direction if available
+        if (directionChar.isNotEmpty) {
+          final etaDir = e['dir']?.toString().trim().toUpperCase() ?? '';
+          if (etaDir.isEmpty || etaDir[0] != directionChar) return false;
+        }
+        
+        return true;
+      }).toList();
       
       // Sort by eta_seq
       freshEtas.sort((a, b) {
@@ -698,7 +773,11 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
   @override
   Widget build(BuildContext context) {
     final route = widget.stop['route'] ?? '';
-    final stopName = _liveStopName ?? widget.stop['stopName'] ?? '';
+    final nameEn = widget.stop['stopNameEn'] ?? widget.stop['stopName'] ?? '';
+    final nameTc = widget.stop['stopNameTc'] ?? widget.stop['stopName'] ?? '';
+    final stopName = widget.lang.isEnglish 
+      ? (nameEn.isNotEmpty ? nameEn : nameTc)
+      : (nameTc.isNotEmpty ? nameTc : nameEn);
     final latitude = widget.stop['latitude'];
     final longitude = widget.stop['longitude'];
     final destEn = widget.stop['destEn'];
