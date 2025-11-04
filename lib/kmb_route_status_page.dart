@@ -4,7 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart' show compute;
-import 'main.dart' show LanguageProvider;
+import 'main.dart' show LanguageProvider, DeveloperSettingsProvider;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -12,6 +12,9 @@ import 'dart:async';
 import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 
 class KmbRouteStatusPage extends StatefulWidget {
   final String route;
@@ -51,17 +54,112 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   // User location for finding nearest stop
   Position? _userPosition;
   bool _locationLoading = false;
+  
+  // Floating bottom bar visibility
+  bool _showFloatingBar = true;
+  double _lastScrollOffset = 0.0;
+  
+  // Map view state
+  bool _showMapView = false;
+  final MapController _mapController = MapController();
+  
+  // Animated highlight state for clicked stop
+  String? _highlightedStopId;
+  Timer? _highlightTimer;
+  
+  // Method to jump to a specific location on the map with animated highlight
+  void _jumpToMapLocation(double latitude, double longitude, {String? stopId}) {
+    // Set highlighted stop for animation
+    if (stopId != null) {
+      setState(() {
+        _highlightedStopId = stopId;
+      });
+      
+      // Clear highlight after 3 seconds
+      _highlightTimer?.cancel();
+      _highlightTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() {
+            _highlightedStopId = null;
+          });
+        }
+      });
+    }
+    
+    if (!_showMapView) {
+      // Enable map view if not already shown
+      setState(() {
+        _showMapView = true;
+      });
+      // Wait for map to build, then move to location
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) {
+            _mapController.move(LatLng(latitude, longitude), 17.0); // Closer zoom for better view
+          }
+        });
+      });
+    } else {
+      // Map already shown, just move to location
+      _mapController.move(LatLng(latitude, longitude), 17.0);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _fetch();
     _addToHistory();
+    _scrollController.addListener(_onScroll);
+    _initializeLocation(); // Get user location on startup
+  }
+  
+  /// Initialize user location if permission is granted
+  Future<void> _initializeLocation() async {
+    try {
+      final status = await Permission.location.status;
+      if (status.isGranted) {
+        // Permission already granted, get location
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.best,
+          timeLimit: const Duration(seconds: 5),
+        ).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => throw TimeoutException('Location request timed out'),
+        );
+        if (mounted) {
+          setState(() => _userPosition = pos);
+        }
+      }
+    } catch (e) {
+      // Silently fail - location is optional
+      // User can manually trigger location via button if needed
+    }
+  }
+  
+  void _onScroll() {
+    // Show/hide floating bar based on scroll direction
+    if (_scrollController.hasClients) {
+      final currentOffset = _scrollController.offset;
+      if (currentOffset > _lastScrollOffset && currentOffset > 100) {
+        // Scrolling down - hide bar
+        if (_showFloatingBar) {
+          setState(() => _showFloatingBar = false);
+        }
+      } else if (currentOffset < _lastScrollOffset) {
+        // Scrolling up - show bar
+        if (!_showFloatingBar) {
+          setState(() => _showFloatingBar = true);
+        }
+      }
+      _lastScrollOffset = currentOffset;
+    }
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _highlightTimer?.cancel();
     super.dispose();
   }
 
@@ -193,6 +291,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       loading = true;
       error = null;
     });
+    
+    // Start loading route info immediately (independent of stop list)
+    final r = widget.route.trim().toUpperCase();
+    _loadVariantsFromCache(r, widget.bound, widget.serviceType);
+    
     try {
       // Try to load prebuilt assets first (fast startup)
       final rnorm = widget.route.trim().toUpperCase();
@@ -202,7 +305,6 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         return;
       }
   final useRouteApi = await Kmb.getUseRouteApiSetting();
-      final r = widget.route.trim().toUpperCase();
       final base = RegExp(r'^(\\d+)').firstMatch(r)?.group(1) ?? r;
 
       if (useRouteApi) {
@@ -224,11 +326,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             'data': entries,
           };
         });
-        _loadVariantsFromCache(r, widget.bound, widget.serviceType);
       } else {
         final result = await Kmb.fetchRouteStatus(r);
         setState(() { data = result; });
-        _loadVariantsFromCache(r, widget.bound, widget.serviceType);
       }
     } catch (e) {
       setState(() {
@@ -365,7 +465,19 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       appBar: AppBar(
         title: Text('${lang.route} ${widget.route}'),
         actions: [
-          // Location-based scroll button
+          // Map view toggle - now shows split view
+          IconButton(
+            icon: Icon(_showMapView ? Icons.splitscreen : Icons.map),
+            tooltip: _showMapView 
+              ? (isEnglish ? 'Show list only' : '僅顯示列表')
+              : (isEnglish ? 'Show map + list' : '顯示地圖+列表'),
+            onPressed: () {
+              setState(() {
+                _showMapView = !_showMapView;
+              });
+            },
+          ),
+          // Location-based scroll button - available in both modes
           if (_scrollController.hasClients)
             IconButton(
               icon: _locationLoading 
@@ -430,21 +542,292 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: loading
-            ? const Center(child: CircularProgressIndicator())
-            : (error != null
-                ? Center(child: Text('Error: $error', style: const TextStyle(color: Colors.red)))
-                : (data == null
-                    ? const Center(child: Text('No data'))
-                    : Column(
+      body: Stack(
+        children: [
+          Consumer<DeveloperSettingsProvider>(
+            builder: (context, devSettings, _) {
+              // Determine if we should show split view (map + list together)
+              final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+              final showSplitView = _showMapView;
+              final screenWidth = MediaQuery.of(context).size.width;
+              final isMobile = screenWidth < 600;
+              
+              return Padding(
+                // Add bottom padding only when floating bar is enabled
+                padding: EdgeInsets.only(
+                  left: 12.0, 
+                  right: 12.0, 
+                  top: 12.0, 
+                  bottom: devSettings.useFloatingRouteToggles ? 80.0 : 12.0,
+                ),
+                child: showSplitView
+                  ? (isLandscape 
+                      // Landscape: side-by-side split view
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Map on left (less space on mobile)
+                            Expanded(
+                              flex: isMobile ? 2 : 1,
+                              child: _buildMapView(),
+                            ),
+                            const SizedBox(width: 8),
+                            // List on right (more space on mobile for better readability)
+                            Expanded(
+                              flex: isMobile ? 3 : 1,
+                              child: _buildListView(devSettings),
+                            ),
+                          ],
+                        )
+                      // Portrait: top-bottom split view
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Map on top (less space on mobile for more list visibility)
+                            Expanded(
+                              flex: isMobile ? 2 : 1,
+                              child: _buildMapView(),
+                            ),
+                            const SizedBox(height: 8),
+                            // List on bottom (more space on mobile)
+                            Expanded(
+                              flex: isMobile ? 3 : 1,
+                              child: _buildListView(devSettings),
+                            ),
+                          ],
+                        ))
+                  // Map view disabled: show only list
+                  : _buildListView(devSettings),
+              );
+            },
+          ),
+          // Floating bottom bar with direction and service type toggles
+          _buildFloatingBottomBar(),
+        ],
+      ),
+    );
+  }
+
+  /// Build the list view showing route details and stops
+  Widget _buildListView(DeveloperSettingsProvider devSettings) {
+    return Column(
+      children: [
+        // Show route details card independently (even while loading stops)
+        if (_routeDetails != null && !devSettings.useFloatingRouteToggles)
+          _buildRouteDetailsCard(),
+        if (_routeDetails != null && devSettings.useFloatingRouteToggles)
+          _buildRouteDetailsCard(),
+        
+        // Show stop list or loading state
+        Expanded(
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : (error != null
+                  ? Center(child: Text('Error: $error', style: const TextStyle(color: Colors.red)))
+                  : (data == null
+                      ? const Center(child: Text('No data'))
+                      : Column(
+                          children: [
+                            if (_combinedLoading) const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator())),
+                            if (_combinedError != null) Padding(padding: const EdgeInsets.all(8.0), child: Text('Combined error: $_combinedError', style: const TextStyle(color: Colors.red))),
+                            Expanded(child: _buildStructuredView()),
+                          ],
+                    ))),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildFloatingBottomBar() {
+    final lang = context.watch<LanguageProvider>();
+    final isEnglish = lang.isEnglish;
+    final theme = Theme.of(context);
+    final devSettings = context.watch<DeveloperSettingsProvider>();
+    
+    // Don't show if setting is disabled
+    if (!devSettings.useFloatingRouteToggles) {
+      return SizedBox.shrink();
+    }
+    
+    // Don't show if no variants available
+    if (_directions.isEmpty && _serviceTypes.isEmpty) {
+      return SizedBox.shrink();
+    }
+    
+    return AnimatedPositioned(
+      duration: Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      bottom: _showFloatingBar ? 0 : -100,
+      left: 0,
+      right: 0,
+      child: ClipRRect(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface.withOpacity(0.85),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 20,
+                  offset: Offset(0, -5),
+                ),
+              ],
+              border: Border(
+                top: BorderSide(
+                  color: theme.colorScheme.outline.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Direction toggles
+                    if (_directions.isNotEmpty) ...[
+                      Row(
                         children: [
-                          if (_combinedLoading) const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator())),
-                          if (_combinedError != null) Padding(padding: const EdgeInsets.all(8.0), child: Text('Combined error: $_combinedError', style: const TextStyle(color: Colors.red))),
-                          Expanded(child: _buildStructuredView()),
+                          Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
+                          SizedBox(width: 8),
+                          Text(
+                            isEnglish ? 'Direction' : '方向',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
                         ],
-                      ))),
+                      ),
+                      SizedBox(height: 8),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _directions.map((d) {
+                            final isSelected = _selectedDirection == d;
+                            final isOutbound = d.toUpperCase().startsWith('O');
+                            final dirLabel = isOutbound 
+                              ? (isEnglish ? 'Outbound' : '去程')
+                              : (isEnglish ? 'Inbound' : '回程');
+                            
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8.0),
+                              child: AnimatedContainer(
+                                duration: Duration(milliseconds: 200),
+                                child: FilterChip(
+                                  label: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
+                                        size: 16,
+                                        color: isSelected 
+                                          ? Colors.white
+                                          : (isOutbound ? Colors.green : Colors.orange),
+                                      ),
+                                      SizedBox(width: 6),
+                                      Text(dirLabel),
+                                    ],
+                                  ),
+                                  selected: isSelected,
+                                  selectedColor: isOutbound 
+                                    ? Colors.green.withOpacity(0.9)
+                                    : Colors.orange.withOpacity(0.9),
+                                  backgroundColor: isOutbound
+                                    ? Colors.green.withOpacity(0.1)
+                                    : Colors.orange.withOpacity(0.1),
+                                  checkmarkColor: Colors.white,
+                                  labelStyle: TextStyle(
+                                    color: isSelected ? Colors.white : theme.colorScheme.onSurface,
+                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                  elevation: isSelected ? 4 : 0,
+                                  pressElevation: 2,
+                                  onSelected: (selected) {
+                                    if (selected) {
+                                      setState(() {
+                                        _selectedDirection = d;
+                                      });
+                                      _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
+                                      _fetchRouteEta(widget.route, _selectedServiceType ?? '1');
+                                    }
+                                  },
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                    
+                    // Service type toggles
+                    if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
+                      if (_directions.isNotEmpty) SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
+                          SizedBox(width: 8),
+                          Text(
+                            isEnglish ? 'Service Type' : '服務類型',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _serviceTypes.map((st) {
+                            final isSelected = _selectedServiceType == st;
+                            final typeLabel = '${isEnglish ? "Type" : "類型"} $st';
+                            
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8.0),
+                              child: AnimatedContainer(
+                                duration: Duration(milliseconds: 200),
+                                child: FilterChip(
+                                  label: Text(typeLabel),
+                                  selected: isSelected,
+                                  selectedColor: theme.colorScheme.primary,
+                                  backgroundColor: theme.colorScheme.surfaceVariant,
+                                  checkmarkColor: Colors.white,
+                                  labelStyle: TextStyle(
+                                    color: isSelected ? Colors.white : theme.colorScheme.onSurface,
+                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                  elevation: isSelected ? 4 : 0,
+                                  pressElevation: 2,
+                                  onSelected: (selected) {
+                                    if (selected) {
+                                      setState(() {
+                                        _selectedServiceType = st;
+                                      });
+                                      _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
+                                      _fetchRouteEta(widget.route, st);
+                                    }
+                                  },
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -493,6 +876,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   Widget _buildStructuredView() {
     final payload = data!['data'];
+    final devSettings = context.watch<DeveloperSettingsProvider>();
 
     List<Widget> sections = [];
 
@@ -543,13 +927,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       // sections.add(_buildRawJsonCard());
     }
 
-    // If we have discovered service types, show selectors and route details
-    if (_serviceTypes.isNotEmpty) {
+    // If we have discovered service types, show selectors
+    // Only show old-style selector card if floating toggles are disabled
+    // Route details card is now shown independently at the top (outside this view)
+    if (_serviceTypes.isNotEmpty && !devSettings.useFloatingRouteToggles) {
       sections.insert(0, _buildSelectorsCard());
-      // Show destination card separately after selectors
-      if (_routeDetails != null) {
-        sections.insert(1, _buildRouteDetailsCard());
-      }
     }
 
     // Hide raw JSON at the end - users don't need debug info
@@ -1587,6 +1969,383 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       destTc: destTc,
       direction: _selectedDirection,
       isNearby: isNearby,
+      onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
+    );
+  }
+
+  /// Build OpenStreetMap view showing all route stops
+  Widget _buildMapView() {
+    final lang = context.watch<LanguageProvider>();
+    final isEnglish = lang.isEnglish;
+
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Column(
+            children: [
+              RouteDestinationWidget(
+                route: widget.route,
+                direction: _selectedDirection,
+                serviceType: _selectedServiceType,
+              ),
+              const SizedBox(height: 8),
+              const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ],
+          );
+        }
+        if (snap.hasError) {
+          return Column(
+            children: [
+              RouteDestinationWidget(
+                route: widget.route,
+                direction: _selectedDirection,
+                serviceType: _selectedServiceType,
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Center(child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red))),
+              ),
+            ],
+          );
+        }
+
+        final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
+        final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
+
+        final r = widget.route.trim().toUpperCase();
+        final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
+        var entries = routeMap[r] ?? routeMap[base] ?? [];
+
+        if (entries.isEmpty) {
+          return Column(
+            children: [
+              RouteDestinationWidget(
+                route: widget.route,
+                direction: _selectedDirection,
+                serviceType: _selectedServiceType,
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Center(child: Text(isEnglish ? 'No stop data available' : '無站點資料')),
+              ),
+            ],
+          );
+        }
+
+        // Filter by selected direction and service type
+        entries = List<Map<String, dynamic>>.from(
+          entries.where((e) {
+            if (!e.containsKey('seq')) return false;
+            
+            if (_selectedDirection != null) {
+              final bound = e['bound']?.toString().trim().toUpperCase() ?? '';
+              if (bound.isNotEmpty && _selectedDirection!.isNotEmpty && 
+                  bound[0] != _selectedDirection![0]) return false;
+            }
+            
+            if (_selectedServiceType != null) {
+              final st = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
+              if (st != _selectedServiceType) return false;
+            }
+            
+            return true;
+          })
+        );
+
+        entries.sort((a, b) {
+          final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
+          final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
+          return ai.compareTo(bi);
+        });
+
+        // Build markers for stops
+        final List<Marker> markers = [];
+        final List<LatLng> polylinePoints = [];
+
+        for (final entry in entries) {
+          final stopId = entry['stop']?.toString() ?? '';
+          final meta = stopMap[stopId];
+          
+          if (meta == null) continue;
+          
+          final latStr = meta['lat']?.toString() ?? meta['latitude']?.toString() ?? '';
+          final lngStr = meta['long']?.toString() ?? meta['lng']?.toString() ?? meta['longitude']?.toString() ?? '';
+          
+          final lat = double.tryParse(latStr);
+          final lng = double.tryParse(lngStr);
+          
+          if (lat == null || lng == null) continue;
+          
+          final latLng = LatLng(lat, lng);
+          polylinePoints.add(latLng);
+
+          final nameEn = meta['name_en']?.toString() ?? '';
+          final nameTc = meta['name_tc']?.toString() ?? '';
+          final displayName = isEnglish ? (nameEn.isNotEmpty ? nameEn : nameTc) : (nameTc.isNotEmpty ? nameTc : nameEn);
+          final seq = entry['seq']?.toString() ?? '';
+          final isHighlighted = _highlightedStopId == stopId;
+
+          markers.add(
+            Marker(
+              point: latLng,
+              width: 80,
+              height: 80,
+              child: GestureDetector(
+                onTap: () {
+                  // Show stop details in a bottom sheet
+                  showModalBottomSheet(
+                    context: context,
+                    builder: (context) => Container(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$seq. $displayName',
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text('Stop ID: $stopId'),
+                          const SizedBox(height: 8),
+                          Text('${isEnglish ? "Coordinates" : "座標"}: ${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}'),
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.list),
+                            label: Text(isEnglish ? 'View in list' : '在列表中查看'),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              setState(() {
+                                _showMapView = false;
+                              });
+                              // Optionally scroll to this stop
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Animated pulsing ring for highlighted stop
+                    if (isHighlighted)
+                      _PulsingRing(
+                        color: Theme.of(context).colorScheme.tertiary,
+                      ),
+                    // Main marker circle
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: isHighlighted 
+                          ? Theme.of(context).colorScheme.tertiary
+                          : Theme.of(context).colorScheme.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.surface, 
+                          width: isHighlighted ? 3 : 2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isHighlighted
+                              ? Theme.of(context).colorScheme.tertiary.withOpacity(0.5)
+                              : Theme.of(context).colorScheme.shadow.withOpacity(0.3),
+                            blurRadius: isHighlighted ? 8 : 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        seq,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimary,
+                          fontSize: isHighlighted ? 14 : 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        // Calculate center and zoom level
+        LatLng center;
+        double zoom = 13.0;
+        
+        // Prefer user location if available, otherwise use route center
+        if (_userPosition != null) {
+          // Center on user's current location
+          center = LatLng(_userPosition!.latitude, _userPosition!.longitude);
+          zoom = 14.0; // Closer zoom when centered on user
+        } else if (polylinePoints.isNotEmpty) {
+          // Calculate bounding box for route
+          double minLat = polylinePoints.first.latitude;
+          double maxLat = polylinePoints.first.latitude;
+          double minLng = polylinePoints.first.longitude;
+          double maxLng = polylinePoints.first.longitude;
+          
+          for (final point in polylinePoints) {
+            if (point.latitude < minLat) minLat = point.latitude;
+            if (point.latitude > maxLat) maxLat = point.latitude;
+            if (point.longitude < minLng) minLng = point.longitude;
+            if (point.longitude > maxLng) maxLng = point.longitude;
+          }
+          
+          center = LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
+          
+          // Adjust zoom based on distance
+          final latDiff = maxLat - minLat;
+          final lngDiff = maxLng - minLng;
+          final maxDiff = latDiff > lngDiff ? latDiff : lngDiff;
+          
+          if (maxDiff > 0.1) zoom = 11.0;
+          else if (maxDiff > 0.05) zoom = 12.0;
+          else if (maxDiff > 0.02) zoom = 13.0;
+          else zoom = 14.0;
+        } else {
+          // Default to Hong Kong
+          center = const LatLng(22.3193, 114.1694);
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Route destination header removed - already shown in list view
+            // Map
+            Expanded(
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: FlutterMap(
+                      mapController: _mapController,
+                      options: MapOptions(
+                        initialCenter: center,
+                        initialZoom: zoom,
+                        minZoom: 10.0,
+                        maxZoom: 18.0,
+                      ),
+                      children: [
+                        TileLayer(
+                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'com.example.lrt_next_train',
+                          maxZoom: 19,
+                        ),
+                        // Polyline showing route path
+                        if (polylinePoints.length > 1)
+                          PolylineLayer(
+                            polylines: [
+                              Polyline(
+                                points: polylinePoints,
+                                strokeWidth: 4.0,
+                                color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
+                                borderStrokeWidth: 2.0,
+                                borderColor: Theme.of(context).colorScheme.surface,
+                              ),
+                            ],
+                          ),
+                        // Markers for stops
+                        MarkerLayer(markers: markers),
+                        // Current location layer with live updates
+                        CurrentLocationLayer(
+                          alignPositionOnUpdate: AlignOnUpdate.never,
+                          alignDirectionOnUpdate: AlignOnUpdate.never,
+                          style: LocationMarkerStyle(
+                            marker: DefaultLocationMarker(
+                              color: Theme.of(context).colorScheme.error,
+                              child: Icon(
+                                Icons.navigation,
+                                color: Theme.of(context).colorScheme.onError,
+                                size: 20,
+                              ),
+                            ),
+                            markerSize: const Size(40, 40),
+                            markerDirection: MarkerDirection.heading,
+                            headingSectorColor: Theme.of(context).colorScheme.error.withOpacity(0.2),
+                            headingSectorRadius: 60,
+                            accuracyCircleColor: Theme.of(context).colorScheme.error.withOpacity(0.1),
+                            showAccuracyCircle: true,
+                            showHeadingSector: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Recenter button
+                  if (_userPosition != null)
+                    Positioned(
+                      bottom: 16,
+                      right: 16,
+                      child: FloatingActionButton.small(
+                        heroTag: 'recenter_map',
+                        backgroundColor: Theme.of(context).colorScheme.surface,
+                        foregroundColor: Theme.of(context).colorScheme.error,
+                        onPressed: () {
+                          _mapController.move(
+                            LatLng(_userPosition!.latitude, _userPosition!.longitude),
+                            14.0,
+                          );
+                        },
+                        child: const Icon(Icons.my_location),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            // Legend - Hidden per user request
+            // Container(
+            //   margin: const EdgeInsets.only(top: 8),
+            //   padding: const EdgeInsets.all(12),
+            //   decoration: BoxDecoration(
+            //     color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+            //     borderRadius: BorderRadius.circular(12),
+            //     boxShadow: [
+            //       BoxShadow(
+            //         color: Theme.of(context).colorScheme.shadow.withOpacity(0.1),
+            //         blurRadius: 4,
+            //         offset: const Offset(0, 2),
+            //       ),
+            //     ],
+            //   ),
+            //   child: Row(
+            //     mainAxisAlignment: MainAxisAlignment.spaceAround,
+            //     children: [
+            //       Row(
+            //         children: [
+            //           Container(
+            //             width: 20,
+            //             height: 20,
+            //             decoration: BoxDecoration(
+            //               color: Theme.of(context).colorScheme.primary,
+            //               shape: BoxShape.circle,
+            //             ),
+            //           ),
+            //           const SizedBox(width: 8),
+            //           Text(isEnglish ? 'Bus Stop' : '巴士站'),
+            //         ],
+            //       ),
+            //       if (_userPosition != null)
+            //         Row(
+            //           children: [
+            //             Icon(Icons.my_location, color: Theme.of(context).colorScheme.error, size: 20),
+            //             const SizedBox(width: 8),
+            //             Text(isEnglish ? 'Your Location' : '您的位置'),
+            //           ],
+            //         ),
+            //     ],
+            //   ),
+            // ),
+          ],
+        );
+      },
     );
   }
 
@@ -1634,6 +2393,7 @@ class ExpandableStopCard extends StatefulWidget {
   final String? destTc;
   final String? direction;
   final bool isNearby;
+  final void Function(double lat, double lng)? onJumpToMap;
 
   const ExpandableStopCard({
     Key? key,
@@ -1652,6 +2412,7 @@ class ExpandableStopCard extends StatefulWidget {
     this.destTc,
     this.direction,
     this.isNearby = false,
+    this.onJumpToMap,
   }) : super(key: key);
 
   @override
@@ -1751,14 +2512,18 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
     
+    final theme = Theme.of(context);
+    final nearbyColor = theme.colorScheme.tertiary;
+    final nearbyBgColor = theme.colorScheme.tertiaryContainer;
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       elevation: _isExpanded ? 2 : 1,
-      color: widget.isNearby ? Colors.green.withOpacity(0.05) : null,
+      color: widget.isNearby ? nearbyBgColor.withOpacity(0.3) : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
         side: widget.isNearby 
-          ? BorderSide(color: Colors.green.withOpacity(0.5), width: 2)
+          ? BorderSide(color: nearbyColor, width: 2)
           : BorderSide.none,
       ),
       child: InkWell(
@@ -1928,21 +2693,91 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                     ),
                   ),
                   
-                  // Pin button
-                  IconButton(
-                    icon: Icon(Icons.push_pin_outlined, size: 18),
-                    tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                    padding: EdgeInsets.zero,
-                    constraints: BoxConstraints(),
-                    onPressed: () => _pinStop(context),
-                  ),
-                  SizedBox(width: 4),
-                  
-                  // Expand indicator
-                  Icon(
-                    _isExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: Colors.grey[600],
-                    size: 20,
+                  // Responsive button layout
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Get screen width to determine layout
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final isMobile = screenWidth < 600;
+                      
+                      if (isMobile) {
+                        // Compact vertical layout for mobile
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // Top row: Pin and Map buttons
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(Icons.push_pin_outlined, size: 16),
+                                  tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
+                                  padding: EdgeInsets.all(4),
+                                  constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                  onPressed: () => _pinStop(context),
+                                ),
+                                if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                  IconButton(
+                                    icon: Icon(Icons.map_outlined, size: 16),
+                                    tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                    padding: EdgeInsets.all(4),
+                                    constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                    onPressed: () {
+                                      final lat = double.tryParse(widget.latitude!);
+                                      final lng = double.tryParse(widget.longitude!);
+                                      if (lat != null && lng != null) {
+                                        widget.onJumpToMap!(lat, lng);
+                                      }
+                                    },
+                                  ),
+                              ],
+                            ),
+                            // Bottom: Expand indicator
+                            Icon(
+                              _isExpanded ? Icons.expand_less : Icons.expand_more,
+                              color: Colors.grey[600],
+                              size: 18,
+                            ),
+                          ],
+                        );
+                      } else {
+                        // Original horizontal layout for wide screens
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(Icons.push_pin_outlined, size: 18),
+                              tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
+                              padding: EdgeInsets.zero,
+                              constraints: BoxConstraints(),
+                              onPressed: () => _pinStop(context),
+                            ),
+                            SizedBox(width: 4),
+                            if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                              IconButton(
+                                icon: Icon(Icons.map_outlined, size: 18),
+                                tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                padding: EdgeInsets.zero,
+                                constraints: BoxConstraints(),
+                                onPressed: () {
+                                  final lat = double.tryParse(widget.latitude!);
+                                  final lng = double.tryParse(widget.longitude!);
+                                  if (lat != null && lng != null) {
+                                    widget.onJumpToMap!(lat, lng);
+                                  }
+                                },
+                              ),
+                            if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                              SizedBox(width: 4),
+                            Icon(
+                              _isExpanded ? Icons.expand_less : Icons.expand_more,
+                              color: Colors.grey[600],
+                              size: 20,
+                            ),
+                          ],
+                        );
+                      }
+                    },
                   ),
                 ],
               ),
@@ -2246,6 +3081,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
         _routeData = details.containsKey('data')
             ? (details['data'] as Map<String, dynamic>?)
             : details;
+        _error = null; // Clear any previous error on successful fetch
         if (!silent) {
           _loading = false;
         }
@@ -2253,15 +3089,23 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     } catch (e) {
       if (!mounted) return; // Check if widget is still mounted
       
+      // Only show error message for non-silent updates to avoid disrupting UI
       if (!silent) {
         print('RouteDestinationWidget error for route ${widget.route}: $e');
-      }
-      setState(() {
-        _error = e.toString();
-        if (!silent) {
+        setState(() {
+          _error = e.toString();
           _loading = false;
+        });
+      } else {
+        // Silent refresh failed - keep showing old data if available
+        // Only update error if we don't have any data yet
+        if (_routeData == null) {
+          setState(() {
+            _error = e.toString();
+          });
         }
-      });
+        // Otherwise, silently fail and keep showing existing data
+      }
     }
   }
 
@@ -2422,6 +3266,60 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Pulsing ring animation widget for highlighted map markers
+class _PulsingRing extends StatefulWidget {
+  final Color color;
+  
+  const _PulsingRing({required this.color});
+  
+  @override
+  State<_PulsingRing> createState() => _PulsingRingState();
+}
+
+class _PulsingRingState extends State<_PulsingRing> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat();
+    
+    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+  }
+  
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: 40 + (_animation.value * 25),
+          height: 40 + (_animation.value * 25),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: widget.color.withOpacity(1.0 - _animation.value),
+              width: 3,
+            ),
+          ),
+        );
+      },
     );
   }
 }

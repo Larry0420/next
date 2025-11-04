@@ -1866,6 +1866,7 @@ class ThemeProvider extends ChangeNotifier {
     static const String _mtrAutoLoadCachedSelectionKey = 'mtr_auto_load_cached_selection';
   static const String _showKmbInNavKey = 'show_kmb_in_nav';
   static const String _showSubNavKey = 'show_sub_nav';
+  static const String _useFloatingRouteTogglesKey = 'use_floating_route_toggles';
     
     bool _hideStationId = false;
     bool _showGridDebug = false;
@@ -1874,6 +1875,7 @@ class ThemeProvider extends ChangeNotifier {
     bool _mtrAutoLoadCachedSelection = true; // Default to true for convenience
   bool _showKmbInNav = true; // Default to visible
   bool _showSubNav = true; // Default to visible
+  bool _useFloatingRouteToggles = true; // Default to new floating UI
     SharedPreferences? _prefs;
 
     bool get hideStationId => _hideStationId;
@@ -1883,6 +1885,7 @@ class ThemeProvider extends ChangeNotifier {
     bool get mtrAutoLoadCachedSelection => _mtrAutoLoadCachedSelection;
   bool get showKmbInNav => _showKmbInNav;
   bool get showSubNav => _showSubNav;
+  bool get useFloatingRouteToggles => _useFloatingRouteToggles;
 
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
@@ -1893,6 +1896,7 @@ class ThemeProvider extends ChangeNotifier {
       _mtrAutoLoadCachedSelection = _prefs!.getBool(_mtrAutoLoadCachedSelectionKey) ?? true;
       _showKmbInNav = _prefs!.getBool(_showKmbInNavKey) ?? true;
       _showSubNav = _prefs!.getBool(_showSubNavKey) ?? true;
+      _useFloatingRouteToggles = _prefs!.getBool(_useFloatingRouteTogglesKey) ?? true;
       notifyListeners();
     }
 
@@ -1942,6 +1946,13 @@ class ThemeProvider extends ChangeNotifier {
       _showSubNav = show;
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool(_showSubNavKey, show);
+      notifyListeners();
+    }
+    
+    Future<void> setUseFloatingRouteToggles(bool use) async {
+      _useFloatingRouteToggles = use;
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool(_useFloatingRouteTogglesKey, use);
       notifyListeners();
     }
   }
@@ -8969,6 +8980,26 @@ class _SettingsPage extends StatelessWidget {
               value: devSettings.showSubNav,
               onChanged: (value) {
                 devSettings.setShowSubNav(value);
+              },
+            ),
+          ),
+        ),
+
+        const SizedBox(height: UIConstants.spacingXS),
+
+        // Floating Route Toggles setting
+        Consumer<DeveloperSettingsProvider>(
+          builder: (context, devSettings, _) => _buildCompactCard(
+            context,
+            icon: Icons.toggle_on,
+            title: lang.isEnglish ? 'Floating Route Controls' : '浮動路線控制',
+            subtitle: devSettings.useFloatingRouteToggles
+                ? (lang.isEnglish ? 'Modern bottom bar with auto-hide' : '現代底部欄位自動隱藏')
+                : (lang.isEnglish ? 'Classic top selector card' : '經典頂部選擇卡'),
+            trailing: Switch(
+              value: devSettings.useFloatingRouteToggles,
+              onChanged: (value) {
+                devSettings.setUseFloatingRouteToggles(value);
               },
             ),
           ),
