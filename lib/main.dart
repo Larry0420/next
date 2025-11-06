@@ -3741,7 +3741,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                                       child: active
                                           ? Padding(
                                               key: const ValueKey('dot_on'),
-                                              padding: const EdgeInsets.only(left: 6),
+                                              padding: const EdgeInsets.only(left: 6.4),
                                               child: FadeTransition(
                                                 opacity: _pulseOpacity,
                                                 child: ScaleTransition(

@@ -4,7 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart' show compute;
-import 'main.dart' show LanguageProvider, DeveloperSettingsProvider;
+import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -67,6 +67,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   String? _highlightedStopId;
   Timer? _highlightTimer;
   
+  // ETA auto-refresh (page-level, similar to LRT adaptive timer)
+  Timer? _etaRefreshTimer;
+  Duration _etaRefreshInterval = const Duration(seconds: 15);
+  int _etaConsecutiveErrors = 0;
+  
   // Method to jump to a specific location on the map with animated highlight
   void _jumpToMapLocation(double latitude, double longitude, {String? stopId}) {
     // Set highlighted stop for animation
@@ -112,6 +117,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     _addToHistory();
     _scrollController.addListener(_onScroll);
     _initializeLocation(); // Get user location on startup
+    // Start ETA auto-refresh after first frame when selections are available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeStartEtaAutoRefresh();
+    });
   }
   
   /// Initialize user location if permission is granted
@@ -160,6 +169,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   void dispose() {
     _scrollController.dispose();
     _highlightTimer?.cancel();
+    _stopEtaAutoRefresh();
     super.dispose();
   }
 
@@ -628,8 +638,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       ? const Center(child: Text('No data'))
                       : Column(
                           children: [
-                            if (_combinedLoading) const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator())),
-                            if (_combinedError != null) Padding(padding: const EdgeInsets.all(8.0), child: Text('Combined error: $_combinedError', style: const TextStyle(color: Colors.red))),
+                            if (_combinedLoading) Padding(padding: UIConstants.cardPadding, child: const Center(child: CircularProgressIndicator())),
+                            if (_combinedError != null) Padding(padding: UIConstants.cardPadding, child: Text('Combined error: $_combinedError', style: const TextStyle(color: Colors.red))),
                             Expanded(child: _buildStructuredView()),
                           ],
                     ))),
@@ -685,7 +695,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             child: SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingL, vertical: UIConstants.spacingM),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -717,7 +727,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                               : (isEnglish ? 'Inbound' : '回程');
                             
                             return Padding(
-                              padding: const EdgeInsets.only(right: 8.0),
+                              padding: EdgeInsets.only(right: UIConstants.spacingS),
                               child: AnimatedContainer(
                                 duration: Duration(milliseconds: 200),
                                 child: FilterChip(
@@ -756,6 +766,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                       });
                                       _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
                                       _fetchRouteEta(widget.route, _selectedServiceType ?? '1');
+                                      _restartEtaAutoRefresh();
                                     }
                                   },
                                 ),
@@ -791,7 +802,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                             final typeLabel = '${isEnglish ? "Type" : "類型"} $st';
                             
                             return Padding(
-                              padding: const EdgeInsets.only(right: 8.0),
+                              padding: EdgeInsets.only(right: UIConstants.spacingS),
                               child: AnimatedContainer(
                                 duration: Duration(milliseconds: 200),
                                 child: FilterChip(
@@ -813,6 +824,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                       });
                                       _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
                                       _fetchRouteEta(widget.route, st);
+                                      _restartEtaAutoRefresh();
                                     }
                                   },
                                 ),
@@ -950,9 +962,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final isEnglish = lang.isEnglish;
     
     return Card(
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  margin: EdgeInsets.symmetric(horizontal: UIConstants.spacingM, vertical: UIConstants.spacingS),
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+  padding: EdgeInsets.all(UIConstants.spacingM),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -988,6 +1000,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                             _fetchRouteDetails(widget.route.trim().toUpperCase(), d, _selectedServiceType!);
                           }
                         });
+                        _restartEtaAutoRefresh();
                       }
                     },
                     selectedColor: isOutbound 
@@ -1034,6 +1047,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                             _fetchRouteDetails(widget.route.trim().toUpperCase(), _selectedDirection!, s);
                           }
                         });
+                        _restartEtaAutoRefresh();
                       }
                     },
                     selectedColor: Theme.of(context).colorScheme.primaryContainer,
@@ -1053,7 +1067,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     if (_routeDetailsLoading) {
       return Card(
         child: Padding(
-          padding: const EdgeInsets.all(12.0),
+          padding: EdgeInsets.all(UIConstants.spacingM),
           child: Center(child: CircularProgressIndicator()),
         ),
       );
@@ -1187,9 +1201,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   Widget _buildRouteEtaCard() {
-    if (_routeEtaLoading) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
-    if (_routeEtaError != null) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error: $_routeEtaError', style: TextStyle(color: Colors.red))));
-    if (_routeEtaEntries == null || _routeEtaEntries!.isEmpty) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('No route ETA data')));
+  if (_routeEtaLoading) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Center(child: CircularProgressIndicator())));
+  if (_routeEtaError != null) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('Error: $_routeEtaError', style: TextStyle(color: Colors.red))));
+  if (_routeEtaEntries == null || _routeEtaEntries!.isEmpty) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('No route ETA data')));
 
     // Group entries by stop sequence
     final Map<String, List<Map<String, dynamic>>> byStop = {};
@@ -1251,7 +1265,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final meta = combined['data'] ?? {};
   final List stops = meta['stops'] ?? [];
 
-    if (stops.isEmpty) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('No combined stops')));
+  if (stops.isEmpty) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('No combined stops')));
 
     final combinedRouteEta = meta['routeEta'] ?? [];
     return Card(
@@ -1295,6 +1309,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       });
       if (_selectedServiceType != null) {
         _fetchRouteEta(r, _selectedServiceType!);
+        _restartEtaAutoRefresh();
       }
       // If both direction and serviceType are selected, fetch variant-specific stops
       if (_selectedDirection != null && _selectedServiceType != null) {
@@ -1351,11 +1366,17 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       setState(() { 
         _routeEtaEntries = entries;
         _etaBySeqCache = etaBySeq; // Store precomputed HashMap for O(1) lookups
+        // Reset error counter on success and normalize interval if needed
+        _etaConsecutiveErrors = 0;
       });
     } catch (e) {
       setState(() { _routeEtaError = e.toString(); });
+      // Increase error counter for backoff handling
+      _etaConsecutiveErrors += 1;
     } finally {
       setState(() { _routeEtaLoading = false; });
+      // Adjust timer with simple exponential backoff on errors
+      _maybeAdjustEtaTimer();
     }
   }
 
@@ -1375,6 +1396,47 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       setState(() { _routeDetailsError = e.toString(); });
     } finally {
       setState(() { _routeDetailsLoading = false; });
+    }
+  }
+
+  // ===== ETA Auto-Refresh (modeled after LRT startAutoRefresh) =====
+  void _maybeStartEtaAutoRefresh() {
+    if (_etaRefreshTimer != null && _etaRefreshTimer!.isActive) return;
+    if (_selectedServiceType == null) return;
+    final r = widget.route.trim().toUpperCase();
+    final st = _selectedServiceType!;
+    _etaRefreshTimer = Timer.periodic(_etaRefreshInterval, (_) {
+      _fetchRouteEta(r, st, silent: true);
+    });
+    // Trigger an immediate refresh (non-silent so UI shows initial state once)
+    _fetchRouteEta(r, st);
+  }
+
+  void _stopEtaAutoRefresh() {
+    _etaRefreshTimer?.cancel();
+    _etaRefreshTimer = null;
+  }
+
+  void _restartEtaAutoRefresh({Duration? interval}) {
+    if (interval != null) {
+      _etaRefreshInterval = interval;
+    }
+    _stopEtaAutoRefresh();
+    _maybeStartEtaAutoRefresh();
+  }
+
+  void _maybeAdjustEtaTimer() {
+    // Simple backoff: after 2+ consecutive errors, double interval up to 60s
+    final base = const Duration(seconds: 15);
+    final max = const Duration(seconds: 60);
+    if (_etaConsecutiveErrors >= 2) {
+      final doubled = Duration(seconds: (_etaRefreshInterval.inSeconds * 2).clamp(base.inSeconds, max.inSeconds));
+      if (doubled != _etaRefreshInterval) {
+        _restartEtaAutoRefresh(interval: doubled);
+      }
+    } else if (_etaConsecutiveErrors == 0 && _etaRefreshInterval != base) {
+      // Recover back to base when errors cleared
+      _restartEtaAutoRefresh(interval: base);
     }
   }
 
@@ -1463,7 +1525,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             subtitle: Text('$nameen\nlat: $lat, long: $lng'),
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingM),
                 child: StopEtaTile(stopId: stopId),
               )
             ],
@@ -1629,6 +1691,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           child: ListView.builder(
             controller: _scrollController,
             shrinkWrap: false,
+            padding: EdgeInsets.only(
+              bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 96.0 : 12.0,
+            ),
             itemCount: sortedStops.length,
             itemBuilder: (context, index) {
               final s = sortedStops[index];
@@ -1791,6 +1856,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               controller: _scrollController,
               shrinkWrap: true,
               physics: NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.only(
+                bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 96.0 : 12.0,
+              ),
               itemCount: stops.length,
               itemBuilder: (context, index) {
                   final s = stops[index];
@@ -2515,70 +2583,96 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     final theme = Theme.of(context);
     final nearbyColor = theme.colorScheme.tertiary;
     final nearbyBgColor = theme.colorScheme.tertiaryContainer;
+    final isActive = _isExpanded || widget.isNearby;
     
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      elevation: _isExpanded ? 2 : 1,
-      color: widget.isNearby ? nearbyBgColor.withOpacity(0.3) : null,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: widget.isNearby 
-          ? BorderSide(color: nearbyColor, width: 2)
-          : BorderSide.none,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isActive
+            ? (widget.isNearby 
+                ? nearbyBgColor.withOpacity(0.2)
+                : theme.colorScheme.primaryContainer.withOpacity(0.1))
+            : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isActive
+              ? (widget.isNearby
+                  ? nearbyColor.withOpacity(0.4)
+                  : theme.colorScheme.primary.withOpacity(0.3))
+              : theme.colorScheme.outline.withOpacity(0.1),
+          width: isActive ? 1.5 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isActive
+                ? (widget.isNearby
+                    ? nearbyColor.withOpacity(0.08)
+                    : theme.colorScheme.primary.withOpacity(0.08))
+                : theme.colorScheme.shadow.withOpacity(0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _isExpanded = !_isExpanded;
-          });
-        },
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Column(
-            children: [
-              // Main row - always visible
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              setState(() {
+                _isExpanded = !_isExpanded;
+              });
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
                 children: [
-                  // Platform/sequence number on the left
-                  Column(
+                  // Main row - always visible
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.square, size: 18, color: Theme.of(context).primaryColor),
-                      SizedBox(height: 2),
-                      Text(
-                        widget.seq,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
+                      // Platform/sequence number on the left
+                      Column(
+                        children: [
+                          Icon(Icons.square, size: 18, color: Theme.of(context).primaryColor),
+                          SizedBox(height: 2),
+                          Text(
+                            widget.seq,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  SizedBox(width: 12),
-                  
-                  // ETAs and stop name
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ETA times in a row
-                        AnimatedSwitcher(
-                          duration: Duration(milliseconds: 300),
-                          child: widget.etas.isEmpty
-                              ? Text(
-                                  key: ValueKey('empty'),
-                                  widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-                                  style: TextStyle(
-                                    color: Colors.grey[600],
-                                    fontSize: 12,
-                                  ),
-                                )
-                              : Row(
-                                  key: ValueKey('etas'),
-                                  children: [
-                                    ...widget.etas.take(3).expand((e) sync* {
-                                final etaRaw = e['eta'] ?? e['eta_time'];
+                      SizedBox(width: 12),
+                      
+                      // ETAs and stop name
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // ETA times in a row
+                            AnimatedSwitcher(
+                              duration: Duration(milliseconds: 300),
+                              child: widget.etas.isEmpty
+                                  ? Text(
+                                      key: ValueKey('empty'),
+                                      widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 12,
+                                      ),
+                                    )
+                                  : Row(
+                                      key: ValueKey('etas'),
+                                      children: [
+                                        ...widget.etas.take(3).expand((e) sync* {
+                                          final etaRaw = e['eta'] ?? e['eta_time'];
                                 final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
                                 final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
                                 final rmk = widget.isEnglish
@@ -2660,214 +2754,216 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                 }
                               }).toList(),
                             ],
-                          ),
-                        ),
-                        
-                        SizedBox(height: 8),
-                        
-                        // Stop name below
-                        Text(
-                          widget.displayName,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[700],
-                          ),
-                          maxLines: _isExpanded ? null : 2,
-                          overflow: _isExpanded ? null : TextOverflow.ellipsis,
-                        ),
-                        
-                        // Coordinates display
-                        if (widget.latitude != null && widget.longitude != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4.0),
-                            child: Text(
-                              '📍 ${widget.latitude}, ${widget.longitude}',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.grey[500],
-                                fontFamily: 'monospace',
-                              ),
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Responsive button layout
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      // Get screen width to determine layout
-                      final screenWidth = MediaQuery.of(context).size.width;
-                      final isMobile = screenWidth < 600;
-                      
-                      if (isMobile) {
-                        // Compact vertical layout for mobile
-                        return Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            // Top row: Pin and Map buttons
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Icon(Icons.push_pin_outlined, size: 16),
-                                  tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                                  padding: EdgeInsets.all(4),
-                                  constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-                                  onPressed: () => _pinStop(context),
+                          
+                          SizedBox(height: 8),
+                          
+                          // Stop name below
+                          Text(
+                            widget.displayName,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[700],
+                            ),
+                            maxLines: _isExpanded ? null : 2,
+                            overflow: _isExpanded ? null : TextOverflow.ellipsis,
+                          ),
+                          
+                          // Coordinates display
+                          if (widget.latitude != null && widget.longitude != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Text(
+                                '📍 ${widget.latitude}, ${widget.longitude}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey[500],
+                                  fontFamily: 'monospace',
                                 ),
-                                if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Responsive button layout
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        // Get screen width to determine layout
+                        final screenWidth = MediaQuery.of(context).size.width;
+                        final isMobile = screenWidth < 600;
+                        
+                        if (isMobile) {
+                          // Compact vertical layout for mobile
+                          return Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              // Top row: Pin and Map buttons
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
                                   IconButton(
-                                    icon: Icon(Icons.map_outlined, size: 16),
-                                    tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                    icon: Icon(Icons.push_pin_outlined, size: 16),
+                                    tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
                                     padding: EdgeInsets.all(4),
                                     constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-                                    onPressed: () {
-                                      final lat = double.tryParse(widget.latitude!);
-                                      final lng = double.tryParse(widget.longitude!);
-                                      if (lat != null && lng != null) {
-                                        widget.onJumpToMap!(lat, lng);
-                                      }
-                                    },
+                                    onPressed: () => _pinStop(context),
                                   ),
-                              ],
-                            ),
-                            // Bottom: Expand indicator
-                            Icon(
-                              _isExpanded ? Icons.expand_less : Icons.expand_more,
-                              color: Colors.grey[600],
-                              size: 18,
-                            ),
-                          ],
-                        );
-                      } else {
-                        // Original horizontal layout for wide screens
-                        return Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.push_pin_outlined, size: 18),
-                              tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                              padding: EdgeInsets.zero,
-                              constraints: BoxConstraints(),
-                              onPressed: () => _pinStop(context),
-                            ),
-                            SizedBox(width: 4),
-                            if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                  if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                    IconButton(
+                                      icon: Icon(Icons.map_outlined, size: 16),
+                                      tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                      padding: EdgeInsets.all(4),
+                                      constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                      onPressed: () {
+                                        final lat = double.tryParse(widget.latitude!);
+                                        final lng = double.tryParse(widget.longitude!);
+                                        if (lat != null && lng != null) {
+                                          widget.onJumpToMap!(lat, lng);
+                                        }
+                                      },
+                                    ),
+                                ],
+                              ),
+                              // Bottom: Expand indicator
+                              Icon(
+                                _isExpanded ? Icons.expand_less : Icons.expand_more,
+                                color: Colors.grey[600],
+                                size: 18,
+                              ),
+                            ],
+                          );
+                        } else {
+                          // Original horizontal layout for wide screens
+                          return Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
                               IconButton(
-                                icon: Icon(Icons.map_outlined, size: 18),
-                                tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                icon: Icon(Icons.push_pin_outlined, size: 18),
+                                tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
                                 padding: EdgeInsets.zero,
                                 constraints: BoxConstraints(),
-                                onPressed: () {
-                                  final lat = double.tryParse(widget.latitude!);
-                                  final lng = double.tryParse(widget.longitude!);
-                                  if (lat != null && lng != null) {
-                                    widget.onJumpToMap!(lat, lng);
-                                  }
-                                },
+                                onPressed: () => _pinStop(context),
                               ),
-                            if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
                               SizedBox(width: 4),
-                            Icon(
-                              _isExpanded ? Icons.expand_less : Icons.expand_more,
-                              color: Colors.grey[600],
-                              size: 20,
-                            ),
-                          ],
-                        );
-                      }
-                    },
-                  ),
-                ],
-              ),
-              
-              // Expanded details
-              if (_isExpanded && widget.etas.isNotEmpty) ...[
-                Divider(height: 20),
-                ...widget.etas.map((e) {
-                  final etaRaw = e['eta'] ?? e['eta_time'];
-                  final etaSeq = e['eta_seq']?.toString() ?? '';
-                  final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
-                  final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
-                  final rmk = widget.isEnglish
-                      ? (rmkEn.isNotEmpty ? rmkEn : rmkTc)
-                      : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
-                  
-                  String fullEtaText = '—';
-                  if (etaRaw != null) {
-                    try {
-                      final dt = DateTime.parse(etaRaw.toString()).toLocal();
-                      final now = DateTime.now();
-                      final diff = dt.difference(now);
-                      final mins = diff.inMinutes;
-                      
-                      if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
-                        fullEtaText = widget.isEnglish ? 'Arriving now' : '正在到達';
-                      } else if (diff.isNegative) {
-                        fullEtaText = widget.isEnglish ? 'Departed' : '已開出';
-                      } else if (mins < 1) {
-                        fullEtaText = widget.isEnglish ? 'Due now' : '即將抵達';
-                      } else {
-                        fullEtaText = widget.isEnglish ? '$mins min (${DateFormat.jm().format(dt)})' : '$mins分鐘 (${DateFormat.Hm().format(dt)})';
-                      }
-                    } catch (_) {}
-                  }
-                  
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: _getEtaColor(etaRaw).withOpacity(0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text(
-                              etaSeq,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: _getEtaColor(etaRaw),
+                              if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                IconButton(
+                                  icon: Icon(Icons.map_outlined, size: 18),
+                                  tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                  padding: EdgeInsets.zero,
+                                  constraints: BoxConstraints(),
+                                  onPressed: () {
+                                    final lat = double.tryParse(widget.latitude!);
+                                    final lng = double.tryParse(widget.longitude!);
+                                    if (lat != null && lng != null) {
+                                      widget.onJumpToMap!(lat, lng);
+                                    }
+                                  },
+                                ),
+                              if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                SizedBox(width: 4),
+                              Icon(
+                                _isExpanded ? Icons.expand_less : Icons.expand_more,
+                                color: Colors.grey[600],
+                                size: 20,
                               ),
+                            ],
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              
+                // Expanded details
+                if (_isExpanded && widget.etas.isNotEmpty) ...[
+                  Divider(height: 20),
+                  ...widget.etas.map((e) {
+                    final etaRaw = e['eta'] ?? e['eta_time'];
+                    final etaSeq = e['eta_seq']?.toString() ?? '';
+                    final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
+                    final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
+                    final rmk = widget.isEnglish
+                        ? (rmkEn.isNotEmpty ? rmkEn : rmkTc)
+                        : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
+                    
+                    String fullEtaText = '—';
+                    if (etaRaw != null) {
+                      try {
+                        final dt = DateTime.parse(etaRaw.toString()).toLocal();
+                        final now = DateTime.now();
+                        final diff = dt.difference(now);
+                        final mins = diff.inMinutes;
+                        
+                        if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
+                          fullEtaText = widget.isEnglish ? 'Arriving now' : '正在到達';
+                        } else if (diff.isNegative) {
+                          fullEtaText = widget.isEnglish ? 'Departed' : '已開出';
+                        } else if (mins < 1) {
+                          fullEtaText = widget.isEnglish ? 'Due now' : '即將抵達';
+                        } else {
+                          fullEtaText = widget.isEnglish ? '$mins min (${DateFormat.jm().format(dt)})' : '$mins分鐘 (${DateFormat.Hm().format(dt)})';
+                        }
+                      } catch (_) {}
+                    }
+                    
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4.0),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: _getEtaColor(etaRaw).withOpacity(0.2),
+                              shape: BoxShape.circle,
                             ),
-                          ),
-                        ),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                fullEtaText,
+                            child: Center(
+                              child: Text(
+                                etaSeq,
                                 style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
                                   color: _getEtaColor(etaRaw),
                                 ),
                               ),
-                              if (rmk.isNotEmpty)
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 Text(
-                                  rmk,
+                                  fullEtaText,
                                   style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.orange[700],
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: _getEtaColor(etaRaw),
                                   ),
                                 ),
-                            ],
+                                if (rmk.isNotEmpty)
+                                  Text(
+                                    rmk,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.orange[700],
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ],
               ],
-            ],
+            ),
           ),
         ),
+      ),
       ),
     );
   }
