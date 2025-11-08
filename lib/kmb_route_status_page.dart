@@ -67,6 +67,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   String? _highlightedStopId;
   Timer? _highlightTimer;
   
+  // Keys for per-stop widgets to support ensureVisible auto-scroll
+  final Map<String, GlobalKey> _stopKeys = {};
+  
+  // Variant-scoped auto-scroll guard to avoid repositioning on auto-refresh
+  String? _lastAutoScrollVariantKey;
+  
   // ETA auto-refresh (page-level, similar to LRT adaptive timer)
   Timer? _etaRefreshTimer;
   Duration _etaRefreshInterval = const Duration(seconds: 15);
@@ -1626,15 +1632,30 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         }
       }
       
-      // Scroll to nearest stop with animation
-      if (nearestIndex >= 0 && _scrollController.hasClients) {
+      // Scroll to nearest stop with context-aware ensureVisible (works for ListView or SingleChildScrollView)
+      if (nearestIndex >= 0) {
         await Future.delayed(Duration(milliseconds: 300)); // Wait for list to build
-        final position = nearestIndex * 120.0; // Approximate card height
-        _scrollController.animateTo(
-          position,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
+        try {
+          final seqStr = stops[nearestIndex]['seq']?.toString() ?? '';
+          final key = _stopKeys[seqStr];
+          final ctx = key?.currentContext;
+          if (ctx != null) {
+            await Scrollable.ensureVisible(
+              ctx,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeInOut,
+              alignment: 0.2,
+            );
+          } else if (_scrollController.hasClients) {
+            // Fallback to index-based approximation
+            final position = nearestIndex * 120.0;
+            _scrollController.animateTo(
+              position,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeInOut,
+            );
+          }
+        } catch (_) {}
       }
     } catch (e) {
       // Silently fail - location is optional
@@ -1673,8 +1694,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     // Build optimized stop cards using cached data
     // Auto-scroll to nearest stop when data first loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_userPosition == null && !_locationLoading && sortedStops.isNotEmpty) {
-        _getUserLocationAndScrollToNearest(sortedStops);
+      final variantKey = '${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant';
+      if (_lastAutoScrollVariantKey != variantKey) {
+        if (_userPosition == null && !_locationLoading && sortedStops.isNotEmpty) {
+          _getUserLocationAndScrollToNearest(sortedStops);
+        }
+        _lastAutoScrollVariantKey = variantKey;
       }
     });
     
@@ -1688,7 +1713,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         ),
         SizedBox(height: 8),
         Expanded(
-          child: ListView.builder(
+          child: AnimatedSwitcher(
+            duration: Duration(milliseconds: 200),
+            child: ListView.builder(
+              key: PageStorageKey<String>('kmb_list_${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant'),
             controller: _scrollController,
             shrinkWrap: false,
             padding: EdgeInsets.only(
@@ -1733,6 +1761,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 isNearby: isNearby,
               );
             },
+            ),
           ),
         ),
       ],
@@ -1837,8 +1866,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         // Build optimized stop cards using cached data - no redundant API calls!
         // Auto-scroll to nearest stop when data first loads
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_userPosition == null && !_locationLoading && stops.isNotEmpty) {
-            _getUserLocationAndScrollToNearest(stops);
+          final variantKey = '${r}_${selectedBoundChar}_${selectedService}_cached';
+          if (_lastAutoScrollVariantKey != variantKey) {
+            if (_userPosition == null && !_locationLoading && stops.isNotEmpty) {
+              _getUserLocationAndScrollToNearest(stops);
+            }
+            _lastAutoScrollVariantKey = variantKey;
           }
         });
         
@@ -1852,8 +1885,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             ),
             SizedBox(height: 8),
             // Use shrinkWrap instead of Expanded since we're inside a SingleChildScrollView
-            ListView.builder(
-              controller: _scrollController,
+            AnimatedSwitcher(
+              duration: Duration(milliseconds: 200),
+              child: ListView.builder(
+                key: PageStorageKey<String>('kmb_list_${r}_${selectedBoundChar}_${selectedService}_cached'),
               shrinkWrap: true,
               physics: NeverScrollableScrollPhysics(),
               padding: EdgeInsets.only(
@@ -1897,6 +1932,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                     isNearby: isNearby,
                   );
                 },
+              ),
             ),
           ],
         );
@@ -2020,24 +2056,27 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       }
     }
     
-    return ExpandableStopCard(
-      key: ValueKey('${widget.route}_$seq'), // Unique key to preserve expansion state
-      seq: seq,
-      stopId: stopId,
-      displayName: displayName,
-      nameEn: nameEn,
-      nameTc: nameTc,
-      etas: etas,
-      isEnglish: isEnglish,
-      route: widget.route,
-      selectedServiceType: _selectedServiceType,
-      latitude: latitude,
-      longitude: longitude,
-      destEn: destEn,
-      destTc: destTc,
-      direction: _selectedDirection,
-      isNearby: isNearby,
-      onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
+    return KeyedSubtree(
+      key: _stopKeys.putIfAbsent(seq, () => GlobalKey()),
+      child: ExpandableStopCard(
+        key: ValueKey('${widget.route}_${_selectedDirection}_${_selectedServiceType}_$seq'),
+        seq: seq,
+        stopId: stopId,
+        displayName: displayName,
+        nameEn: nameEn,
+        nameTc: nameTc,
+        etas: etas,
+        isEnglish: isEnglish,
+        route: widget.route,
+        selectedServiceType: _selectedServiceType,
+        latitude: latitude,
+        longitude: longitude,
+        destEn: destEn,
+        destTc: destTc,
+        direction: _selectedDirection,
+        isNearby: isNearby,
+        onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
+      ),
     );
   }
 
@@ -2161,7 +2200,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               point: latLng,
               width: 80,
               height: 80,
-              child: GestureDetector(
+              child: KeyedSubtree(
+                key: ValueKey('marker_$stopId'),
+                child: GestureDetector(
                 onTap: () {
                   // Show stop details in a bottom sheet
                   showModalBottomSheet(
@@ -2239,6 +2280,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                     ),
                   ],
                 ),
+              ),
               ),
             ),
           );
@@ -2581,8 +2623,15 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     super.build(context); // Required for AutomaticKeepAliveClientMixin
     
     final theme = Theme.of(context);
-    final nearbyColor = theme.colorScheme.tertiary;
-    final nearbyBgColor = theme.colorScheme.tertiaryContainer;
+    final isDark = theme.brightness == Brightness.dark;
+    // Theme-aware nearby highlight colors
+    final nearbyBgColor = theme.colorScheme.tertiaryContainer
+        .withOpacity(isDark ? 0.28 : 0.18);
+    final nearbyBorderColor = theme.colorScheme.onTertiaryContainer
+        .withOpacity(isDark ? 0.60 : 0.40);
+    final nearbyTextPrimary = theme.colorScheme.onTertiaryContainer;
+    final nearbyTextSecondary = theme.colorScheme.onTertiaryContainer
+        .withOpacity(isDark ? 0.85 : 0.70);
     final isActive = _isExpanded || widget.isNearby;
     
     return AnimatedContainer(
@@ -2592,14 +2641,14 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
       decoration: BoxDecoration(
         color: isActive
             ? (widget.isNearby 
-                ? nearbyBgColor.withOpacity(0.2)
+                ? nearbyBgColor
                 : theme.colorScheme.primaryContainer.withOpacity(0.1))
             : theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isActive
               ? (widget.isNearby
-                  ? nearbyColor.withOpacity(0.4)
+                  ? nearbyBorderColor
                   : theme.colorScheme.primary.withOpacity(0.3))
               : theme.colorScheme.outline.withOpacity(0.1),
           width: isActive ? 1.5 : 1.0,
@@ -2608,7 +2657,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
           BoxShadow(
             color: isActive
                 ? (widget.isNearby
-                    ? nearbyColor.withOpacity(0.08)
+                    ? nearbyBorderColor.withOpacity(0.18)
                     : theme.colorScheme.primary.withOpacity(0.08))
                 : theme.colorScheme.shadow.withOpacity(0.04),
             blurRadius: 4,
@@ -2635,11 +2684,9 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Platform/sequence number on the left
+                      // Sequence number on the left (remove meaningless colored block)
                       Column(
                         children: [
-                          Icon(Icons.square, size: 18, color: Theme.of(context).primaryColor),
-                          SizedBox(height: 2),
                           Text(
                             widget.seq,
                             style: TextStyle(
@@ -2663,8 +2710,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                   ? Text(
                                       key: ValueKey('empty'),
                                       widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
+                                  style: TextStyle(
+                                        color: widget.isNearby ? nearbyTextSecondary : Colors.grey[600],
                                         fontSize: 12,
                                       ),
                                     )
@@ -2764,7 +2811,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                             widget.displayName,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[700],
+                              color: widget.isNearby ? nearbyTextPrimary : Colors.grey[700],
                             ),
                             maxLines: _isExpanded ? null : 2,
                             overflow: _isExpanded ? null : TextOverflow.ellipsis,
@@ -2778,7 +2825,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                 '📍 ${widget.latitude}, ${widget.longitude}',
                                 style: TextStyle(
                                   fontSize: 10,
-                                  color: Colors.grey[500],
+                                  color: widget.isNearby ? nearbyTextSecondary : Colors.grey[500],
                                   fontFamily: 'monospace',
                                 ),
                               ),
@@ -2795,38 +2842,31 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         final isMobile = screenWidth < 600;
                         
                         if (isMobile) {
-                          // Compact vertical layout for mobile
+                          // Vertical alignment for mobile: Pin over Map, then expand icon
                           return Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              // Top row: Pin and Map buttons
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: Icon(Icons.push_pin_outlined, size: 16),
-                                    tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                                    padding: EdgeInsets.all(4),
-                                    constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-                                    onPressed: () => _pinStop(context),
-                                  ),
-                                  if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
-                                    IconButton(
-                                      icon: Icon(Icons.map_outlined, size: 16),
-                                      tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
-                                      padding: EdgeInsets.all(4),
-                                      constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-                                      onPressed: () {
-                                        final lat = double.tryParse(widget.latitude!);
-                                        final lng = double.tryParse(widget.longitude!);
-                                        if (lat != null && lng != null) {
-                                          widget.onJumpToMap!(lat, lng);
-                                        }
-                                      },
-                                    ),
-                                ],
+                              IconButton(
+                                icon: Icon(Icons.push_pin_outlined, size: 16),
+                                tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
+                                padding: EdgeInsets.all(4),
+                                constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                onPressed: () => _pinStop(context),
                               ),
-                              // Bottom: Expand indicator
+                              if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                IconButton(
+                                  icon: Icon(Icons.map_outlined, size: 16),
+                                  tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                  padding: EdgeInsets.all(4),
+                                  constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                  onPressed: () {
+                                    final lat = double.tryParse(widget.latitude!);
+                                    final lng = double.tryParse(widget.longitude!);
+                                    if (lat != null && lng != null) {
+                                      widget.onJumpToMap!(lat, lng);
+                                    }
+                                  },
+                                ),
                               Icon(
                                 _isExpanded ? Icons.expand_less : Icons.expand_more,
                                 color: Colors.grey[600],
