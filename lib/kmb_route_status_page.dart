@@ -698,10 +698,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 ),
               ),
             ),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingL, vertical: UIConstants.spacingM),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                // Reduce vertical padding so floating toggle bar is more compact
+                padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingL, vertical: UIConstants.spacingS),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1892,7 +1893,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               shrinkWrap: true,
               physics: NeverScrollableScrollPhysics(),
               padding: EdgeInsets.only(
-                bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 96.0 : 12.0,
+                bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 200.0 : 12.0,
               ),
               itemCount: stops.length,
               itemBuilder: (context, index) {
@@ -2374,10 +2375,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                               child: Icon(
                                 Icons.navigation,
                                 color: Theme.of(context).colorScheme.onError,
-                                size: 20,
+                                size: 10,
                               ),
                             ),
-                            markerSize: const Size(40, 40),
+                            markerSize: const Size(18, 18),
                             markerDirection: MarkerDirection.heading,
                             headingSectorColor: Theme.of(context).colorScheme.error.withOpacity(0.2),
                             headingSectorRadius: 60,
@@ -2392,8 +2393,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                   // Recenter button
                   if (_userPosition != null)
                     Positioned(
-                      bottom: 16,
-                      right: 16,
+                      bottom: 12,
+                      right: 12,
                       child: FloatingActionButton.small(
                         heroTag: 'recenter_map',
                         backgroundColor: Theme.of(context).colorScheme.surface,
@@ -2637,7 +2638,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      // compact vertical spacing for card container
+      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 6),
       decoration: BoxDecoration(
         color: isActive
             ? (widget.isNearby 
@@ -2677,7 +2679,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
             },
             borderRadius: BorderRadius.circular(12),
             child: Padding(
-              padding: const EdgeInsets.all(12.0),
+              // keep inner content spacing readable but reduce container Y-height
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
               child: Column(
                 children: [
                   // Main row - always visible
@@ -2712,7 +2715,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                       widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
                                   style: TextStyle(
                                         color: widget.isNearby ? nearbyTextSecondary : Colors.grey[600],
-                                        fontSize: 12,
+                                        fontSize: 14,
                                       ),
                                     )
                                   : Row(
@@ -2756,18 +2759,20 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                 
                                 // Yield the ETA widget
                                 yield Padding(
-                                  padding: const EdgeInsets.only(right: 8.0),
+                                  padding: const EdgeInsets.only(right: 4.0, left: 4.0),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
                                       Text(
                                         etaText,
                                         style: TextStyle(
-                                          fontSize: 16,
+                                          fontSize: 24,
                                           fontWeight: FontWeight.bold,
-                                          color: isDeparted 
-                                            ? Colors.grey[400] 
-                                            : (isNearlyArrived ? Colors.green : _getEtaColor(etaRaw)),
+                                          color: isDeparted
+                                              ? Colors.grey[400]
+                                              : (isNearlyArrived
+                                                  ? Colors.green
+                                                  : _getEtaColor(etaRaw)),
                                         ),
                                         textAlign: TextAlign.center,
                                       ),
@@ -2775,8 +2780,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                         Text(
                                           rmk,
                                           style: TextStyle(
-                                            fontSize: 9,
-                                            color: Colors.grey[600],
+                                            fontSize: 12,
+                                            color: Colors.grey[800],
                                           ),
                                           textAlign: TextAlign.center,
                                         ),
@@ -2792,7 +2797,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                     child: Text(
                                       '|',
                                       style: TextStyle(
-                                        fontSize: 16,
+                                        fontSize: 20,
                                         color: Colors.grey[400],
                                         fontWeight: FontWeight.w300,
                                       ),
@@ -2804,17 +2809,19 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                             ),
                           ),
                           
-                          SizedBox(height: 8),
+                          SizedBox(height: 10),
                           
                           // Stop name below
-                          Text(
+                          Padding(padding: const EdgeInsets.only(bottom: 4.0, top: 16.0),
+                            child:Text(
                             widget.displayName,
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 16,
                               color: widget.isNearby ? nearbyTextPrimary : Colors.grey[700],
                             ),
                             maxLines: _isExpanded ? null : 2,
                             overflow: _isExpanded ? null : TextOverflow.ellipsis,
+                            )
                           ),
                           
                           // Coordinates display
@@ -2847,18 +2854,19 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               IconButton(
-                                icon: Icon(Icons.push_pin_outlined, size: 16),
+                                icon: Icon(Icons.push_pin_outlined, size: 22),
                                 tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                                padding: EdgeInsets.all(4),
-                                constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                // tighter hit target to reduce vertical space
+                                padding: EdgeInsets.all(10),
+                                constraints: BoxConstraints(minWidth: 10, minHeight: 5),
                                 onPressed: () => _pinStop(context),
                               ),
                               if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
                                 IconButton(
-                                  icon: Icon(Icons.map_outlined, size: 16),
+                                  icon: Icon(Icons.map_outlined, size: 22),
                                   tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
-                                  padding: EdgeInsets.all(4),
-                                  constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                  padding: EdgeInsets.all(10),
+                                  constraints: BoxConstraints(minWidth: 24, minHeight: 24),
                                   onPressed: () {
                                     final lat = double.tryParse(widget.latitude!);
                                     final lng = double.tryParse(widget.longitude!);
@@ -2880,29 +2888,29 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: Icon(Icons.push_pin_outlined, size: 18),
-                                tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                                padding: EdgeInsets.zero,
-                                constraints: BoxConstraints(),
-                                onPressed: () => _pinStop(context),
-                              ),
-                              SizedBox(width: 4),
-                              if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
-                                IconButton(
-                                  icon: Icon(Icons.map_outlined, size: 18),
-                                  tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
-                                  padding: EdgeInsets.zero,
-                                  constraints: BoxConstraints(),
-                                  onPressed: () {
-                                    final lat = double.tryParse(widget.latitude!);
-                                    final lng = double.tryParse(widget.longitude!);
-                                    if (lat != null && lng != null) {
-                                      widget.onJumpToMap!(lat, lng);
-                                    }
-                                  },
-                                ),
-                              if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
-                                SizedBox(width: 4),
+                                    icon: Icon(Icons.push_pin_outlined, size: 16),
+                                    tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
+                                    padding: EdgeInsets.all(2),
+                                    constraints: BoxConstraints(minWidth: 24, minHeight: 24),
+                                    onPressed: () => _pinStop(context),
+                                  ),
+                                  SizedBox(width: 4),
+                                  if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                    IconButton(
+                                      icon: Icon(Icons.map_outlined, size: 16),
+                                      tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
+                                      padding: EdgeInsets.all(2),
+                                      constraints: BoxConstraints(minWidth: 24, minHeight: 24),
+                                      onPressed: () {
+                                        final lat = double.tryParse(widget.latitude!);
+                                        final lng = double.tryParse(widget.longitude!);
+                                        if (lat != null && lng != null) {
+                                          widget.onJumpToMap!(lat, lng);
+                                        }
+                                      },
+                                    ),
+                                  if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
+                                    SizedBox(width: 4),
                               Icon(
                                 _isExpanded ? Icons.expand_less : Icons.expand_more,
                                 color: Colors.grey[600],
@@ -2918,7 +2926,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
               
                 // Expanded details
                 if (_isExpanded && widget.etas.isNotEmpty) ...[
-                  Divider(height: 20),
+                  Divider(height: 16),
                   ...widget.etas.map((e) {
                     final etaRaw = e['eta'] ?? e['eta_time'];
                     final etaSeq = e['eta_seq']?.toString() ?? '';
@@ -2949,7 +2957,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                     }
                     
                     return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4.0),
+                      padding: const EdgeInsets.symmetric(vertical: 2.0),
                       child: Row(
                         children: [
                           Container(
@@ -2988,7 +2996,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                     rmk,
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.orange[700],
+                                      color: Colors.grey[700],
                                     ),
                                   ),
                               ],

@@ -142,72 +142,13 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
   @override
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
-
+  // (bottomInset is computed per-tab where needed)
     return Scaffold(
-      body: Column(
+      // Use a Stack so we can place the TabBar visually above the app's bottom nav
+      body: Stack(
         children: [
-          // Compact liquid glass tab bar
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.7),
-                          Theme.of(context).colorScheme.surface.withOpacity(0.5),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
-                        width: 1.0,
-                      ),
-                    ),
-                    child: TabBar(
-                      controller: _tabController,
-                      indicator: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
-                      ),
-                      indicatorSize: TabBarIndicatorSize.tab,
-                      indicatorPadding: EdgeInsets.all(4),
-                      labelColor: Theme.of(context).colorScheme.onPrimaryContainer,
-                      unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                      dividerColor: Colors.transparent,
-                      tabs: [
-                        Tab(
-                          icon: Icon(Icons.push_pin, size: 20),
-                          text: lang.pinnedRoutes,
-                          height: 52,
-                        ),
-                        Tab(
-                          icon: Icon(Icons.location_on, size: 20),
-                          text: lang.isEnglish ? 'Stops' : '站點',
-                          height: 52,
-                        ),
-                        Tab(
-                          icon: Icon(Icons.history, size: 20),
-                          text: lang.history,
-                          height: 52,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          
-          // Content
-          Expanded(
+          // Main content (TabBarView)
+          Positioned.fill(
             child: _loading
                 ? Center(child: CircularProgressIndicator())
                 : TabBarView(
@@ -218,6 +159,62 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                       _buildHistoryTab(lang),
                     ],
                   ),
+          ),
+
+          // Floating bottom TabBar placed above the global bottom navigation
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: true,
+              bottom: false,
+              child: Padding(
+                // compute bottom offset so the bar sits above the app's bottom nav (~60) + small gap
+                padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).padding.bottom + 12 + 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        /*gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.7),
+                            Theme.of(context).colorScheme.surface.withOpacity(0.5),
+                          ],
+                        ),*/
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                          width: 1.0,
+                        ),
+                      ),
+                      child: TabBar(
+                        controller: _tabController,  
+                        splashBorderRadius: BorderRadius.circular(12),
+                        indicator: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
+                        ),
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicatorPadding: EdgeInsets.all(4),
+                        labelColor: Theme.of(context).colorScheme.onPrimaryContainer,
+                        unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                        dividerColor: Colors.transparent,
+                        tabs: [
+                          Tab(icon: Icon(Icons.push_pin, size: 20), text: lang.pinnedRoutes, height: 52),
+                          Tab(icon: Icon(Icons.location_on, size: 20), text: lang.isEnglish ? 'Stops' : '站點', height: 52),
+                          Tab(icon: Icon(Icons.history, size: 20), text: lang.history, height: 52),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -247,11 +244,12 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
         ),
       );
     }
+    final double bottomInset = 80 + MediaQuery.of(context).padding.bottom;
 
     return RefreshIndicator(
       onRefresh: _loadData,
       child: ListView.builder(
-        padding: EdgeInsets.fromLTRB(12, 8, 12, 12),
+        padding: EdgeInsets.fromLTRB(12, 8, 12, bottomInset),
         itemCount: _pinnedRoutes.length,
         itemBuilder: (context, index) {
           final route = _pinnedRoutes[index];
@@ -274,6 +272,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
   }
 
   Widget _buildHistoryTab(LanguageProvider lang) {
+    final double bottomInset = 80 + MediaQuery.of(context).padding.bottom;
     if (_historyRoutes.isEmpty) {
       return Center(
         child: Column(
@@ -342,8 +341,8 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
         Expanded(
           child: RefreshIndicator(
             onRefresh: _loadData,
-            child: ListView.builder(
-              padding: EdgeInsets.fromLTRB(12, 4, 12, 12),
+        child: ListView.builder(
+          padding: EdgeInsets.fromLTRB(12, 4, 12, bottomInset),
               itemCount: _historyRoutes.length,
               itemBuilder: (context, index) {
                 final route = _historyRoutes[index];
@@ -602,11 +601,12 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
         ),
       );
     }
+    final double bottomInset = 80 + MediaQuery.of(context).padding.bottom;
 
     return RefreshIndicator(
       onRefresh: _loadData,
       child: ListView.builder(
-        padding: EdgeInsets.fromLTRB(12, 8, 12, 12),
+        padding: EdgeInsets.fromLTRB(12, 8, 12, bottomInset),
         itemCount: _pinnedStops.length,
         itemBuilder: (context, index) {
           final stop = _pinnedStops[index];
@@ -621,6 +621,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
               );
               _loadData();
             },
+            compact: _pinnedStops.length > 8,
           );
         },
       ),
@@ -631,11 +632,13 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     required Map<String, dynamic> stop,
     required LanguageProvider lang,
     required VoidCallback onUnpin,
+    bool compact = false,
   }) {
     return PinnedStopCard(
       stop: stop,
       lang: lang,
       onUnpin: onUnpin,
+      compact: compact,
     );
   }
 }
@@ -645,12 +648,14 @@ class PinnedStopCard extends StatefulWidget {
   final Map<String, dynamic> stop;
   final LanguageProvider lang;
   final VoidCallback onUnpin;
+  final bool compact;
 
   const PinnedStopCard({
     Key? key,
     required this.stop,
     required this.lang,
     required this.onUnpin,
+    this.compact = false,
   }) : super(key: key);
 
   @override
@@ -798,7 +803,120 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       directionColor = Colors.orange;
       directionIcon = Icons.arrow_circle_left;
     }
-    
+    // Lightweight compact rendering for long lists (faster, avoids BackdropFilter)
+    if (widget.compact) {
+      String? firstEtaText;
+      if (_loading) {
+        firstEtaText = null;
+      } else if (_etas.isEmpty) {
+        firstEtaText = null;
+      } else {
+        final e = _etas.first;
+        final etaRaw = e['eta'] ?? e['eta_time'];
+        if (etaRaw != null) {
+          try {
+            final dt = DateTime.parse(etaRaw.toString()).toLocal();
+            final diff = dt.difference(DateTime.now());
+            if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
+              firstEtaText = widget.lang.isEnglish ? 'Arr' : '到達';
+            } else if (diff.isNegative) {
+              firstEtaText = '-';
+            } else {
+              final mins = diff.inMinutes;
+              firstEtaText = widget.lang.isEnglish ? '${mins}m' : '${mins}分';
+            }
+          } catch (_) {
+            firstEtaText = null;
+          }
+        }
+      }
+
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6.0),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outline.withOpacity(0.06),
+              width: 1,
+            ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => KmbRouteStatusPage(
+                      route: route,
+                      bound: widget.stop['direction'],
+                      serviceType: widget.stop['serviceType'],
+                    ),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                child: Row(
+                  children: [
+                    // small route badge
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: directionColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(route, style: TextStyle(fontWeight: FontWeight.bold, color: directionColor, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    // stop name + dest
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          if (dest.isNotEmpty) SizedBox(height: 2),
+                          if (dest.isNotEmpty) Text(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    // ETA / loading indicator
+                    if (_loading)
+                      SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    else if (firstEtaText != null)
+                      Text(firstEtaText, style: TextStyle(fontWeight: FontWeight.bold, color: _getEtaColor(_etas.isNotEmpty ? (_etas.first['eta'] ?? _etas.first['eta_time']) : null)))
+                    else
+                      SizedBox.shrink(),
+                    SizedBox(width: 8),
+                    // unpin
+                    InkWell(
+                      onTap: widget.onUnpin,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6.0),
+                        child: Icon(Icons.push_pin, size: 18, color: Theme.of(context).colorScheme.primary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Full (original) rich card
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: ClipRRect(
@@ -807,14 +925,14 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
+              /*gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
                   Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
                   Theme.of(context).colorScheme.surface.withOpacity(0.4),
                 ],
-              ),
+              ),*/
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
@@ -1031,21 +1149,23 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                           ),
                           
                           // Unpin button
-                          Container(
-                            padding: EdgeInsets.all(6),
+                          Ink(
+                            padding: EdgeInsets.all(10),
                             decoration: BoxDecoration(
                               color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(100),
                             ),
                             child: InkWell(
                               onTap: widget.onUnpin,
+                              borderRadius: BorderRadius.circular(100),
                               child: Icon(
                                 Icons.push_pin,
                                 color: Theme.of(context).colorScheme.primary,
-                                size: 18,
+                                size: 25,
                               ),
                             ),
-                          ),
+                          )
+
                         ],
                       ),
                     ],

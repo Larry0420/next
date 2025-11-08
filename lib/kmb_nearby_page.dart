@@ -25,7 +25,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   Timer? _refreshTimer;
   
   // Range selection
-  double _rangeMeters = 100.0; // Default 100m
+  double _rangeMeters = 150.0; // Default 200m
   final TextEditingController _customRangeController = TextEditingController();
   
   // Spatial index cache for O(1) nearby lookup
@@ -261,7 +261,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(langProv.isEnglish ? 'Custom Range' : '自訂範圍'),
+        title: Text(
+          langProv.isEnglish ? 'Custom Range' : '自訂範圍',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
         content: TextField(
           controller: _customRangeController,
           keyboardType: TextInputType.number,
@@ -355,6 +361,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                 children: [
                                   _buildRangeChip('100m', 100, langProv),
                                   SizedBox(width: 8),
+                                  _buildRangeChip('150m', 150, langProv),
+                                  SizedBox(width: 8),
                                   _buildRangeChip('200m', 200, langProv),
                                   SizedBox(width: 8),
                                   _buildRangeChip('400m', 400, langProv),
@@ -392,23 +400,26 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  langProv.isEnglish ? 'Current Location' : '目前位置',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                SizedBox(height: 2),
-                                Text(
-                                  '${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
+                                  children: [
+                                      Text(
+                                        (langProv.isEnglish ? 'Current Location' : '目前位置'),
+                                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        '${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}',
+                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                          fontFeatures: [FontFeature.tabularFigures()],
+                                        ),
+                                      ),
+                                    ],
+                                )
                               ],
                             ),
                           ),
@@ -419,7 +430,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     // Stops list
                     Expanded(
                       child: ListView.builder(
-                        padding: EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.only(
+                          top: 6,
+                          bottom: MediaQuery.of(context).viewInsets.bottom +
+                              MediaQuery.of(context).padding.bottom +
+                              kBottomNavigationBarHeight +
+                              80,
+                        ),
+
                         itemCount: _nearby.length,
                         itemBuilder: (context, idx) => _buildStopCard(context, idx, langProv),
                       ),
@@ -523,14 +541,15 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                               ),
                             ),
                             SizedBox(width: 8),
-                            Text(
+                            //Removed StopID for better visibility
+                            /* Text(
                               s.stopId,
                               style: TextStyle(
                                 fontSize: 10,
                                 color: Colors.grey[500],
                                 fontFamily: 'monospace',
                               ),
-                            ),
+                            ), */
                           ],
                         ),
                       ],
@@ -693,13 +712,22 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(displayName),
+        title: Text(displayName,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: MainAxisSize.max,
             children: [
-              Text(langProv.isEnglish ? 'Stop ID: ${stop.stopId}' : '站點編號: ${stop.stopId}', style: TextStyle(fontSize: 12)),
+              //Removed to StopID for better visibility 
+              /*Text(langProv.isEnglish ? 'Stop ID: ${stop.stopId}' : '站點編號: ${stop.stopId}', style: TextStyle(fontSize: 12)),
+              */
+              
               Text(langProv.isEnglish ? 'Distance: ${_fmtDistance(stop.distanceMeters)}' : '距離: ${_fmtDistance(stop.distanceMeters)}', style: TextStyle(fontSize: 12)),
               Text('Lat: ${stop.lat.toStringAsFixed(6)}, Lng: ${stop.lng.toStringAsFixed(6)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
               SizedBox(height: 12),
@@ -727,7 +755,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     margin: EdgeInsets.only(bottom: 8),
                     child: ListTile(
                       dense: true,
-                      title: Text('Route $route → $displayDest', style: TextStyle(fontWeight: FontWeight.bold)),
+                      title: Text(langProv.isEnglish ? 'Route $route → $displayDest' : '路線 $route → $displayDest', style: TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: routeEtas.take(3).map((eta) {
