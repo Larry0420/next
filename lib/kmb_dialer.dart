@@ -525,8 +525,8 @@ class _KmbDialerState extends State<KmbDialer> {
                                                 : dirLabel;
                                             } else {
                                               subtitleText = serviceType != null && serviceType != '1'
-                                                ? '$orig → $dest (Type $serviceType)'
-                                                : '$orig → $dest';
+                                                ? '$orig → $dest ${lang.type}($serviceType)'
+                                                : '$orig → $dest ${lang.isEnglish ? ' [Normal Service]' : ' [常規班次]'}';
                                             }
                                           }
                                         }

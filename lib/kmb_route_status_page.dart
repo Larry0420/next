@@ -792,7 +792,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                           Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
                           SizedBox(width: 8),
                           Text(
-                            isEnglish ? 'Service Type' : '服務類型',
+                            isEnglish ? 'Service Type' : '班次類型',
                             style: theme.textTheme.labelMedium?.copyWith(
                               fontWeight: FontWeight.w600,
                               color: theme.colorScheme.onSurface,
@@ -804,9 +804,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(
-                          children: _serviceTypes.map((st) {
+                          children: (_serviceTypes..sort()).map((st) {
                             final isSelected = _selectedServiceType == st;
-                            final typeLabel = '${isEnglish ? "Type" : "類型"} $st';
+                            final typeLabel = st == '1'
+                                ? (isEnglish ? 'Normal Service' : '常規班次')
+                                : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
                             
                             return Padding(
                               padding: EdgeInsets.only(right: UIConstants.spacingS),
@@ -826,9 +828,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                   pressElevation: 2,
                                   onSelected: (selected) {
                                     if (selected) {
-                                      setState(() {
-                                        _selectedServiceType = st;
-                                      });
+                                      setState(() => _selectedServiceType = st);
                                       _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
                                       _fetchRouteEta(widget.route, st);
                                       _restartEtaAutoRefresh();
@@ -839,6 +839,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                             );
                           }).toList(),
                         ),
+
                       ),
                     ],
                   ],
@@ -978,7 +979,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             if (_directions.isNotEmpty) ...[
               Row(
                 children: [
-                  Icon(Icons.alt_route, size: 18, color: Colors.grey[700]),
+                  Icon(Icons.alt_route, size: 18, color: Theme.of(context).iconTheme.color ?? Colors.grey[700]),
                   SizedBox(width: 8),
                   Text(
                     isEnglish ? 'Direction' : '方向',
@@ -1029,7 +1030,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               SizedBox(height: 12),
               Row(
                 children: [
-                  Icon(Icons.route, size: 18, color: Colors.grey[700]),
+                  Icon(Icons.route, size: 18, color: Theme.of(context).iconTheme.color ?? Colors.grey[700]),
                   SizedBox(width: 8),
                   Text(
                     isEnglish ? 'Service Type' : '服務類型',
@@ -1661,7 +1662,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     } catch (e) {
       // Silently fail - location is optional
     } finally {
-      setState(() => _locationLoading = false);
+      if (mounted) setState(() => _locationLoading = false);
     }
   }
 
@@ -2769,7 +2770,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                           fontSize: 24,
                                           fontWeight: FontWeight.bold,
                                           color: isDeparted
-                                              ? Colors.grey[400]
+                                              ? Theme.of(context).colorScheme.onSurface.withOpacity(0.7)
                                               : (isNearlyArrived
                                                   ? Colors.green
                                                   : _getEtaColor(etaRaw)),
@@ -2780,8 +2781,9 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                         Text(
                                           rmk,
                                           style: TextStyle(
+                                            height: 1.0,
                                             fontSize: 12,
-                                            color: Colors.grey[800],
+                                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                                           ),
                                           textAlign: TextAlign.center,
                                         ),
@@ -2798,7 +2800,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                       '|',
                                       style: TextStyle(
                                         fontSize: 20,
-                                        color: Colors.grey[400],
+                                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
                                         fontWeight: FontWeight.w300,
                                       ),
                                     ),
@@ -2816,8 +2818,9 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                             child:Text(
                             widget.displayName,
                             style: TextStyle(
-                              fontSize: 16,
-                              color: widget.isNearby ? nearbyTextPrimary : Colors.grey[700],
+                              fontSize: 20,
+                              color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
+                              fontWeight: FontWeight.w600,
                             ),
                             maxLines: _isExpanded ? null : 2,
                             overflow: _isExpanded ? null : TextOverflow.ellipsis,
@@ -2983,22 +2986,29 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  fullEtaText,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: _getEtaColor(etaRaw),
-                                  ),
-                                ),
-                                if (rmk.isNotEmpty)
-                                  Text(
-                                    rmk,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey[700],
-                                    ),
-                                  ),
+                                        Row(
+                                          children: [ // Added 'children:' and square brackets
+                                            Text(
+                                              fullEtaText,
+                                              style: TextStyle(
+                                                height: 2.0,
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                                color: _getEtaColor(etaRaw),
+                                              ),
+                                            ),
+                                            if (rmk.isNotEmpty) // Conditional widget remains valid
+                                              Text(
+                                                ' · $rmk',
+                                                style: TextStyle(
+                                                  height: 2.0,
+                                                  fontSize: 13,
+                                                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                                ),
+                                              ),
+                                          ], // Closing square bracket for the children list
+                                        )
+
                               ],
                             ),
                           ),

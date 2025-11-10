@@ -1135,7 +1135,10 @@ class MtrCatalogProvider extends ChangeNotifier {
   /// Call this when the auto-load setting changes
   Future<void> reloadWithSettings(bool loadCachedSelection) async {
     _isInitialized = false;
-    notifyListeners();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifyListeners();
+    });
+
     await _loadMtrData(loadCachedSelection: loadCachedSelection);
   }
   
@@ -2458,8 +2461,8 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                         // Appearance animation removed; no controller to trigger.
                       },
                       leadingWidget: Container(
-                        width: 3,
-                        height: 16,
+                        width: 10,
+                        height: 9,
                         decoration: BoxDecoration(
                           color: line.lineColor,
                           borderRadius: BorderRadius.circular(1.5),
@@ -2766,7 +2769,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     final colorScheme = Theme.of(context).colorScheme;
     
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
       decoration: BoxDecoration(
         color: colorScheme.surface,
@@ -2800,7 +2803,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                     child: Text(
                       title,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w500,
                         color: colorScheme.onSurface,
                         fontSize: UIConstants.cardTitleFontSize,
                       ),
@@ -2813,7 +2816,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                     trailing,
                   ],
                   if (showToggle) ...[
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 8),
                     Builder(builder: (ctx) {
                       final mq = MediaQuery.maybeOf(ctx);
                       final reduceMotion = mq?.disableAnimations == true || mq?.accessibleNavigation == true;
@@ -2838,16 +2841,16 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
             child: AnimatedSize(
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeInOut,
-              alignment: Alignment.topCenter,
+              alignment: Alignment.topLeft,
               child: content != null && isExpanded
                     ? Container(
                         width: double.infinity,
                         // Align chip content with the header text (icon + spacing)
                         // and reduce right padding so chips sit closer to the card edge.
                         padding: const EdgeInsets.fromLTRB(
-                          UIConstants.cardPadding + 30,
+                          UIConstants.cardPadding,
                           4,
-                          8,
+                          UIConstants.cardPadding,
                           UIConstants.cardPadding,
                         ),
                         child: content,
@@ -3130,9 +3133,9 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           ? 'Tap to switch line'
           : '\u9ede\u64ca\u5207\u63db\u7dab\u8def',
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 500),
         curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
         decoration: BoxDecoration(
           color: colorScheme.primary.withOpacity(0.13),
           borderRadius: BorderRadius.circular(7),
@@ -3149,12 +3152,12 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
               size: 16,
               color: colorScheme.primary,
             ),
-            const SizedBox(width: 5),
+            const SizedBox(width: 6, height: 8,),
             Text(
               lang.isEnglish ? 'Lines' : '轉綫',
               style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
                 color: colorScheme.primary,
               ),
             ),

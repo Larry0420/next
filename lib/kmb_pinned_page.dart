@@ -1,3 +1,4 @@
+import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:ui';
@@ -384,7 +385,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
       final orig = origEn ?? origTc ?? '';
       final dest = destEn ?? destTc ?? '';
       if (orig.isNotEmpty && dest.isNotEmpty) {
-        destinationText = '$orig → $dest';
+        destinationText = lang.isEnglish ? 'From $orig to $dest' : '由 $orig 往 $dest';
       } else {
         destinationText = label.replaceFirst('$routeNum: ', '');
       }
@@ -392,7 +393,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
       final orig = origTc ?? origEn ?? '';
       final dest = destTc ?? destEn ?? '';
       if (orig.isNotEmpty && dest.isNotEmpty) {
-        destinationText = '$orig → $dest';
+        destinationText = lang.isEnglish ? 'From $orig to $dest' : '由 $orig 往 $dest';
       } else {
         destinationText = label.replaceFirst('$routeNum: ', '');
       }
@@ -492,8 +493,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                                     color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
-                                  child: Text(
-                                    routeNum,
+                                  child: AutoSizeText(
+                                    '${lang.route} $routeNum',
+                                    maxLines: 1,
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       color: Theme.of(context).colorScheme.onPrimaryContainer,
@@ -509,9 +511,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                                       color: Colors.blue.withOpacity(0.15),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
-                                    child: Text(
-                                      lang.isEnglish ? 'T$serviceType' : '${lang.type}$serviceType',
-                                      style: TextStyle(fontSize: 9, color: Colors.blue[800], fontWeight: FontWeight.w600),
+                                    child: AutoSizeText(
+                                      '${lang.type}($serviceType)',
+                                      style: TextStyle(fontSize: 10, color: Colors.blue[800], fontWeight: FontWeight.w600),
                                     ),
                                   ),
                                 ],
@@ -519,14 +521,14 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                             ),
                             SizedBox(height: 4),
                             // Route destination
-                            Text(
+                            AutoSizeText(
                               destinationText,
                               style: TextStyle(
-                                fontSize: 12, 
+                                fontSize: 14, 
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 height: 1.3,
                               ),
-                              maxLines: 1,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                             // Timestamp
@@ -884,7 +886,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
                           if (dest.isNotEmpty) SizedBox(height: 2),
                           if (dest.isNotEmpty) Text(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9)), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ],
@@ -1114,7 +1116,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                                               rmk,
                                               style: TextStyle(
                                                 fontSize: 9,
-                                                color: Colors.grey[600],
+                                                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
                                               ),
                                             ),
                                         ],

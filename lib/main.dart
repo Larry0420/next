@@ -2191,7 +2191,7 @@ class LanguageProvider extends ChangeNotifier {
   String get inbound => _isEnglish ? 'Inbound' : '返程';
   String get pinRoute => _isEnglish ? 'Pin route' : '固定路線';
   String get routePinned => _isEnglish ? 'Route pinned' : '已固定路線';
-  String get type => _isEnglish ? 'Type' : '類型';
+  String get type => _isEnglish ? 'Special Service' : '特別班次';
   String get kmb => _isEnglish ? 'KMB' : '巴士'; // KMB is a brand name, same in both languages
 }
 

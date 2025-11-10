@@ -1,3 +1,4 @@
+import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'kmb.dart';
@@ -184,10 +185,12 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         _fetchEtasForNearbyStops();
       });
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -472,11 +475,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     
     return Card(
       margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      elevation: 1,
+      elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
           width: 1,
         ),
       ),
@@ -517,12 +520,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        AutoSizeText(
                           displayName,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
                             height: 1.2,
+                            color: Theme.of(context).colorScheme.primary,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -530,13 +534,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                         SizedBox(height: 3),
                         Row(
                           children: [
-                            Icon(Icons.location_on, size: 11, color: Colors.grey[600]),
+                            Icon(Icons.location_on, size: 11, color: Theme.of(context).colorScheme.primary),
                             SizedBox(width: 3),
                             Text(
                               _fmtDistance(s.distanceMeters),
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.grey[600],
+                                color: Theme.of(context).colorScheme.secondary,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -556,7 +560,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     ),
                   ),
                   
-                  Icon(Icons.chevron_right, size: 20, color: Colors.grey[400]),
+                  Icon(Icons.chevron_right, size: 30, color: Colors.grey[400]),
                 ],
               ),
               
@@ -566,7 +570,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
-                  children: etasByRoute.entries.take(6).map((entry) {
+                  children: etasByRoute.entries.take(8).map((entry) {
                     return _buildRouteChip(context, entry.key, entry.value, langProv);
                   }).toList(),
                 ),
@@ -755,7 +759,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     margin: EdgeInsets.only(bottom: 8),
                     child: ListTile(
                       dense: true,
-                      title: Text(langProv.isEnglish ? 'Route $route → $displayDest' : '路線 $route → $displayDest', style: TextStyle(fontWeight: FontWeight.bold)),
+                      title: Text(langProv.isEnglish ? 'Route $route To $displayDest' : '路線 $route 往 $displayDest', style: TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: routeEtas.take(3).map((eta) {
