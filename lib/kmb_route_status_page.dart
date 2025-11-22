@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'kmb.dart';
+import 'kmb/api/kmb.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart' show compute;
-import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants;
+import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -2621,407 +2621,242 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   }
 
   @override
-  Widget build(BuildContext context) {
+    Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
-    
+
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    // Theme-aware nearby highlight colors
-    final nearbyBgColor = theme.colorScheme.tertiaryContainer
-        .withOpacity(isDark ? 0.28 : 0.18);
-    final nearbyBorderColor = theme.colorScheme.onTertiaryContainer
-        .withOpacity(isDark ? 0.60 : 0.40);
-    final nearbyTextPrimary = theme.colorScheme.onTertiaryContainer;
-    final nearbyTextSecondary = theme.colorScheme.onTertiaryContainer
-        .withOpacity(isDark ? 0.85 : 0.70);
+
+    // Theme-aware nearby highlight colors (Material 3 tokens)
+    final nearbyBgColor = colorScheme.tertiaryContainer.withOpacity(isDark ? 0.28 : 0.18);
+    final nearbyBorderColor = colorScheme.tertiary.withOpacity(isDark ? 0.60 : 0.40);
+    final nearbyTextPrimary = colorScheme.onTertiaryContainer;
+    final nearbyTextSecondary = colorScheme.onTertiaryContainer.withOpacity(isDark ? 0.85 : 0.70);
+
     final isActive = _isExpanded || widget.isNearby;
-    
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-      // compact vertical spacing for card container
-      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 6),
-      decoration: BoxDecoration(
-        color: isActive
-            ? (widget.isNearby 
-                ? nearbyBgColor
-                : theme.colorScheme.primaryContainer.withOpacity(0.1))
-            : theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isActive
-              ? (widget.isNearby
-                  ? nearbyBorderColor
-                  : theme.colorScheme.primary.withOpacity(0.3))
-              : theme.colorScheme.outline.withOpacity(0.1),
-          width: isActive ? 1.5 : 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
+
+    // Android 16 / Material 3 Card Design
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+      child: Card(
+        elevation: isActive ? 1 : 0,
+        margin: EdgeInsets.zero,
+        // Use primaryContainer for expanded state to show active context
+        color: isActive 
+            ? (widget.isNearby ? nearbyBgColor : colorScheme.surfaceContainerHigh)
+            : colorScheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16), // M3 Standard
+          side: BorderSide(
             color: isActive
-                ? (widget.isNearby
-                    ? nearbyBorderColor.withOpacity(0.18)
-                    : theme.colorScheme.primary.withOpacity(0.08))
-                : theme.colorScheme.shadow.withOpacity(0.04),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
+                ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary.withOpacity(0.4))
+                : colorScheme.outlineVariant.withOpacity(0.4),
+            width: isActive ? 1.5 : 1.0,
           ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              setState(() {
-                _isExpanded = !_isExpanded;
-              });
-            },
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              // keep inner content spacing readable but reduce container Y-height
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-              child: Column(
-                children: [
-                  // Main row - always visible
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Sequence number on the left (remove meaningless colored block)
-                      Column(
-                        children: [
-                          Text(
-                            widget.seq,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            setState(() {
+              _isExpanded = !_isExpanded;
+            });
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Sequence Number Badge (M3 Style)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isActive 
+                            ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary)
+                            : colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      SizedBox(width: 12),
-                      
-                      // ETAs and stop name
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // ETA times in a row
-                            AnimatedSwitcher(
-                              duration: Duration(milliseconds: 300),
-                              child: widget.etas.isEmpty
-                                  ? Text(
-                                      key: ValueKey('empty'),
-                                      widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-                                  style: TextStyle(
-                                        color: widget.isNearby ? nearbyTextSecondary : Colors.grey[600],
-                                        fontSize: 14,
-                                      ),
-                                    )
-                                  : Row(
-                                      key: ValueKey('etas'),
-                                      children: [
-                                        ...widget.etas.take(3).expand((e) sync* {
-                                          final etaRaw = e['eta'] ?? e['eta_time'];
-                                final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
-                                final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
-                                final rmk = widget.isEnglish
-                                    ? (rmkEn.isNotEmpty ? rmkEn : rmkTc)
-                                    : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
-                                
-                                // Format ETA as "X min" or time
-                                String etaText = '—';
-                                bool isDeparted = false;
-                                bool isNearlyArrived = false;
-                                if (etaRaw != null) {
-                                  try {
-                                    final dt = DateTime.parse(etaRaw.toString()).toLocal();
-                                    final now = DateTime.now();
-                                    final diff = dt.difference(now);
-                                    
-                                    if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
-                                      etaText = widget.isEnglish ? 'Arriving' : '到達中';
-                                      isNearlyArrived = true;
-                                    } else if (diff.isNegative) {
-                                      etaText = '-';
-                                      isDeparted = true;
-                                    } else {
-                                      final mins = diff.inMinutes;
-                                      if (mins < 1) {
-                                        etaText = widget.isEnglish ? 'Due' : '即將抵達';
-                                        isNearlyArrived = true;
-                                      } else {
-                                        etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
-                                      }
-                                    }
-                                  } catch (_) {}
-                                }
-                                
-                                // Yield the ETA widget
-                                yield Padding(
-                                  padding: const EdgeInsets.only(right: 4.0, left: 4.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.center,
+                      child: Text(
+                        widget.seq,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: isActive 
+                              ? (widget.isNearby ? colorScheme.onTertiary : colorScheme.onPrimary)
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+
+                    // ETAs and Stop Name
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // ETA Row
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 300),
+                            child: widget.etas.isEmpty
+                                ? Text(
+                                    key: const ValueKey('empty'),
+                                    widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
+                                    ),
+                                  )
+                                : Row(
+                                    key: const ValueKey('etas'),
                                     children: [
-                                      Text(
-                                        etaText,
-                                        style: TextStyle(
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.bold,
-                                          color: isDeparted
-                                              ? Theme.of(context).colorScheme.onSurface.withOpacity(0.7)
-                                              : (isNearlyArrived
-                                                  ? Colors.green
-                                                  : _getEtaColor(etaRaw)),
-                                        ),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                      if (rmk.isNotEmpty)
-                                        Text(
-                                          rmk,
-                                          style: TextStyle(
-                                            height: 1.0,
-                                            fontSize: 12,
-                                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                      ...widget.etas.take(3).expand((e) sync* {
+                                        final etaRaw = e['eta'] ?? e['eta_time'];
+                                        final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
+                                        final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
+                                        // Use M3 style logic for remarks if needed, keeping simple for now
+
+                                        // Format ETA logic preserved
+                                        String etaText = '—';
+                                        bool isDeparted = false;
+                                        bool isNearlyArrived = false;
+
+                                        if (etaRaw != null) {
+                                          try {
+                                            final dt = DateTime.parse(etaRaw.toString()).toLocal();
+                                            final now = DateTime.now();
+                                            final diff = dt.difference(now);
+
+                                            if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
+                                              etaText = widget.isEnglish ? 'Arriving' : '到達中';
+                                              isNearlyArrived = true;
+                                            } else if (diff.isNegative) {
+                                              etaText = '-';
+                                              isDeparted = true;
+                                            } else {
+                                              final mins = diff.inMinutes;
+                                              if (mins < 1) {
+                                                etaText = widget.isEnglish ? 'Due' : '即將抵達';
+                                                isNearlyArrived = true;
+                                              } else {
+                                                etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
+                                              }
+                                            }
+                                          } catch (_) {}
+                                        }
+
+                                        yield Padding(
+                                          padding: const EdgeInsets.only(right: 16.0),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                etaText,
+                                                style: theme.textTheme.titleLarge?.copyWith(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isDeparted 
+                                                      ? colorScheme.onSurface.withOpacity(0.38)
+                                                      : (isNearlyArrived ? colorScheme.primary : colorScheme.onSurface),
+                                                  fontSize: 20,
+                                                ),
+                                              ),
+                                              // Display remark if available
+                                              if ((widget.isEnglish ? rmkEn : rmkTc).isNotEmpty)
+                                                Padding(
+                                                  padding: const EdgeInsets.only(top: 2.0),
+                                                  child: Text(
+                                                    widget.isEnglish ? rmkEn : rmkTc,
+                                                    style: theme.textTheme.labelSmall?.copyWith(
+                                                      color: colorScheme.onSurfaceVariant,
+                                                      fontSize: 10,
+                                                      height: 1.2,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                            ],
                                           ),
-                                          textAlign: TextAlign.center,
-                                        ),
+                                        );
+                                      }),
                                     ],
                                   ),
-                                );
-                                
-                                // Add separator after each ETA except the last one
-                                final index = widget.etas.indexOf(e);
-                                if (index < widget.etas.take(3).length - 1) {
-                                  yield Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                    child: Text(
-                                      '|',
-                                      style: TextStyle(
-                                        fontSize: 20,
-                                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-                                        fontWeight: FontWeight.w300,
-                                      ),
-                                    ),
-                                  );
-                                }
-                              }).toList(),
-                            ],
-                            ),
                           ),
-                          
-                          SizedBox(height: 10),
-                          
-                          // Stop name below
-                          Padding(padding: const EdgeInsets.only(bottom: 4.0, top: 16.0),
-                            child:Text(
+
+                          const SizedBox(height: 6),
+
+                          // Stop Name
+                          Text(
                             widget.displayName,
-                            style: TextStyle(
-                              fontSize: 20,
-                              color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
-                              fontWeight: FontWeight.w600,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                              color: widget.isNearby ? nearbyTextPrimary : colorScheme.onSurface,
                             ),
-                            maxLines: _isExpanded ? null : 2,
-                            overflow: _isExpanded ? null : TextOverflow.ellipsis,
-                            )
                           ),
-                          
-                          // Coordinates display
-                          if (widget.latitude != null && widget.longitude != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4.0),
-                              child: Text(
-                                '📍 ${widget.latitude}, ${widget.longitude}',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: widget.isNearby ? nearbyTextSecondary : Colors.grey[500],
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                            ),
                         ],
                       ),
                     ),
-                    
-                    // Responsive button layout
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        // Get screen width to determine layout
-                        final screenWidth = MediaQuery.of(context).size.width;
-                        final isMobile = screenWidth < 600;
-                        
-                        if (isMobile) {
-                          // Vertical alignment for mobile: Pin over Map, then expand icon
-                          return Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.push_pin_outlined, size: 22),
-                                tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                                // tighter hit target to reduce vertical space
-                                padding: EdgeInsets.all(10),
-                                constraints: BoxConstraints(minWidth: 10, minHeight: 5),
-                                onPressed: () => _pinStop(context),
-                              ),
-                              if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
-                                IconButton(
-                                  icon: Icon(Icons.map_outlined, size: 22),
-                                  tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
-                                  padding: EdgeInsets.all(10),
-                                  constraints: BoxConstraints(minWidth: 24, minHeight: 24),
-                                  onPressed: () {
-                                    final lat = double.tryParse(widget.latitude!);
-                                    final lng = double.tryParse(widget.longitude!);
-                                    if (lat != null && lng != null) {
-                                      widget.onJumpToMap!(lat, lng);
-                                    }
-                                  },
-                                ),
-                              Icon(
-                                _isExpanded ? Icons.expand_less : Icons.expand_more,
-                                color: Colors.grey[600],
-                                size: 18,
-                              ),
-                            ],
-                          );
-                        } else {
-                          // Original horizontal layout for wide screens
-                          return Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                    icon: Icon(Icons.push_pin_outlined, size: 16),
-                                    tooltip: widget.isEnglish ? 'Pin this stop' : '釘選此站',
-                                    padding: EdgeInsets.all(2),
-                                    constraints: BoxConstraints(minWidth: 24, minHeight: 24),
-                                    onPressed: () => _pinStop(context),
-                                  ),
-                                  SizedBox(width: 4),
-                                  if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
-                                    IconButton(
-                                      icon: Icon(Icons.map_outlined, size: 16),
-                                      tooltip: widget.isEnglish ? 'Show on map' : '在地圖上顯示',
-                                      padding: EdgeInsets.all(2),
-                                      constraints: BoxConstraints(minWidth: 24, minHeight: 24),
-                                      onPressed: () {
-                                        final lat = double.tryParse(widget.latitude!);
-                                        final lng = double.tryParse(widget.longitude!);
-                                        if (lat != null && lng != null) {
-                                          widget.onJumpToMap!(lat, lng);
-                                        }
-                                      },
-                                    ),
-                                  if (widget.latitude != null && widget.longitude != null && widget.onJumpToMap != null)
-                                    SizedBox(width: 4),
-                              Icon(
-                                _isExpanded ? Icons.expand_less : Icons.expand_more,
-                                color: Colors.grey[600],
-                                size: 20,
-                              ),
-                            ],
-                          );
-                        }
-                      },
+
+                    // Expand Icon
+                    Icon(
+                      _isExpanded ? Icons.expand_less : Icons.expand_more,
+                      color: colorScheme.onSurfaceVariant,
                     ),
                   ],
                 ),
-              
-                // Expanded details
-                if (_isExpanded && widget.etas.isNotEmpty) ...[
-                  Divider(height: 16),
-                  ...widget.etas.map((e) {
-                    final etaRaw = e['eta'] ?? e['eta_time'];
-                    final etaSeq = e['eta_seq']?.toString() ?? '';
-                    final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
-                    final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
-                    final rmk = widget.isEnglish
-                        ? (rmkEn.isNotEmpty ? rmkEn : rmkTc)
-                        : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
-                    
-                    String fullEtaText = '—';
-                    if (etaRaw != null) {
-                      try {
-                        final dt = DateTime.parse(etaRaw.toString()).toLocal();
-                        final now = DateTime.now();
-                        final diff = dt.difference(now);
-                        final mins = diff.inMinutes;
-                        
-                        if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
-                          fullEtaText = widget.isEnglish ? 'Arriving now' : '正在到達';
-                        } else if (diff.isNegative) {
-                          fullEtaText = widget.isEnglish ? 'Departed' : '已開出';
-                        } else if (mins < 1) {
-                          fullEtaText = widget.isEnglish ? 'Due now' : '即將抵達';
-                        } else {
-                          fullEtaText = widget.isEnglish ? '$mins min (${DateFormat.jm().format(dt)})' : '$mins分鐘 (${DateFormat.Hm().format(dt)})';
-                        }
-                      } catch (_) {}
-                    }
-                    
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2.0),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 24,
-                            height: 24,
-                            decoration: BoxDecoration(
-                              color: _getEtaColor(etaRaw).withOpacity(0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Center(
-                              child: Text(
-                                etaSeq,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: _getEtaColor(etaRaw),
-                                ),
-                              ),
-                            ),
-                          ),
-                          SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                        Row(
-                                          children: [ // Added 'children:' and square brackets
-                                            Text(
-                                              fullEtaText,
-                                              style: TextStyle(
-                                                height: 2.0,
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w600,
-                                                color: _getEtaColor(etaRaw),
-                                              ),
-                                            ),
-                                            if (rmk.isNotEmpty) // Conditional widget remains valid
-                                              Text(
-                                                ' · $rmk',
-                                                style: TextStyle(
-                                                  height: 2.0,
-                                                  fontSize: 13,
-                                                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                                                ),
-                                              ),
-                                          ], // Closing square bracket for the children list
-                                        )
+              ),
 
-                              ],
-                            ),
+              // Action Buttons (Expanded State)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                child: _isExpanded
+                    ? Container(
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainer,
+                          border: Border(
+                            top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.2)),
                           ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ],
-              ],
-            ),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () => _pinStop(context),
+                              icon: Icon(Icons.push_pin_outlined, size: 20),
+                              label: Text(widget.isEnglish ? 'Pin' : '釘選'),
+                              style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
+                            ),
+                            if (widget.latitude != null && widget.longitude != null)
+                            TextButton.icon(
+                              onPressed: () {
+                                widget.onJumpToMap?.call(
+                                  double.tryParse(widget.latitude!) ?? 0,
+                                  double.tryParse(widget.longitude!) ?? 0,
+                                );
+                              },
+                              icon: Icon(Icons.map_outlined, size: 20),
+                              label: Text(widget.isEnglish ? 'Map' : '地圖'),
+                              style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
+                            ),
+                            TextButton.icon(
+                              onPressed: () {
+                                // Implementation for Street View would go here
+                              },
+                              icon: Icon(Icons.streetview, size: 20),
+                              label: Text(widget.isEnglish ? 'View' : '街景'),
+                              style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
+                            ),
+                          ],
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
           ),
         ),
-      ),
       ),
     );
   }

@@ -8,9 +8,9 @@ import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart' show compute;
 
 import 'package:shared_preferences/shared_preferences.dart';
-import 'ui_constants.dart';
+import '../ui_constants.dart';
 // Import LanguageProvider, DeveloperSettingsProvider and AppColors from main.dart
-import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, AppColors;
+import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, AppColors;
 
 // Cached SharedPreferences future to avoid repeated platform channel lookups
 final Future<SharedPreferences> _sharedPrefsInstance = SharedPreferences.getInstance();

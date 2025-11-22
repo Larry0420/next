@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:async';
 import 'package:provider/provider.dart';
-import 'kmb.dart';
-import 'kmb_route_status_page.dart';
-import 'main.dart' show LanguageProvider;
+import 'api/kmb.dart';
+import '../kmb_route_status_page.dart';
+import '../main.dart' show LanguageProvider;
 
 class KmbDialer extends StatefulWidget {
   final void Function(String route)? onRouteSelected;

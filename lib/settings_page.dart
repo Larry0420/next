@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'kmb.dart';
+import 'kmb/api/kmb.dart';
 // Conditional import: use IO implementation when dart:io is available,
 // otherwise import a stub that indicates the action isn't supported.
 import 'prebuild_runner_stub.dart' if (dart.library.io) 'prebuild_runner_io.dart';

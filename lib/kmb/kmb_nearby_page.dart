@@ -1,13 +1,13 @@
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'kmb.dart';
+import 'api/kmb.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'kmb_route_status_page.dart';
-import 'main.dart' show LanguageProvider;
+import '../kmb_route_status_page.dart';
+import '../main.dart' show LanguageProvider;
 
 class KmbNearbyPage extends StatefulWidget {
   const KmbNearbyPage({Key? key}) : super(key: key);

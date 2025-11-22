@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:ui';
 import 'dart:async';
-import 'kmb.dart';
-import 'kmb_route_status_page.dart';
-import 'main.dart' show LanguageProvider;
+import 'api/kmb.dart';
+import '../kmb_route_status_page.dart';
+import '../main.dart' show LanguageProvider;
 
 class KmbPinnedPage extends StatefulWidget {
   const KmbPinnedPage({Key? key}) : super(key: key);

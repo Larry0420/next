@@ -24,10 +24,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 
 //Tailor Made .dart imported
-import 'mtr_schedule_page.dart';
-import 'kmb_dialer.dart';
-import 'kmb_nearby_page.dart';
-import 'kmb_pinned_page.dart';
+import 'mtr/mtr_schedule_page.dart';
+import 'kmb/kmb_dialer.dart';
+import 'kmb/kmb_nearby_page.dart';
+import 'kmb/kmb_pinned_page.dart';
 
 // ========================= Station Grouping (Top-level) =========================
 class _StationGroupInfo {
@@ -748,103 +748,94 @@ class LrtApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-          ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
-          ChangeNotifierProvider(create: (_) => HttpErrorProvider()), 
-          ChangeNotifierProvider(create: (_) => LanguageProvider()..initialize()),
-          ChangeNotifierProvider(create: (_) => ThemeProvider()..initialize()),
-          ChangeNotifierProvider(create: (_) => AccessibilityProvider()..initialize()),
-          ChangeNotifierProvider(create: (_) => DeveloperSettingsProvider()..initialize()),
-          ChangeNotifierProvider(create: (_) => StationProvider()..initialize()),
-          ChangeNotifierProvider(create: (_) => ScheduleProvider()..loadCacheAlertSetting()),
-          ChangeNotifierProvider(create: (_) => RoutesCatalogProvider()..loadFromEmbeddedJson()),
-          ChangeNotifierProvider(create: (_) => MtrCatalogProvider()), // MTR catalog provider
-          ChangeNotifierProvider(create: (_) => MtrScheduleProvider()), // MTR schedule provider
+        ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
+        ChangeNotifierProvider(create: (_) => HttpErrorProvider()),
+        ChangeNotifierProvider(create: (_) => LanguageProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => AccessibilityProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => DeveloperSettingsProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => StationProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => ScheduleProvider()..loadCacheAlertSetting()),
+        ChangeNotifierProvider(create: (_) => RoutesCatalogProvider()..loadFromEmbeddedJson()),
+        ChangeNotifierProvider(create: (_) => MtrCatalogProvider()),
+        ChangeNotifierProvider(create: (_) => MtrScheduleProvider()),
       ],
-      child: Builder(
-        builder: (context) {
-                      return Consumer3<LanguageProvider, ThemeProvider, AccessibilityProvider>(
-              builder: (context, lang, themeProvider, accessibility, _) {
-                return MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                    textScaler: TextScaler.linear(accessibility.pageScale),
-                  ),
-                  child: MaterialApp(
-                    title: lang.isEnglish ? 'LRT Next Train' : '輕鐵班次',
-                theme: ThemeData(
-                  useMaterial3: true,
-                  splashFactory: InkSparkle.splashFactory,
-                  colorSchemeSeed: themeProvider.seedColor,
-                  brightness: themeProvider.useSystemTheme 
-                      ? MediaQuery.platformBrightnessOf(context) == Brightness.dark ? Brightness.dark : Brightness.light
-                      : themeProvider.isDarkMode ? Brightness.dark : Brightness.light,
-                  pageTransitionsTheme: PageTransitionsTheme(builders: {
-                    TargetPlatform.android: _EnhancedPageTransitionsBuilder(),
-                    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-                    TargetPlatform.windows: _EnhancedPageTransitionsBuilder(),
-                    TargetPlatform.linux: _EnhancedPageTransitionsBuilder(),
-                    TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-                  }),
-                  textTheme: Theme.of(context).textTheme.apply(
-                    fontSizeFactor: accessibility.textScale,
-                  ),
-                ),
-                darkTheme: ThemeData(
-                  useMaterial3: true,
-                  splashFactory: InkSparkle.splashFactory,
-                  colorSchemeSeed: themeProvider.seedColor,
-                  brightness: Brightness.dark,
-                  pageTransitionsTheme: const PageTransitionsTheme(builders: {
-                    TargetPlatform.android: ZoomPageTransitionsBuilder(),
-                    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-                  }),
-                  textTheme: Theme.of(context).textTheme.apply(
-                    fontSizeFactor: accessibility.textScale,
-                  ).copyWith(
-                    // 針對深色主題優化文字顏色對比度 - WCAG AAA 標準 (7:1 對比度)
-                    bodyLarge: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.white.withOpacity(0.90), // 提升至 0.90 獲得更好對比
-                    ),
-                    bodyMedium: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withOpacity(0.90), // 主要內容文字保持高對比
-                    ),
-                    bodySmall: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withOpacity(0.65), // 次要文字適度降低
-                    ),
-                    titleLarge: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.white.withOpacity(0.97), // 標題使用最高對比度
-                      fontWeight: FontWeight.w600,
-                    ),
-                    titleMedium: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white.withOpacity(0.92), // 中等標題保持清晰
-                      fontWeight: FontWeight.w600,
-                    ),
-                    titleSmall: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Colors.white.withOpacity(0.88), // 小標題良好可讀性
-                    ),
-                    headlineMedium: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: Colors.white.withOpacity(0.97), // 大標題最高對比
-                      fontWeight: FontWeight.w600,
-                    ),
-                    labelLarge: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: Colors.white.withOpacity(0.90), // 標籤文字清晰可辨
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                themeMode: themeProvider.useSystemTheme 
-                    ? ThemeMode.system 
-                    : themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-                scrollBehavior: EnhancedScrollBehavior(),
-                home: const HomePage(),
-              ),
-            );
-            },
+      child: Consumer3<LanguageProvider, ThemeProvider, AccessibilityProvider>(
+        builder: (context, lang, theme, accessibility, _) {
+          return MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(accessibility.pageScale),
+            ),
+            child: MaterialApp(
+              title: lang.isEnglish ? 'LRT Next Train' : '輕鐵班次',
+              theme: _buildTheme(context, theme, accessibility, Brightness.light),
+              darkTheme: _buildTheme(context, theme, accessibility, Brightness.dark),
+              themeMode: theme.useSystemTheme
+                  ? ThemeMode.system
+                  : (theme.isDarkMode ? ThemeMode.dark : ThemeMode.light),
+              scrollBehavior: EnhancedScrollBehavior(),
+              home: const HomePage(),
+            ),
           );
         },
       ),
     );
   }
+
+
+
+  ThemeData _buildTheme(BuildContext context, ThemeProvider theme, AccessibilityProvider accessibility, Brightness brightness) {
+    final baseTheme = Theme.of(context);
+    final isDark = brightness == Brightness.dark;
+
+    return ThemeData(
+      useMaterial3: true,
+      splashFactory: InkSparkle.splashFactory,
+      colorSchemeSeed: theme.seedColor,
+      brightness: brightness,
+      pageTransitionsTheme: PageTransitionsTheme(
+        builders: {
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.android: isDark ? ZoomPageTransitionsBuilder() : _EnhancedPageTransitionsBuilder(),
+          TargetPlatform.windows: _EnhancedPageTransitionsBuilder(),
+          TargetPlatform.linux: _EnhancedPageTransitionsBuilder(),
+        },
+      ),
+      textTheme: baseTheme.textTheme.apply(fontSizeFactor: accessibility.textScale).copyWith(
+        bodyLarge: baseTheme.textTheme.bodyLarge?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.90) : null,
+        ),
+        bodyMedium: baseTheme.textTheme.bodyMedium?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.90) : null,
+        ),
+        bodySmall: baseTheme.textTheme.bodySmall?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.65) : null,
+        ),
+        titleLarge: baseTheme.textTheme.titleLarge?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.97) : null,
+          fontWeight: FontWeight.w600,
+        ),
+        titleMedium: baseTheme.textTheme.titleMedium?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.92) : null,
+          fontWeight: FontWeight.w600,
+        ),
+        titleSmall: baseTheme.textTheme.titleSmall?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.88) : null,
+        ),
+        headlineMedium: baseTheme.textTheme.headlineMedium?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.97) : null,
+          fontWeight: FontWeight.w600,
+        ),
+        labelLarge: baseTheme.textTheme.labelLarge?.copyWith(
+          color: isDark ? Colors.white.withOpacity(0.90) : null,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
 }
+
 
 
 /* ========================= Enhanced Page Transitions ========================= */
@@ -854,7 +845,7 @@ class _EnhancedPageTransitionsBuilder extends PageTransitionsBuilder {
   const _EnhancedPageTransitionsBuilder();
 
   @override
-  Widget buildTransitions<T extends Object?>(
+  Widget buildTransitions<T>(
     PageRoute<T> route,
     BuildContext context,
     Animation<double> animation,
@@ -869,6 +860,7 @@ class _EnhancedPageTransitionsBuilder extends PageTransitionsBuilder {
     );
   }
 }
+
 
 /* ========================= Motion Constants ========================= */
 
@@ -3140,6 +3132,7 @@ class ScheduleProvider extends ChangeNotifier {
       priority: _LrtPendingOperation.priorityRouteSwitch,
     );
     debugPrint('Auto-refresh started for station $stationId with interval: ${refreshInterval.inSeconds}s');
+    notifyListeners(); // Notify UI that auto-refresh status changed
   }
 
   void stopAutoRefresh() {
@@ -3149,6 +3142,37 @@ class ScheduleProvider extends ChangeNotifier {
     _currentRefreshInterval = null;
     _adjustmentCheckCounter = 0; // 重置調整檢查計數器
     debugPrint('Auto-refresh stopped');
+    notifyListeners(); // Notify UI that auto-refresh status changed
+  }
+
+  // Auto-refresh preference persistence (matching MTR implementation)
+  static const String _autoRefreshPrefKey = 'lrt_auto_refresh_enabled';
+  bool _autoRefreshEnabled = true;
+
+  bool get autoRefreshEnabled => _autoRefreshEnabled;
+
+  Future<void> loadAutoRefreshPref() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _autoRefreshEnabled = prefs.getBool(_autoRefreshPrefKey) ?? true;
+      notifyListeners();
+      debugPrint('LRT Auto-refresh preference loaded: $_autoRefreshEnabled');
+    } catch (e) {
+      debugPrint('Failed to load LRT auto-refresh preference: $e');
+      _autoRefreshEnabled = true;
+    }
+  }
+
+  Future<void> saveAutoRefreshPref(bool enabled) async {
+    _autoRefreshEnabled = enabled;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_autoRefreshPrefKey, enabled);
+      debugPrint('LRT Auto-refresh preference saved: $enabled');
+    } catch (e) {
+      debugPrint('Failed to save LRT auto-refresh preference: $e');
+    }
   }
 
   // 控制快取警告的顯示
@@ -3545,277 +3569,248 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
     }
 
     return Scaffold(
-      extendBody: true,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
-        child: AnnotatedRegion<SystemUiOverlayStyle>(
-          value: Theme.of(context).brightness == Brightness.dark
-              ? SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent)
-              : SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
-          child: SafeArea(
-            top: true,
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOutCubic,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Theme.of(context).colorScheme.surface.withOpacity(0.9),
-                          Theme.of(context).colorScheme.surface.withOpacity(0.7),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.outline.withOpacity(0.12),
-                        width: 1.0,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                        BoxShadow(
-                          color: Theme.of(context).colorScheme.shadow.withOpacity(0.02),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        const SizedBox(width: 2),
-                        SvgPicture.asset(
-                          'assets/icon/tram_icon_android.svg',
-                          width: 28,
-                          height: 28,
-                          fit: BoxFit.contain,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: AnimatedSwitcher(
-                              duration: MotionConstants.contentTransition,
-                              switchInCurve: MotionConstants.standardEasing,
-                              child: Text(
-                                lang.appTitle,
-                                key: ValueKey(lang.isEnglish),
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.15,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        Consumer<AccessibilityProvider>(
-                          builder: (context, accessibility, _) => IconButton(
-                            icon: Icon(Icons.translate, size: 24 * accessibility.iconScale),
-                            tooltip: lang.language,
-                            onPressed: lang.toggle,
-                            splashRadius: 24,
-                          ),
-                        ),
-                        // (moved) auto-refresh pill will be inserted after theme consumer below
-                        Consumer2<AccessibilityProvider, ThemeProvider>(
-                          builder: (context, accessibility, themeProvider, _) => IconButton(
-                            icon: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 250),
-                              child: Icon(
-                                themeProvider.useSystemTheme 
-                                  ? Icons.brightness_auto
-                                  : (themeProvider.isDarkMode ? Icons.brightness_2 : Icons.brightness_7),
-                                size: 24 * accessibility.iconScale,
-                                key: ValueKey(themeProvider.useSystemTheme.toString() + themeProvider.isDarkMode.toString()),
-                              ),
-                            ),
-                            tooltip: themeProvider.useSystemTheme 
-                                ? (lang.isEnglish ? 'Auto Theme' : '自動主題')
-                                : (themeProvider.isDarkMode 
-                                    ? (lang.isEnglish ? 'Dark Theme' : '深色主題')
-                                    : (lang.isEnglish ? 'Light Theme' : '淺色主題')),
-                            onPressed: () {
-                              if (themeProvider.useSystemTheme) {
-                                themeProvider.setUseSystemTheme(false);
-                                themeProvider.setDarkMode(false);
-                              } else {
-                                if (!themeProvider.isDarkMode) {
-                                  themeProvider.setDarkMode(true);
-                                } else {
-                                  themeProvider.setUseSystemTheme(true);
-                                }
-                              }
-                            },
-                            splashRadius: 24,
-                          ),
-                        ),
-                        // Auto-refresh pill (moved to right corner)
-                        Consumer<AccessibilityProvider>(
-                          builder: (context, accessibility, _) {
-                            // Determine where MTR actually sits in the nav pages so KMB insertion/removal is handled
-                            final int mtrIndex = pages.indexWhere((p) => p is MtrSchedulePage);
-                            final bool isMtrPageVisible = (mtrIndex != -1) && (_pageIndex == mtrIndex);
-
-                            // Read providers dynamically so we always reflect current state
-                            final schedInner = context.watch<ScheduleProvider>();
-                            final mtrSchedInner = context.watch<MtrScheduleProvider>();
-                            final stationProv = context.watch<StationProvider>();
-                            final connectivityInner = context.watch<ConnectivityProvider>();
-
-                            final bool active = isMtrPageVisible ? mtrSchedInner.isAutoRefreshActive : schedInner.isAutoRefreshActive;
-                            final String tooltip = isMtrPageVisible
-                                ? (mtrSchedInner.isAutoRefreshActive
-                                    ? 'MTR 自動刷新已啟用 (${mtrSchedInner.currentRefreshIntervalDescription})'
-                                    : lang.refresh)
-                                : (schedInner.isAutoRefreshActive
-                                    ? '自動刷新已啟用 (${schedInner.currentRefreshIntervalDescription})'
-                                    : lang.refresh);
-
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              if (active) {
-                                if (!_refreshAnimController.isAnimating) _refreshAnimController.repeat();
-                              } else {
-                                if (_refreshAnimController.isAnimating) _refreshAnimController.stop();
-                                _refreshAnimController.reset();
-                              }
-                            });
-
-                            return IconButton(
-                              icon: AnimatedContainer(
-                                duration: const Duration(milliseconds: 200),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: active
-                                      ? Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.14)
-                                      : Theme.of(context).colorScheme.onSurface.withOpacity(0.06),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: active
-                                        ? Theme.of(context).colorScheme.outline.withOpacity(0.28)
-                                        : Theme.of(context).colorScheme.onSurface.withOpacity(0.20),
-                                    width: 1.5,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    RotationTransition(
-                                      turns: _rotationAnim,
-                                      child: Icon(
-                                        Icons.autorenew_rounded,
-                                        size: 15 * accessibility.iconScale,
-                                        color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 5),
-                                    // Animated label (AUTO / OFF)
-                                    AnimatedSwitcher(
-                                      duration: const Duration(milliseconds: 220),
-                                      transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
-                                      child: Text(
-                                        active ? (lang.isEnglish ? 'AUTO' : '自動') : (lang.isEnglish ? 'OFF' : '關閉'),
-                                        key: ValueKey(active),
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
-                                          letterSpacing: 0.5,
-                                        ),
-                                      ),
-                                    ),
-                                    // Animated dot (appears when active)
-                                    AnimatedSwitcher(
-                                      duration: const Duration(milliseconds: 250),
-                                      transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: ScaleTransition(scale: animation, child: child)),
-                                      child: active
-                                          ? Padding(
-                                              key: const ValueKey('dot_on'),
-                                              padding: const EdgeInsets.only(left: 6.4),
-                                              child: FadeTransition(
-                                                opacity: _pulseOpacity,
-                                                child: ScaleTransition(
-                                                  scale: _pulseAnim,
-                                                  child: Container(
-                                                    width: 8,
-                                                    height: 8,
-                                                    decoration: BoxDecoration(
-                                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                                      shape: BoxShape.circle,
-                                                      boxShadow: [
-                                                        BoxShadow(
-                                                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.18),
-                                                          blurRadius: 6,
-                                                          spreadRadius: 0.6,
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            )
-                                          : const SizedBox(key: ValueKey('dot_off'), width: 0, height: 0),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              tooltip: tooltip,
-                              onPressed: connectivityInner.isOnline
-                                  ? () async {
-                                      debugPrint('=== Manual refresh button pressed ===');
-                                      if (isMtrPageVisible) {
-                                        debugPrint('Toggling MTR auto-refresh (current=${mtrSchedInner.isAutoRefreshActive})');
-                                          if (mtrSchedInner.isAutoRefreshActive) {
-                                          mtrSchedInner.stopAutoRefresh();
-                                          await mtrSchedInner.saveAutoRefreshPref(false);
-                                        } else {
-                                          final catalog = context.read<MtrCatalogProvider>();
-                                            if (catalog.hasSelection) {
-                                            mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
-                                            await mtrSchedInner.saveAutoRefreshPref(true);
-                                          } else {
-                                            await catalog.applyCachedSelection();
-                                              if (catalog.hasSelection) {
-                                              mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
-                                              await mtrSchedInner.saveAutoRefreshPref(true);
-                                            } else {
-                                              debugPrint('No MTR selection available to start auto-refresh');
-                                            }
-                                          }
-                                        }
-                                      } else {
-                                        debugPrint('Toggling LRT auto-refresh (current=${schedInner.isAutoRefreshActive})');
-                                        if (schedInner.isAutoRefreshActive) {
-                                          schedInner.stopAutoRefresh();
-                                        } else {
-                                          schedInner.startAutoRefresh(stationProv.selectedStationId);
-                                        }
-                                      }
-                                    }
-                                  : null,
-                              splashRadius: 24,
-                            );
-                          }
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                    ),
-                  ),
-                ),
+      extendBody: false,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        systemOverlayStyle: Theme.of(context).brightness == Brightness.dark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Theme.of(context).colorScheme.surface.withOpacity(0.95),
+                Theme.of(context).colorScheme.surface.withOpacity(0.88),
+              ],
+            ),
+            border: Border(
+              bottom: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.2),
+                width: 1.0,
               ),
             ),
           ),
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(color: Colors.transparent),
+            ),
+          ),
         ),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12.0, top:8.0, bottom: 8.0),
+          child: SvgPicture.asset(
+            'assets/icon/tram_icon_android.svg',
+            width: 28,
+            height: 28,
+            fit: BoxFit.contain,
+          ),
+        ),
+        title: AnimatedSwitcher(
+          duration: MotionConstants.contentTransition,
+          switchInCurve: MotionConstants.standardEasing,
+          child: AutoSizeText(
+            lang.appTitle, maxLines: 1,
+            key: ValueKey(lang.isEnglish),
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.15,
+            ),
+          ),
+        ),
+        centerTitle: false,
+        actions: [
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) => IconButton(
+              icon: Icon(Icons.translate, size: 24 * accessibility.iconScale),
+              tooltip: lang.language,
+              onPressed: lang.toggle,
+              splashRadius: 24,
+            ),
+          ),
+          Consumer2<AccessibilityProvider, ThemeProvider>(
+            builder: (context, accessibility, themeProvider, _) => IconButton(
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: Icon(
+                  themeProvider.useSystemTheme
+                    ? Icons.brightness_auto
+                    : (themeProvider.isDarkMode ? Icons.brightness_2 : Icons.brightness_7),
+                  size: 24 * accessibility.iconScale,
+                  key: ValueKey(themeProvider.useSystemTheme.toString() + themeProvider.isDarkMode.toString()),
+                ),
+              ),
+              tooltip: themeProvider.useSystemTheme
+                  ? (lang.isEnglish ? 'Auto Theme' : '自動主題')
+                  : (themeProvider.isDarkMode
+                      ? (lang.isEnglish ? 'Dark Theme' : '深色主題')
+                      : (lang.isEnglish ? 'Light Theme' : '淺色主題')),
+              onPressed: () {
+                if (themeProvider.useSystemTheme) {
+                  themeProvider.setUseSystemTheme(false);
+                  themeProvider.setDarkMode(false);
+                } else {
+                  if (!themeProvider.isDarkMode) {
+                    themeProvider.setDarkMode(true);
+                  } else {
+                    themeProvider.setUseSystemTheme(true);
+                  }
+                }
+              },
+              splashRadius: 24,
+            ),
+          ),
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) {
+              final int mtrIndex = pages.indexWhere((p) => p is MtrSchedulePage);
+              final bool isMtrPageVisible = (mtrIndex != -1) && (_pageIndex == mtrIndex);
+
+              final schedInner = context.watch<ScheduleProvider>();
+              final mtrSchedInner = context.watch<MtrScheduleProvider>();
+              final stationProv = context.watch<StationProvider>();
+              final connectivityInner = context.watch<ConnectivityProvider>();
+
+              final bool active = isMtrPageVisible ? mtrSchedInner.isAutoRefreshActive : schedInner.isAutoRefreshActive;
+              final String tooltip = isMtrPageVisible
+                  ? (mtrSchedInner.isAutoRefreshActive
+                      ? 'MTR 自動刷新已啟用 (${mtrSchedInner.currentRefreshIntervalDescription})'
+                      : lang.refresh)
+                  : (schedInner.isAutoRefreshActive
+                      ? '自動刷新已啟用 (${schedInner.currentRefreshIntervalDescription})'
+                      : lang.refresh);
+
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                if (active) {
+                  if (!_refreshAnimController.isAnimating) _refreshAnimController.repeat();
+                } else {
+                  if (_refreshAnimController.isAnimating) _refreshAnimController.stop();
+                  _refreshAnimController.reset();
+                }
+              });
+
+              return IconButton(
+                icon: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.14)
+                        : Theme.of(context).colorScheme.onSurface.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: active
+                          ? Theme.of(context).colorScheme.outline.withOpacity(0.28)
+                          : Theme.of(context).colorScheme.onSurface.withOpacity(0.20),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RotationTransition(
+                        turns: _rotationAnim,
+                        child: Icon(
+                          Icons.autorenew_rounded,
+                          size: 15 * accessibility.iconScale,
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+                        child: Text(
+                          active ? (lang.isEnglish ? 'AUTO' : '自動') : (lang.isEnglish ? 'OFF' : '關閉'),
+                          key: ValueKey(active),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 250),
+                        transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: ScaleTransition(scale: animation, child: child)),
+                        child: active
+                            ? Padding(
+                                key: const ValueKey('dot_on'),
+                                padding: const EdgeInsets.only(left: 6.4),
+                                child: FadeTransition(
+                                  opacity: _pulseOpacity,
+                                  child: ScaleTransition(
+                                    scale: _pulseAnim,
+                                    child: Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.18),
+                                            blurRadius: 6,
+                                            spreadRadius: 0.6,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : const SizedBox(key: ValueKey('dot_off'), width: 0, height: 0),
+                      ),
+                    ],
+                  ),
+                ),
+                tooltip: tooltip,
+                onPressed: connectivityInner.isOnline
+                    ? () async {
+                        debugPrint('=== Manual refresh button pressed ===');
+                        if (isMtrPageVisible) {
+                          debugPrint('Toggling MTR auto-refresh (current=${mtrSchedInner.isAutoRefreshActive})');
+                          if (mtrSchedInner.isAutoRefreshActive) {
+                            mtrSchedInner.stopAutoRefresh();
+                            await mtrSchedInner.saveAutoRefreshPref(false);
+                          } else {
+                            final catalog = context.read<MtrCatalogProvider>();
+                            if (catalog.hasSelection) {
+                              mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
+                              await mtrSchedInner.saveAutoRefreshPref(true);
+                            } else {
+                              await catalog.applyCachedSelection();
+                              if (catalog.hasSelection) {
+                                mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
+                                await mtrSchedInner.saveAutoRefreshPref(true);
+                              } else {
+                                debugPrint('No MTR selection available to start auto-refresh');
+                              }
+                            }
+                          }
+                        } else {
+                          debugPrint('Toggling LRT auto-refresh (current=${schedInner.isAutoRefreshActive})');
+                          if (schedInner.isAutoRefreshActive) {
+                            schedInner.stopAutoRefresh();
+                            await schedInner.saveAutoRefreshPref(false);
+                          } else {
+                            schedInner.startAutoRefresh(stationProv.selectedStationId);
+                            await schedInner.saveAutoRefreshPref(true);
+                          }
+                        }
+                      }
+                    : null,
+                splashRadius: 24,
+              );
+            }
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Column(
         children: [
@@ -3850,190 +3845,202 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
         ],
       ),
       // Liquid-glass floating navigation bar
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
-        child: Builder(builder: (context) {
+      bottomNavigationBar: Builder(
+        builder: (context) {
           final colorScheme = Theme.of(context).colorScheme;
-          // Use a surface-dominant, light frosted appearance (light-first design)
-          // final surface is no longer used because we tint from surfaceTint; keep access via colorScheme
-          // final surface = Theme.of(context).colorScheme.surface;
-          // Navigation tinting will follow Material3 roles (primaryContainer/onPrimaryContainer)
+          final lang = context.watch<LanguageProvider>();
+          final devSettings = context.watch<DeveloperSettingsProvider>();
           final kmbShown = devSettings.showKmbInNav;
-          // Platform-agnostic sizing for floating navbar
-          final double navCornerRadius = 14.0;
-          final double navHorizontalPadding = 10.0;
-          final double navVerticalPadding = 6.0;
-          final double navHeight = 60.0;
-      final isDark = Theme.of(context).brightness == Brightness.dark;
-      // Use Material 3 tokens for navbar: surfaceVariant / surfaceTint for background,
-      // primaryContainer / onPrimaryContainer for indicator/selected, and onSurfaceVariant for unselected.
-      // Make light-mode translucent to show the blur.
-      final decoStart = isDark
-          ? colorScheme.surfaceTint.withOpacity(0.06)
-          : colorScheme.surfaceVariant.withOpacity(0.72);
-      final decoEnd = isDark
-          ? colorScheme.surface.withOpacity(0.04)
-          : colorScheme.surfaceVariant.withOpacity(0.60);
-      // Slightly lower outline in light mode to avoid harsh borders
-      final borderOpacity = isDark ? 0.22 : 0.12;
-      // Use a slightly stronger blur in dark mode, and a moderate blur in light mode
-      final blurSigma = isDark ? 4.0 : 1.9;
-      // Material3 color roles for nav
-      final indicatorColor = colorScheme.primaryContainer;
-      final selectedFg = colorScheme.onPrimaryContainer;
-      final unselectedFg = colorScheme.onSurfaceVariant;
-          // Keep the surface mostly visible; small translucency to show blur
-          // containerColor is not needed directly; gradient uses surface opacities
 
-          return Padding(
-            padding: EdgeInsets.symmetric(horizontal: navHorizontalPadding, vertical: navVerticalPadding),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(navCornerRadius),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [decoStart, decoEnd]),
-                    borderRadius: BorderRadius.circular(navCornerRadius),
-                    border: Border.all(color: colorScheme.outline.withOpacity(borderOpacity), width: 0.76),
-                    boxShadow: [BoxShadow(color: colorScheme.shadow.withOpacity(isDark ? 0.42 : 0.12), blurRadius: 15.0, spreadRadius: 0.0, offset: const Offset(0, 4.5))],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Sub-navbar (animated show/hide when LightRail is active)
-                      AnimatedSwitcher(
-                        duration: MotionConstants.pageTransition,
-                        switchInCurve: MotionConstants.standardEasing,
-                        switchOutCurve: MotionConstants.deceleratedEasing,
-                        transitionBuilder: (child, animation) {
-                          final curved = CurvedAnimation(parent: animation, curve: MotionConstants.standardEasing);
-                          return FadeTransition(
-                            opacity: animation,
-                            child: SlideTransition(
-                              position: Tween<Offset>(begin: const Offset(0, -0.12), end: Offset.zero).animate(curved),
-                              child: child,
-                            ),
-                          );
-                        },
-                        child: _pageIndex == 0
-                            ? Padding(
-                                key: const ValueKey('subnav_on'),
-                                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: ValueListenableBuilder<int>(
-                                        valueListenable: _lightRailTabIndex,
-                                        builder: (context, tabIndex, _) {
-                                          return Consumer<AccessibilityProvider>(
-                                            builder: (context, accessibility, _) {
-                                              final selected = _pageIndex == 0 && tabIndex == 0;
-                                              final fg = selected ? AppColors.getPrimaryColor(context) : Theme.of(context).colorScheme.onSurface;
-                                              return _LiquidPill(
-                                                selected: selected,
-                                                icon: Icons.schedule,
-                                                label: lang.schedule,
-                                                iconScale: accessibility.iconScale,
-                                                fg: fg,
-                                                onTap: () {
-                                                  _lightRailTabIndex.value = 0;
-                                                  _goTo(0);
-                                                },
-                                              );
-                                            },
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: ValueListenableBuilder<int>(
-                                        valueListenable: _lightRailTabIndex,
-                                        builder: (context, tabIndex, _) {
-                                          return Consumer<AccessibilityProvider>(
-                                            builder: (context, accessibility, _) {
-                                              final selected = _pageIndex == 0 && tabIndex == 1;
-                                              final fg = selected ? AppColors.getPrimaryColor(context) : Theme.of(context).colorScheme.onSurface;
-                                              return _LiquidPill(
-                                                selected: selected,
-                                                icon: Icons.route,
-                                                label: lang.routes,
-                                                iconScale: accessibility.iconScale,
-                                                fg: fg,
-                                                onTap: () {
-                                                  _lightRailTabIndex.value = 1;
-                                                  _goTo(0);
-                                                },
-                                              );
-                                            },
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : const SizedBox.shrink(key: ValueKey('subnav_off')),
-                      ),
-                      // Main navigation bar (merged LightRail item) themed with Material3 roles
-                      Theme(
-                        data: Theme.of(context).copyWith(
-                          navigationBarTheme: NavigationBarThemeData(
-                            backgroundColor: Colors.transparent,
-                            indicatorColor: indicatorColor,
-                            labelTextStyle: MaterialStateProperty.resolveWith<TextStyle?>((states) {
-                              return TextStyle(color: states.contains(MaterialState.selected) ? selectedFg : unselectedFg);
-                            }),
-                            iconTheme: MaterialStateProperty.resolveWith<IconThemeData?>((states) {
-                              return IconThemeData(color: states.contains(MaterialState.selected) ? selectedFg : unselectedFg);
-                            }),
-                          ),
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: NavigationBar(
-                            backgroundColor: Colors.transparent,
-                            height: navHeight,
-                            selectedIndex: _pageIndex,
-                            onDestinationSelected: _goTo,
-                            destinations: [
-                              Consumer<AccessibilityProvider>(
-                                builder: (context, accessibility, _) => NavigationDestination(
-                                  icon: Icon(Icons.directions_railway, size: 24 * accessibility.iconScale),
-                                  label: lang.lrt,
-                                ),
-                              ),
-                              Consumer<AccessibilityProvider>(
-                                builder: (context, accessibility, _) => NavigationDestination(
-                                  icon: Icon(Icons.train, size: 24 * accessibility.iconScale),
-                                  label: lang.mtr,
-                                ),
-                              ),
-                              if (kmbShown)
-                                Consumer<AccessibilityProvider>(
-                                  builder: (context, accessibility, _) => NavigationDestination(
-                                    icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
-                                    label: lang.kmb,
-                                  ),
-                                ),
-                              Consumer<AccessibilityProvider>(
-                                builder: (context, accessibility, _) => NavigationDestination(
-                                  icon: Icon(Icons.settings, size: 24 * accessibility.iconScale),
-                                  label: lang.settings,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+          return Container(
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(
+                  color: colorScheme.outlineVariant.withOpacity(0.2),
+                  width: 1.0,
                 ),
               ),
             ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Sub-navigation for LightRail (Schedule/Routes toggle)
+                AnimatedContainer(
+                  duration: MotionConstants.pageTransition,
+                  curve: MotionConstants.standardEasing,
+                  height: _pageIndex == 0 ? 56.0 : 0.0,
+                  child: AnimatedOpacity(
+                    opacity: _pageIndex == 0 ? 1.0 : 0.0,
+                    duration: MotionConstants.pageTransition,
+                    curve: MotionConstants.standardEasing,
+                    child: _pageIndex == 0
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: ValueListenableBuilder<int>(
+                                    valueListenable: _lightRailTabIndex,
+                                    builder: (context, tabIndex, _) {
+                                      return Consumer<AccessibilityProvider>(
+                                        builder: (context, accessibility, _) {
+                                          final selected = _pageIndex == 0 && tabIndex == 0;
+                                          return Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              borderRadius: BorderRadius.circular(16),
+                                              onTap: () {
+                                                _lightRailTabIndex.value = 0;
+                                                _goTo(0);
+                                              },
+                                              child: AnimatedContainer(
+                                                duration: MotionConstants.microInteraction,
+                                                curve: MotionConstants.standardEasing,
+                                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                                                decoration: BoxDecoration(
+                                                  color: selected 
+                                                      ? colorScheme.secondaryContainer
+                                                      : Colors.transparent,
+                                                  borderRadius: BorderRadius.circular(16),
+                                                ),
+                                                child: Row(
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.schedule,
+                                                      size: 20 * accessibility.iconScale,
+                                                      color: selected 
+                                                          ? colorScheme.onSecondaryContainer
+                                                          : colorScheme.onSurfaceVariant,
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      lang.schedule,
+                                                      style: TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                                                        color: selected 
+                                                            ? colorScheme.onSecondaryContainer
+                                                            : colorScheme.onSurfaceVariant,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: ValueListenableBuilder<int>(
+                                    valueListenable: _lightRailTabIndex,
+                                    builder: (context, tabIndex, _) {
+                                      return Consumer<AccessibilityProvider>(
+                                        builder: (context, accessibility, _) {
+                                          final selected = _pageIndex == 0 && tabIndex == 1;
+                                          return Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              borderRadius: BorderRadius.circular(16),
+                                              onTap: () {
+                                                _lightRailTabIndex.value = 1;
+                                                _goTo(0);
+                                              },
+                                              child: AnimatedContainer(
+                                                duration: MotionConstants.microInteraction,
+                                                curve: MotionConstants.standardEasing,
+                                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                                                decoration: BoxDecoration(
+                                                  color: selected 
+                                                      ? colorScheme.secondaryContainer
+                                                      : Colors.transparent,
+                                                  borderRadius: BorderRadius.circular(16),
+                                                ),
+                                                child: Row(
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.route,
+                                                      size: 20 * accessibility.iconScale,
+                                                      color: selected 
+                                                          ? colorScheme.onSecondaryContainer
+                                                          : colorScheme.onSurfaceVariant,
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      lang.routes,
+                                                      style: TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                                                        color: selected 
+                                                            ? colorScheme.onSecondaryContainer
+                                                            : colorScheme.onSurfaceVariant,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+                // Main Navigation Bar (Material 3 Standard)
+                NavigationBar(
+                  backgroundColor: colorScheme.surface,
+                  elevation: 0,
+                  height: 80,
+                  selectedIndex: _pageIndex,
+                  onDestinationSelected: _goTo,
+                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                  destinations: [
+                    Consumer<AccessibilityProvider>(
+                      builder: (context, accessibility, _) => NavigationDestination(
+                        icon: Icon(Icons.directions_railway, size: 24 * accessibility.iconScale),
+                        label: lang.lrt,
+                        tooltip: lang.lrt,
+                      ),
+                    ),
+                    Consumer<AccessibilityProvider>(
+                      builder: (context, accessibility, _) => NavigationDestination(
+                        icon: Icon(Icons.train, size: 24 * accessibility.iconScale),
+                        label: lang.mtr,
+                        tooltip: lang.mtr,
+                      ),
+                    ),
+                    if (kmbShown)
+                      Consumer<AccessibilityProvider>(
+                        builder: (context, accessibility, _) => NavigationDestination(
+                          icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
+                          label: lang.kmb,
+                          tooltip: lang.kmb,
+                        ),
+                      ),
+                    Consumer<AccessibilityProvider>(
+                      builder: (context, accessibility, _) => NavigationDestination(
+                        icon: Icon(Icons.settings, size: 24 * accessibility.iconScale),
+                        label: lang.settings,
+                        tooltip: lang.settings,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           );
-        }),
+        },
       ),
     );
   }
@@ -4098,120 +4105,6 @@ class _CachedDataBanner extends StatelessWidget {
 }
 
 /// Reusable liquid/glass-styled pill used in the bottom sub-navbar.
-class _LiquidPill extends StatelessWidget {
-  final bool selected;
-  final IconData icon;
-  final String label;
-  final double iconScale;
-  final Color fg;
-  final VoidCallback onTap;
-
-  const _LiquidPill({
-    Key? key,
-    required this.selected,
-    required this.icon,
-    required this.label,
-    required this.iconScale,
-    required this.fg,
-    required this.onTap,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12.0),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0),
-          child: AnimatedContainer(
-            duration: MotionConstants.contentTransition,
-            curve: MotionConstants.standardEasing,
-            padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 8.0),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: selected
-                    ? [theme.colorScheme.primary.withOpacity(0.14), theme.colorScheme.primaryContainer.withOpacity(0.06)]
-                    : [theme.colorScheme.surface.withOpacity(0.06), theme.colorScheme.surfaceVariant.withOpacity(0.02)],
-              ),
-              borderRadius: BorderRadius.circular(10.0),
-              border: Border.all(
-                color: selected ? theme.colorScheme.primary.withOpacity(0.18) : theme.colorScheme.outline.withOpacity(0.06),
-                width: 1.0,
-              ),
-              boxShadow: selected
-                  ? [
-                      BoxShadow(
-                        color: theme.colorScheme.onSurface.withOpacity(0.06),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                      BoxShadow(
-                        color: theme.colorScheme.primary.withOpacity(0.03),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6),
-                      ),
-                    ]
-                  : [],
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(icon, size: 18 * iconScale, color: fg),
-                        const SizedBox(width: 8),
-                        Text(label, style: TextStyle(fontSize: 14, color: fg)),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    AnimatedContainer(
-                      duration: MotionConstants.contentTransition,
-                      curve: MotionConstants.standardEasing,
-                      height: 3,
-                      width: selected ? 48 : 0,
-                      decoration: BoxDecoration(
-                        color: selected ? theme.colorScheme.primary : Colors.transparent,
-                        borderRadius: BorderRadius.circular(2.0),
-                      ),
-                    ),
-                  ],
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 16,
-                  child: IgnorePointer(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10.0),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: selected
-                              ? [Colors.white.withOpacity(0.06), Colors.white.withOpacity(0.00)]
-                              : [Colors.white.withOpacity(0.03), Colors.white.withOpacity(0.00)],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /* ------------------------- Schedule Page ------------------------- */
 
@@ -4284,11 +4177,11 @@ class _StatusBar extends StatelessWidget {
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
       curve: MotionConstants.standardEasing,
-      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 0.1),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 5),
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 0.1),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(1),
+        borderRadius: BorderRadius.circular(10.0),
         border: Border.all(color: borderColor, width: 1.2),
         boxShadow: [
           BoxShadow(
@@ -4308,7 +4201,7 @@ class _StatusBar extends StatelessWidget {
               child: Icon(
                 ok ? Icons.check_circle_rounded : Icons.error_rounded,
                 color: iconColor,
-                size: 20 * accessibility.iconScale,
+                size: 16 * accessibility.iconScale,
                 key: ValueKey(ok),
                 shadows: [
                   Shadow(
@@ -4331,14 +4224,17 @@ class _StatusBar extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Text('${lang.system}: ${ok ? lang.normal : lang.alert}'),
+                Text(
+                  '${lang.system}: ${ok ? lang.normal : lang.alert}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Text(
                   '${lang.lastUpdated}: $t',
-                  style: TextStyle(
-                    color: subTextColor,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 13,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -10136,9 +10032,9 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   List<String> _districtNames = [];
   String _selectedDistrict = '';
   List<StationInfo> _recentStations = [];
-  // 側邊索引相關
-  bool _isDraggingIndex = false;
-  String? _activeIndexLabel;
+  // 側邊索引相關 - Optimized with ValueNotifier for better performance
+  final ValueNotifier<bool> _isDraggingIndex = ValueNotifier(false);
+  final ValueNotifier<String?> _activeIndexLabel = ValueNotifier(null);
   bool _showIndexHint = false;
   // 僅針對主選擇器與搜尋按鈕的按壓動畫狀態（不影響車站/地區標籤）
   bool _mainButtonPressed = false;
@@ -10147,6 +10043,10 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   // 性能優化：緩存計算結果
   List<StationInfo>? _cachedStations;
   Map<String, List<StationInfo>>? _cachedStationsByDistrict;
+  
+  // 優化：緩存索引標籤和地區寬度計算
+  List<String>? _cachedIndexLabels;
+  final Map<String, double> _chipWidthCache = {};
   
   // 地區緩存相關
   static const String _selectedDistrictKey = 'selected_station_district';
@@ -10202,6 +10102,8 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   
   @override
   void dispose() {
+    _isDraggingIndex.dispose();
+    _activeIndexLabel.dispose();
     _animationController.dispose();
     _contentAnimationController.dispose();
     _cardStaggerController.dispose();
@@ -10237,6 +10139,8 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       }
       
       _districtNames = _stationsByDistrict.keys.toList()..sort();
+      // ✅ Invalidate index label cache when district names change
+      _cachedIndexLabels = null;
       if (_districtNames.isNotEmpty && _selectedDistrict.isEmpty) {
         _selectedDistrict = _districtNames.first;
       }
@@ -10276,6 +10180,9 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
     _districtNames = _stationsByDistrict.keys.toList();
     _districtNames.sort();
     
+    // ✅ Invalidate index label cache when initialized
+    _cachedIndexLabels = null;
+    
     // 設置默認選中的地區
     if (_districtNames.isNotEmpty && _selectedDistrict.isEmpty) {
       _selectedDistrict = _districtNames.first;
@@ -10301,6 +10208,12 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
 
   List<String> _buildIndexLabels() {
     if (_districtNames.isEmpty) return [];
+    
+    // ✅ Cache index labels to avoid repeated label extraction
+    if (_cachedIndexLabels != null) {
+      return _cachedIndexLabels!;
+    }
+    
     // 以地區名稱首字作為索引，去重後排序（維持原順序）
     final seen = <String>{};
     final labels = <String>[];
@@ -10309,6 +10222,9 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       final first = name.characters.first.toUpperCase();
       if (seen.add(first)) labels.add(first);
     }
+    
+    // ✅ Cache for future calls
+    _cachedIndexLabels = labels;
     return labels;
   }
 
@@ -10364,8 +10280,8 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
     final itemHeight = height / labels.length;
     final int idx = (localPosition.dy ~/ itemHeight).clamp(0, labels.length - 1);
     final label = labels[idx];
-    if (_activeIndexLabel != label) {
-      setState(() { _activeIndexLabel = label; });
+    if (_activeIndexLabel.value != label) {
+      _activeIndexLabel.value = label;
       HapticFeedback.selectionClick();
       _jumpToDistrictByLabel(label);
     }
@@ -10384,7 +10300,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
           final barHeight = constraints.maxHeight;
           return GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onVerticalDragStart: (_) { setState(() { _isDraggingIndex = true; }); },
+            onVerticalDragStart: (_) { _isDraggingIndex.value = true; },
             onVerticalDragUpdate: (details) {
               final box = context.findRenderObject() as RenderBox?;
               if (box != null) {
@@ -10392,17 +10308,17 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                 _handleIndexGesture(local, barHeight);
               }
             },
-            onVerticalDragEnd: (_) { setState(() { _isDraggingIndex = false; _activeIndexLabel = null; }); },
-            onVerticalDragCancel: () { setState(() { _isDraggingIndex = false; _activeIndexLabel = null; }); },
+            onVerticalDragEnd: (_) { _isDraggingIndex.value = false; _activeIndexLabel.value = null; },
+            onVerticalDragCancel: () { _isDraggingIndex.value = false; _activeIndexLabel.value = null; },
             onTapDown: (details) {
-              setState(() { _isDraggingIndex = true; });
+              _isDraggingIndex.value = true;
               final box = context.findRenderObject() as RenderBox?;
               if (box != null) {
                 final local = box.globalToLocal(details.globalPosition);
                 _handleIndexGesture(local, barHeight);
               }
             },
-            onTapUp: (_) { setState(() { _isDraggingIndex = false; _activeIndexLabel = null; }); },
+            onTapUp: (_) { _isDraggingIndex.value = false; _activeIndexLabel.value = null; },
             child: Container(
               width: 24,
               margin: const EdgeInsets.symmetric(vertical: 8),
@@ -10418,20 +10334,25 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: labels.map((l) {
-                  final isActive = _activeIndexLabel == l || _labelForDistrict(_selectedDistrict) == l;
-                  return Expanded(
-                    child: Center(
-                      child: Text(
-                        l,
-                        style: TextStyle(
-                          fontSize: 10 * accessibility.textScale,
-                          fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                          color: isActive
-                              ? Theme.of(context).colorScheme.primary
-                              : AppColors.getPrimaryTextColor(context),
+                  return ValueListenableBuilder<String?>(
+                    valueListenable: _activeIndexLabel,
+                    builder: (context, activeLabel, _) {
+                      final isActive = activeLabel == l || _labelForDistrict(_selectedDistrict) == l;
+                      return Expanded(
+                        child: Center(
+                          child: Text(
+                            l,
+                            style: TextStyle(
+                              fontSize: 10 * accessibility.textScale,
+                              fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                              color: isActive
+                                  ? Theme.of(context).colorScheme.primary
+                                  : AppColors.getPrimaryTextColor(context),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                   );
                 }).toList(),
               ),
@@ -10443,43 +10364,54 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   }
 
   Widget _buildIndexBubble(BuildContext context) {
-    if (!_isDraggingIndex || _activeIndexLabel == null) return const SizedBox.shrink();
-    final accessibility = context.watch<AccessibilityProvider>();
-    return Center(
-      child: Container(
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-          border: Border.all(
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.6),
-            width: 2,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            _activeIndexLabel!,
-            style: TextStyle(
-              fontSize: 28 * accessibility.textScale,
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-        ),
-      ),
+    return ValueListenableBuilder<bool>(
+      valueListenable: _isDraggingIndex,
+      builder: (context, isDragging, _) {
+        if (!isDragging) return const SizedBox.shrink();
+        return ValueListenableBuilder<String?>(
+          valueListenable: _activeIndexLabel,
+          builder: (context, activeLabel, _) {
+            if (activeLabel == null) return const SizedBox.shrink();
+            final accessibility = context.watch<AccessibilityProvider>();
+            return Center(
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.6),
+                    width: 2,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    activeLabel,
+                    style: TextStyle(
+                      fontSize: 28 * accessibility.textScale,
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
   Widget _buildIndexHint(BuildContext context) {
-    if (!_showIndexHint || _isSearching) return const SizedBox.shrink();
+    if (!_showIndexHint || _isSearching || _isDraggingIndex.value) return const SizedBox.shrink();
     final accessibility = context.watch<AccessibilityProvider>();
     final isEnglish = widget.isEnglish;
     return Positioned(
@@ -11115,18 +11047,28 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
             letterSpacing: 0.2,
           );
           
-          // Calculate adaptive width
-          final textPainter = TextPainter(
-            text: TextSpan(text: district, style: textStyle),
-            textDirection: Directionality.of(context),
-            maxLines: 1,
-          )..layout(minWidth: 0, maxWidth: screenWidth);
+          // ✅ Optimize: Cache chip width calculations using district name as key
+          String cacheKey = '$district|$screenWidth|${isSmallScreen}';
+          double chipWidth = _chipWidthCache[cacheKey] ?? 0;
+          
+          // Only calculate if not cached (or cache miss)
+          if (chipWidth == 0) {
+            // Calculate adaptive width
+            final textPainter = TextPainter(
+              text: TextSpan(text: district, style: textStyle),
+              textDirection: Directionality.of(context),
+              maxLines: 1,
+            )..layout(minWidth: 0, maxWidth: screenWidth);
 
-          final textWidth = textPainter.size.width;
-          final chipWidth = math.max(
-            isSmallScreen ? 70.0 : 80.0,
-            math.min(textWidth + 32.0, isSmallScreen ? 140.0 : 160.0),
-          );
+            final textWidth = textPainter.size.width;
+            chipWidth = math.max(
+              isSmallScreen ? 70.0 : 80.0,
+              math.min(textWidth + 32.0, isSmallScreen ? 140.0 : 160.0),
+            );
+            
+            // ✅ Store in cache for future use
+            _chipWidthCache[cacheKey] = chipWidth;
+          }
 
           return AnimatedBuilder(
             animation: _cardStaggerController,
@@ -11311,6 +11253,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                   ),
                 );
               },
+              // ✅ Use const ValueKey for search results - avoids string recreation
               child: _isSearching
                   ? KeyedSubtree(
                       key: const ValueKey('searchGrid'),
@@ -11486,6 +11429,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                 key: const ValueKey('searchGridView'),
                 physics: EnhancedScrollPhysics.enhanced(),
                 padding: const EdgeInsets.all(8),
+                cacheExtent: 100, // Cache 100 pixels above/below viewport for smooth scrolling
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
                   childAspectRatio: aspectRatio,
@@ -11596,6 +11540,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                 key: ValueKey('districtGridView_$_selectedDistrict'),
                 physics: EnhancedScrollPhysics.enhanced(),
                 padding: const EdgeInsets.all(8),
+                cacheExtent: 100, // Cache 100 pixels above/below viewport for smooth scrolling
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
                   childAspectRatio: aspectRatio,
@@ -11709,10 +11654,10 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
             child: AnimatedScale(
               duration: MotionConstants.microInteraction,
               scale: (_pressedStationId == station.id) ? 0.98 : 1.0,
-              curve: Curves.easeOutCubic, // More efficient curve
+              curve: Curves.easeOutCubic,
               child: AnimatedContainer(
                 duration: MotionConstants.contentTransition,
-                curve: Curves.easeOutCubic, // Consistent curve
+                curve: Curves.easeOutCubic,
                 decoration: BoxDecoration(
                   color: isSelected 
                       ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4)
@@ -11744,7 +11689,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // 車站ID圓形圖示（根據設定顯示或隱藏）
+                      // ✅ Optimize: Use selector to reduce rebuilds from DeveloperSettingsProvider
                       if (!devSettings.hideStationId) ...[
                         Container(
                           width: 24,
