@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'kmb/api/kmb.dart';
+import '/kmb/api/kmb.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -54,6 +54,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   // User location for finding nearest stop
   Position? _userPosition;
   bool _locationLoading = false;
+  bool _showLocationBanner = false; // Show compact banner during locating
   
   // Floating bottom bar visibility
   bool _showFloatingBar = true;
@@ -72,6 +73,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   
   // Variant-scoped auto-scroll guard to avoid repositioning on auto-refresh
   String? _lastAutoScrollVariantKey;
+  
+  /// Track if ETA has been fetched at least once (for silent refresh)
+  bool _hasLoadedEtaOnce = false;
   
   // ETA auto-refresh (page-level, similar to LRT adaptive timer)
   Timer? _etaRefreshTimer;
@@ -134,6 +138,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     try {
       final status = await Permission.location.status;
       if (status.isGranted) {
+        // Show locating banner
+        setState(() => _showLocationBanner = true);
+        
         // Permission already granted, get location
         final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.best,
@@ -143,12 +150,17 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           onTimeout: () => throw TimeoutException('Location request timed out'),
         );
         if (mounted) {
-          setState(() => _userPosition = pos);
+          setState(() {
+            _userPosition = pos;
+            _showLocationBanner = false; // Hide banner once complete
+          });
         }
       }
     } catch (e) {
       // Silently fail - location is optional
-      // User can manually trigger location via button if needed
+      if (mounted) {
+        setState(() => _showLocationBanner = false);
+      }
     }
   }
   
@@ -552,10 +564,6 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             tooltip: lang.pinRoute,
             onPressed: _pinRoute,
           ),
-          IconButton(
-            icon: Icon(Icons.refresh),
-            onPressed: _fetch,
-          ),
         ],
       ),
       body: Stack(
@@ -628,6 +636,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   Widget _buildListView(DeveloperSettingsProvider devSettings) {
     return Column(
       children: [
+        // Fixed Route Destination (like AppBar) - always visible at top
+        RouteDestinationWidget(
+          route: widget.route,
+          direction: _selectedDirection,
+          serviceType: _selectedServiceType,
+        ),
+        const SizedBox(height: 8),
         // Show route details card independently (even while loading stops)
         if (_routeDetails != null && !devSettings.useFloatingRouteToggles)
           _buildRouteDetailsCard(),
@@ -772,7 +787,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                         _selectedDirection = d;
                                       });
                                       _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
-                                      _fetchRouteEta(widget.route, _selectedServiceType ?? '1');
+                                      _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
                                       _restartEtaAutoRefresh();
                                     }
                                   },
@@ -830,7 +845,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                     if (selected) {
                                       setState(() => _selectedServiceType = st);
                                       _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
-                                      _fetchRouteEta(widget.route, st);
+                                      _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
                                       _restartEtaAutoRefresh();
                                     }
                                   },
@@ -1050,7 +1065,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       if (selected) {
                         setState(() {
                           _selectedServiceType = s;
-                          _fetchRouteEta(widget.route.trim().toUpperCase(), s);
+                          _fetchRouteEta(widget.route.trim().toUpperCase(), s, silent: _hasLoadedEtaOnce);
                           if (_selectedDirection != null) {
                             _fetchRouteDetails(widget.route.trim().toUpperCase(), _selectedDirection!, s);
                           }
@@ -1316,7 +1331,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         _selectedServiceType = initialServiceType != null && _serviceTypes.contains(initialServiceType) ? initialServiceType : (_serviceTypes.isNotEmpty ? _serviceTypes.first : null);
       });
       if (_selectedServiceType != null) {
-        _fetchRouteEta(r, _selectedServiceType!);
+        _fetchRouteEta(r, _selectedServiceType!, silent: _hasLoadedEtaOnce);
         _restartEtaAutoRefresh();
       }
       // If both direction and serviceType are selected, fetch variant-specific stops
@@ -1374,6 +1389,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       setState(() { 
         _routeEtaEntries = entries;
         _etaBySeqCache = etaBySeq; // Store precomputed HashMap for O(1) lookups
+        _hasLoadedEtaOnce = true; // Mark that we've loaded at least once
         // Reset error counter on success and normalize interval if needed
         _etaConsecutiveErrors = 0;
       });
@@ -1417,7 +1433,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       _fetchRouteEta(r, st, silent: true);
     });
     // Trigger an immediate refresh (non-silent so UI shows initial state once)
-    _fetchRouteEta(r, st);
+    _fetchRouteEta(r, st, silent: _hasLoadedEtaOnce);
   }
 
   void _stopEtaAutoRefresh() {
@@ -1695,27 +1711,21 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
     // Build optimized stop cards using cached data
     // Auto-scroll to nearest stop when data first loads
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final variantKey = '${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant';
-      if (_lastAutoScrollVariantKey != variantKey) {
-        if (_userPosition == null && !_locationLoading && sortedStops.isNotEmpty) {
+    // Build optimized stop cards using cached data
+    // Auto-scroll to nearest stop when data first loads - check BEFORE registering callback
+    final variantKey = '${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant';
+    if (_lastAutoScrollVariantKey != variantKey) {
+      _lastAutoScrollVariantKey = variantKey;
+      if (_userPosition != null && !_locationLoading && sortedStops.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
           _getUserLocationAndScrollToNearest(sortedStops);
-        }
-        _lastAutoScrollVariantKey = variantKey;
+        });
       }
-    });
+    }
     
     return Column(
       children: [
-        // Independent Route Destination Widget
-        RouteDestinationWidget(
-          route: widget.route,
-          direction: _selectedDirection,
-          serviceType: _selectedServiceType,
-        ),
-        SizedBox(height: 8),
-        Expanded(
-          child: AnimatedSwitcher(
+          AnimatedSwitcher(
             duration: Duration(milliseconds: 200),
             child: ListView.builder(
               key: PageStorageKey<String>('kmb_list_${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant'),
@@ -1765,7 +1775,6 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             },
             ),
           ),
-        ),
       ],
     );
   }
@@ -1776,8 +1785,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final lng = double.tryParse(lngStr);
     if (lat == null || lng == null) return false;
     final distance = Geolocator.distanceBetween(_userPosition!.latitude, _userPosition!.longitude, lat, lng);
-    return distance <= 200.0; // Within 200m
+    return distance <= 150.0; // Changed from 200.0 to 150.0
   }
+
 
   Widget _buildOptimizedStationList() {
     // If we have variant-specific stops (from Route-Stop API), use those instead of cached data
@@ -1867,25 +1877,20 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
         // Build optimized stop cards using cached data - no redundant API calls!
         // Auto-scroll to nearest stop when data first loads
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final variantKey = '${r}_${selectedBoundChar}_${selectedService}_cached';
-          if (_lastAutoScrollVariantKey != variantKey) {
-            if (_userPosition == null && !_locationLoading && stops.isNotEmpty) {
+        // Build optimized stop cards using cached data - no redundant API calls!
+        // Auto-scroll to nearest stop when data first loads - check BEFORE registering callback
+        final variantKey = '${r}_${selectedBoundChar}_${selectedService}_cached';
+        if (_lastAutoScrollVariantKey != variantKey) {
+          _lastAutoScrollVariantKey = variantKey;
+          if (_userPosition != null && !_locationLoading && stops.isNotEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
               _getUserLocationAndScrollToNearest(stops);
-            }
-            _lastAutoScrollVariantKey = variantKey;
+            });
           }
-        });
+        }
         
         return Column(
           children: [
-            // Independent Route Destination Widget
-            RouteDestinationWidget(
-              route: r,
-              direction: selectedBoundChar,
-              serviceType: selectedService,
-            ),
-            SizedBox(height: 8),
             // Use shrinkWrap instead of Expanded since we're inside a SingleChildScrollView
             AnimatedSwitcher(
               duration: Duration(milliseconds: 200),
@@ -2533,8 +2538,8 @@ class ExpandableStopCard extends StatefulWidget {
 
 class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticKeepAliveClientMixin {
   bool _isExpanded = false;
-  // Removed: Timer? _etaRefreshTimer; - Parent handles refresh, not individual cards
-  // Removed: bool _etaLoading = false; - No individual loading state needed
+  bool _etaRefreshing = false; // Local refetch loading state for expanded card
+  bool _shouldShowRefreshAnimation = false; // Flag to show loading state on initial expand
 
   @override
   bool get wantKeepAlive => true; // Keep state alive during parent rebuilds
@@ -2542,20 +2547,105 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   @override
   void initState() {
     super.initState();
-    // No need to start refresh timer - parent provides updated ETAs via widget.etas
+    // Auto-expand if stop is nearby (within 150m)
+    if (widget.isNearby) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _autoExpandAndRefetch();
+      });
+    }
   }
 
   @override
   void dispose() {
-    // No timer to cancel anymore
     super.dispose();
+  }
+
+  /// Auto-refetch ETAs when card is expanded with smooth animation
+  Future<void> _autoRefetchOnExpand() async {
+    if (widget.stopId == null || widget.stopId!.isEmpty) return;
+
+    // Show loading animation for 1.5s minimum to make it smooth and noticeable
+    setState(() => _shouldShowRefreshAnimation = true);
+    
+    try {
+      // Fetch fresh ETAs for this stop
+      await Kmb.fetchStopEta(widget.stopId!);
+      
+      // Wait minimum animation duration for smooth visual feedback
+      await Future.delayed(const Duration(milliseconds: 1500));
+    } catch (e) {
+      // Silently handle errors - no snackbar needed for auto-refresh
+      // Just ensure animation completes before hiding
+      await Future.delayed(const Duration(milliseconds: 1500));
+    } finally {
+      if (mounted) setState(() => _shouldShowRefreshAnimation = false);
+    }
+  }
+
+  /// Scroll this card into view (useful for nearby stops)
+  Future<void> scrollIntoView() async {
+    try {
+      await Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    } catch (_) {
+      // Silently fail if scroll context unavailable
+    }
+  }
+
+  /// Manual refetch for action button (if needed)
+  Future<void> _manualRefetchStopEta() async {
+    if (widget.stopId == null || widget.stopId!.isEmpty) return;
+
+    setState(() => _etaRefreshing = true);
+    try {
+      await Kmb.fetchStopEta(widget.stopId!);
+      // Brief animation
+      await Future.delayed(const Duration(milliseconds: 800));
+    } catch (e) {
+      // Silently handle errors
+      await Future.delayed(const Duration(milliseconds: 800));
+    } finally {
+      if (mounted) setState(() => _etaRefreshing = false);
+    }
   }
 
   @override
   void didUpdateWidget(ExpandableStopCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Widget already receives updated ETAs from parent via widget.etas
-    // No need to manually copy - just trigger rebuild
+    // If stop became nearby (location loaded), auto-expand and refetch
+    if (!oldWidget.isNearby && widget.isNearby && !_isExpanded) {
+      _autoExpandAndRefetch();
+    }
+  }
+
+  /// Auto-expand card and trigger refetch when stop is nearby
+  Future<void> _autoExpandAndRefetch() async {
+    setState(() => _isExpanded = true);
+    
+    // Small delay to allow widget to build before scrolling
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    // Scroll this card into view
+    await scrollIntoView();
+    
+    // Immediately trigger auto-refetch after expansion
+    await _autoRefetchOnExpand();
+  }
+
+  /// Toggle expand state and trigger auto-refetch when expanding
+  void _toggleExpanded() {
+    final wasExpanded = _isExpanded;
+    setState(() {
+      _isExpanded = !_isExpanded;
+    });
+    
+    // Auto-refetch when expanding (only if not already expanded)
+    if (!wasExpanded && _isExpanded) {
+      _autoRefetchOnExpand();
+    }
   }
 
   Future<void> _pinStop(BuildContext context) async {
@@ -2657,11 +2747,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () {
-            setState(() {
-              _isExpanded = !_isExpanded;
-            });
-          },
+          onTap: _toggleExpanded,
           borderRadius: BorderRadius.circular(16),
           child: Column(
             children: [
@@ -2697,91 +2783,118 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ETA Row
+                          // ETA Row - Show loading when refetching on expand, otherwise show ETAs or "No buses" when collapsed
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 300),
-                            child: widget.etas.isEmpty
+                            child: !_isExpanded
                                 ? Text(
-                                    key: const ValueKey('empty'),
-                                    widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                    key: const ValueKey('collapsed'),
+                                    widget.isEnglish ? 'Hidden' : '班次隱藏',
+                                    style: theme.textTheme.bodySmall?.copyWith(
                                       color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
                                     ),
                                   )
-                                : Row(
-                                    key: const ValueKey('etas'),
-                                    children: [
-                                      ...widget.etas.take(3).expand((e) sync* {
-                                        final etaRaw = e['eta'] ?? e['eta_time'];
-                                        final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
-                                        final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
-                                        // Use M3 style logic for remarks if needed, keeping simple for now
-
-                                        // Format ETA logic preserved
-                                        String etaText = '—';
-                                        bool isDeparted = false;
-                                        bool isNearlyArrived = false;
-
-                                        if (etaRaw != null) {
-                                          try {
-                                            final dt = DateTime.parse(etaRaw.toString()).toLocal();
-                                            final now = DateTime.now();
-                                            final diff = dt.difference(now);
-
-                                            if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
-                                              etaText = widget.isEnglish ? 'Arriving' : '到達中';
-                                              isNearlyArrived = true;
-                                            } else if (diff.isNegative) {
-                                              etaText = '-';
-                                              isDeparted = true;
-                                            } else {
-                                              final mins = diff.inMinutes;
-                                              if (mins < 1) {
-                                                etaText = widget.isEnglish ? 'Due' : '即將抵達';
-                                                isNearlyArrived = true;
-                                              } else {
-                                                etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
-                                              }
-                                            }
-                                          } catch (_) {}
-                                        }
-
-                                        yield Padding(
-                                          padding: const EdgeInsets.only(right: 16.0),
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                etaText,
-                                                style: theme.textTheme.titleLarge?.copyWith(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: isDeparted 
-                                                      ? colorScheme.onSurface.withOpacity(0.38)
-                                                      : (isNearlyArrived ? colorScheme.primary : colorScheme.onSurface),
-                                                  fontSize: 20,
-                                                ),
-                                              ),
-                                              // Display remark if available
-                                              if ((widget.isEnglish ? rmkEn : rmkTc).isNotEmpty)
-                                                Padding(
-                                                  padding: const EdgeInsets.only(top: 2.0),
-                                                  child: Text(
-                                                    widget.isEnglish ? rmkEn : rmkTc,
-                                                    style: theme.textTheme.labelSmall?.copyWith(
-                                                      color: colorScheme.onSurfaceVariant,
-                                                      fontSize: 10,
-                                                      height: 1.2,
-                                                    ),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                            ],
+                                : (_shouldShowRefreshAnimation
+                                    ? Row(
+                                        key: const ValueKey('loading'),
+                                        children: [
+                                          SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2.5,
+                                              valueColor: AlwaysStoppedAnimation(colorScheme.primary),
+                                            ),
                                           ),
-                                        );
-                                      }),
-                                    ],
-                                  ),
+                                          const SizedBox(width: 12),
+                                          Text(
+                                            widget.isEnglish ? 'Fetching...' : '更新中...',
+                                            style: theme.textTheme.bodySmall?.copyWith(
+                                              color: colorScheme.primary,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : (widget.etas.isEmpty
+                                        ? Text(
+                                            key: const ValueKey('empty'),
+                                            widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+                                            style: theme.textTheme.bodyMedium?.copyWith(
+                                              color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
+                                            ),
+                                          )
+                                        : Row(
+                                            key: const ValueKey('etas'),
+                                            children: [
+                                              ...widget.etas.take(3).expand((e) sync* {
+                                                final etaRaw = e['eta'] ?? e['eta_time'];
+                                                final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
+                                                final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
+
+                                                String etaText = '—';
+                                                bool isDeparted = false;
+                                                bool isNearlyArrived = false;
+
+                                                if (etaRaw != null) {
+                                                  try {
+                                                    final dt = DateTime.parse(etaRaw.toString()).toLocal();
+                                                    final now = DateTime.now();
+                                                    final diff = dt.difference(now);
+
+                                                    if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
+                                                      etaText = widget.isEnglish ? 'Arriving' : '到達中';
+                                                      isNearlyArrived = true;
+                                                    } else if (diff.isNegative) {
+                                                      etaText = '-';
+                                                      isDeparted = true;
+                                                    } else {
+                                                      final mins = diff.inMinutes;
+                                                      if (mins < 1) {
+                                                        etaText = widget.isEnglish ? 'Due' : '即將抵達';
+                                                        isNearlyArrived = true;
+                                                      } else {
+                                                        etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
+                                                      }
+                                                    }
+                                                  } catch (_) {}
+                                                }
+
+                                                yield Padding(
+                                                  padding: const EdgeInsets.only(right: 16.0),
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(
+                                                        etaText,
+                                                        style: theme.textTheme.titleLarge?.copyWith(
+                                                          fontWeight: FontWeight.bold,
+                                                          color: isDeparted 
+                                                              ? colorScheme.onSurface.withOpacity(0.38)
+                                                              : (isNearlyArrived ? colorScheme.primary : colorScheme.onSurface),
+                                                          fontSize: 20,
+                                                        ),
+                                                      ),
+                                                      if ((widget.isEnglish ? rmkEn : rmkTc).isNotEmpty)
+                                                        Padding(
+                                                          padding: const EdgeInsets.only(top: 2.0),
+                                                          child: Text(
+                                                            widget.isEnglish ? rmkEn : rmkTc,
+                                                            style: theme.textTheme.labelSmall?.copyWith(
+                                                              color: colorScheme.onSurfaceVariant,
+                                                              fontSize: 10,
+                                                              height: 1.2,
+                                                            ),
+                                                            maxLines: 1,
+                                                            overflow: TextOverflow.ellipsis,
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                );
+                                              }).toList(),
+                                            ],
+                                          ))),
                           ),
 
                           const SizedBox(height: 6),
@@ -2824,6 +2937,21 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
                             TextButton.icon(
+                              onPressed: _etaRefreshing ? null : _manualRefetchStopEta,
+                              icon: _etaRefreshing
+                                  ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation(colorScheme.secondary),
+                                      ),
+                                    )
+                                  : Icon(Icons.refresh, size: 20),
+                              label: Text(widget.isEnglish ? 'Refresh' : '刷新'),
+                              style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
+                            ),
+                            TextButton.icon(
                               onPressed: () => _pinStop(context),
                               icon: Icon(Icons.push_pin_outlined, size: 20),
                               label: Text(widget.isEnglish ? 'Pin' : '釘選'),
@@ -2839,14 +2967,6 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                               },
                               icon: Icon(Icons.map_outlined, size: 20),
                               label: Text(widget.isEnglish ? 'Map' : '地圖'),
-                              style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
-                            ),
-                            TextButton.icon(
-                              onPressed: () {
-                                // Implementation for Street View would go here
-                              },
-                              icon: Icon(Icons.streetview, size: 20),
-                              label: Text(widget.isEnglish ? 'View' : '街景'),
                               style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
                             ),
                           ],
