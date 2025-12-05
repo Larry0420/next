@@ -3,35 +3,8 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-  <group>
-    <clip-path
-        android:pathData="M0,0h108v108h-108z"/>
-    <path
-        android:pathData="M71,27H37C32.58,27 29,30.58 29,35V73C29,77.42 32.58,81 37,81H71C75.42,81 79,77.42 79,73V35C79,30.58 75.42,27 71,27Z"
-        android:strokeWidth="2.5"
-        android:fillColor="#00000000"
-        android:strokeColor="#000000"/>
-    <path
-        android:pathData="M67,33H41C38.79,33 37,34.79 37,37V53C37,55.21 38.79,57 41,57H67C69.21,57 71,55.21 71,53V37C71,34.79 69.21,33 67,33Z"
-        android:strokeWidth="2.5"
-        android:fillColor="#00000000"
-        android:strokeColor="#000000"/>
-    <path
-        android:pathData="M41,74C42.66,74 44,72.66 44,71C44,69.34 42.66,68 41,68C39.34,68 38,69.34 38,71C38,72.66 39.34,74 41,74Z"
-        android:strokeWidth="2.5"
-        android:fillColor="#00000000"
-        android:strokeColor="#000000"/>
-    <path
-        android:pathData="M67,74C68.66,74 70,72.66 70,71C70,69.34 68.66,68 67,68C65.34,68 64,69.34 64,71C64,72.66 65.34,74 67,74Z"
-        android:strokeWidth="2.5"
-        android:fillColor="#00000000"
-        android:strokeColor="#000000"/>
-    <path
-        android:pathData="M47,27V23H61V27"
-        android:strokeLineJoin="round"
-        android:strokeWidth="2.5"
-        android:fillColor="#00000000"
-        android:strokeColor="#000000"
-        android:strokeLineCap="round"/>
-  </group>
+  <path
+      android:pathData="M46,27V22H62V27H59.5V24.5H48.5V27H46ZM37,27H71C75.42,27 79,30.58 79,35V73C79,77.42 75.42,81 71,81H37C32.58,81 29,77.42 29,73V35C29,30.58 32.58,27 37,27ZM41,33H67C69.21,33 71,34.79 71,37V53C71,55.21 69.21,57 67,57H41C38.79,57 37,55.21 37,53V37C37,34.79 38.79,33 41,33ZM41,68A3,3 0,1 0,41 74A3,3 0,1 0,41 68ZM67,68A3,3 0,1 0,67 74A3,3 0,1 0,67 68Z"
+      android:fillColor="#000000"
+      android:fillType="evenOdd"/>
 </vector>

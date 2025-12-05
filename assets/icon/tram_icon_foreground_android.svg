@@ -1,18 +1,22 @@
 <svg width="108" height="108" viewBox="0 0 108 108" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <!-- 主要對象區域：66x66 dp，居中在 108x108 畫布中 -->
-    <!-- 計算偏移量：(108-66)/2 = 21 -->
     <g transform="translate(21, 21)">
-        <!-- Tram body - 調整尺寸以適應 66x66 區域 -->
-        <rect x="8" y="6" width="50" height="54" rx="8" stroke="white" stroke-width="2.5"/>
+        <!-- 1. Pantograph (Dark Grey - Mechanical part) -->
+        <path d="M26 6 V3 L40 3 V6" stroke="#37474F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+        <!-- 2. Main Body (White - Pop against Orange BG) -->
+        <rect x="8" y="6" width="50" height="54" rx="8" fill="white"/>
         
-        <!-- Windshield -->
-        <rect x="16" y="12" width="34" height="24" rx="4" stroke="white" stroke-width="2.5"/>
+        <!-- 3. Subtle Shadow under body (Optional depth) -->
+        <path d="M8 56 Q33 59 58 56" fill="none" stroke="#000000" stroke-opacity="0.1" stroke-width="2"/>
+
+        <!-- 4. Windshield (Orange - matches Brand) -->
+        <rect x="16" y="12" width="34" height="24" rx="4" fill="#F67C0F"/>
         
-        <!-- Headlights -->
-        <circle cx="20" cy="50" r="3" stroke="white" stroke-width="2.5"/>
-        <circle cx="46" cy="50" r="3" stroke="white" stroke-width="2.5"/>
-        
-        <!-- Pantograph on top -->
-        <path d="M 26 6 V 2 L 40 2 V 6" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- 5. Windshield Internal Shadow (Inset depth) -->
+        <path d="M16 16 H50" stroke="#E65100" stroke-width="2" stroke-opacity="0.2"/>
+
+        <!-- 6. Headlights (Orange Rings with White Center) -->
+        <circle cx="20" cy="50" r="4" stroke="#F67C0F" stroke-width="2" fill="white"/>
+        <circle cx="46" cy="50" r="4" stroke="#F67C0F" stroke-width="2" fill="white"/>
     </g>
 </svg>
