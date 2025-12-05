@@ -81,6 +81,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   Timer? _etaRefreshTimer;
   Duration _etaRefreshInterval = const Duration(seconds: 15);
   int _etaConsecutiveErrors = 0;
+  // When false, page-level periodic ETA refresh is disabled and per-card fetching is used.
+  // Set to true to re-enable the legacy page-level timer behavior.
+  bool _enablePageLevelEtaAutoRefresh = false;
   
   // Method to jump to a specific location on the map with animated highlight
   void _jumpToMapLocation(double latitude, double longitude, {String? stopId}) {
@@ -292,19 +295,21 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   /// Get color for ETA based on time remaining
   Color _getEtaColor(dynamic raw) {
-    if (raw == null) return Colors.grey;
+    final cs = Theme.of(context).colorScheme;
+    // neutral / fallback tone
+    if (raw == null) return cs.onSurface.withOpacity(0.6);
     try {
       final dt = DateTime.parse(raw.toString()).toLocal();
       final now = DateTime.now();
       final diff = dt.difference(now);
       
-      if (diff.isNegative) return Colors.grey; // Departed
-      if (diff.inMinutes <= 2) return Colors.red; // Due soon
-      if (diff.inMinutes <= 5) return Colors.orange; // Coming soon
-      if (diff.inMinutes <= 10) return Colors.green; // On time
-      return Colors.blue; // Later
+      if (diff.isNegative) return cs.onSurface.withOpacity(0.6); // Departed
+      if (diff.inMinutes <= 2) return cs.error; // Due soon
+      if (diff.inMinutes <= 5) return cs.tertiary; // Coming soon
+      if (diff.inMinutes <= 10) return cs.primary; // On time
+      return cs.secondary; // Later
     } catch (_) {
-      return Colors.grey;
+      return Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
     }
   }
 
@@ -512,7 +517,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 ? SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).appBarTheme.iconTheme?.color ?? Theme.of(context).iconTheme.color ?? Theme.of(context).colorScheme.onSurface),
                   )
                 : Icon(
                     _userPosition != null ? Icons.my_location : Icons.location_searching,
@@ -654,13 +659,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           child: loading
               ? const Center(child: CircularProgressIndicator())
               : (error != null
-                  ? Center(child: Text('Error: $error', style: const TextStyle(color: Colors.red)))
+                  ? Center(child: Text('Error: $error', style: TextStyle(color: Theme.of(context).colorScheme.error)))
                   : (data == null
                       ? const Center(child: Text('No data'))
                       : Column(
                           children: [
                             if (_combinedLoading) Padding(padding: UIConstants.cardPadding, child: const Center(child: CircularProgressIndicator())),
-                            if (_combinedError != null) Padding(padding: UIConstants.cardPadding, child: Text('Combined error: $_combinedError', style: const TextStyle(color: Colors.red))),
+                            if (_combinedError != null) Padding(padding: UIConstants.cardPadding, child: Text('Combined error: $_combinedError', style: TextStyle(color: Theme.of(context).colorScheme.error))),
                             Expanded(child: _buildStructuredView()),
                           ],
                     ))),
@@ -701,7 +706,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
+                  color: theme.colorScheme.onSurface.withOpacity(0.2),
                   blurRadius: 20,
                   offset: Offset(0, -5),
                 ),
@@ -713,157 +718,156 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 ),
               ),
             ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                // Reduce vertical padding so floating toggle bar is more compact
-                padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingL, vertical: UIConstants.spacingS),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Direction toggles
-                    if (_directions.isNotEmpty) ...[
-                      Row(
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      // Reduce vertical padding so floating toggle bar is more compact
+                      padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingL, vertical: UIConstants.spacingS),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
-                          SizedBox(width: 8),
-                          Text(
-                            isEnglish ? 'Direction' : '方向',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: theme.colorScheme.onSurface,
+                          // Direction toggles
+                          if (_directions.isNotEmpty) ...[
+                            Row(
+                              children: [
+                                Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
+                                SizedBox(width: 8),
+                                Text(
+                                  isEnglish ? 'Direction' : '方向',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 8),
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: _directions.map((d) {
-                            final isSelected = _selectedDirection == d;
-                            final isOutbound = d.toUpperCase().startsWith('O');
-                            final dirLabel = isOutbound 
-                              ? (isEnglish ? 'Outbound' : '去程')
-                              : (isEnglish ? 'Inbound' : '回程');
-                            
-                            return Padding(
-                              padding: EdgeInsets.only(right: UIConstants.spacingS),
-                              child: AnimatedContainer(
-                                duration: Duration(milliseconds: 200),
-                                child: FilterChip(
-                                  label: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
-                                        size: 16,
-                                        color: isSelected 
-                                          ? Colors.white
-                                          : (isOutbound ? Colors.green : Colors.orange),
+                            SizedBox(height: 8),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: _directions.map((d) {
+                                  final isSelected = _selectedDirection == d;
+                                  final isOutbound = d.toUpperCase().startsWith('O');
+                                  final dirLabel = isOutbound 
+                                    ? (isEnglish ? 'Outbound' : '去程')
+                                    : (isEnglish ? 'Inbound' : '回程');
+                                  
+                                  return Padding(
+                                    padding: EdgeInsets.only(right: UIConstants.spacingS),
+                                    child: AnimatedContainer(
+                                      duration: Duration(milliseconds: 200),
+                                      child: FilterChip(
+                                        label: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
+                                              size: 16,
+                                              color: isSelected 
+                                                ? theme.colorScheme.onPrimary
+                                                : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
+                                            ),
+                                            SizedBox(width: 6),
+                                            Text(dirLabel),
+                                          ],
+                                        ),
+                                        selected: isSelected,
+                                        selectedColor: isOutbound 
+                                          ? theme.colorScheme.primary.withOpacity(0.9)
+                                          : theme.colorScheme.tertiary.withOpacity(0.9),
+                                        backgroundColor: isOutbound
+                                          ? theme.colorScheme.primary.withOpacity(0.1)
+                                          : theme.colorScheme.tertiary.withOpacity(0.1),
+                                        checkmarkColor: theme.colorScheme.onPrimary,
+                                        labelStyle: TextStyle(
+                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                        ),
+                                        elevation: isSelected ? 4 : 0,
+                                        pressElevation: 2,
+                                        onSelected: (selected) {
+                                          if (selected) {
+                                            setState(() {
+                                              _selectedDirection = d;
+                                            });
+                                            _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
+                                            _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
+                                            _restartEtaAutoRefresh();
+                                          }
+                                        },
                                       ),
-                                      SizedBox(width: 6),
-                                      Text(dirLabel),
-                                    ],
-                                  ),
-                                  selected: isSelected,
-                                  selectedColor: isOutbound 
-                                    ? Colors.green.withOpacity(0.9)
-                                    : Colors.orange.withOpacity(0.9),
-                                  backgroundColor: isOutbound
-                                    ? Colors.green.withOpacity(0.1)
-                                    : Colors.orange.withOpacity(0.1),
-                                  checkmarkColor: Colors.white,
-                                  labelStyle: TextStyle(
-                                    color: isSelected ? Colors.white : theme.colorScheme.onSurface,
-                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                  ),
-                                  elevation: isSelected ? 4 : 0,
-                                  pressElevation: 2,
-                                  onSelected: (selected) {
-                                    if (selected) {
-                                      setState(() {
-                                        _selectedDirection = d;
-                                      });
-                                      _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
-                                      _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
-                                      _restartEtaAutoRefresh();
-                                    }
-                                  },
-                                ),
+                                    ),
+                                  );
+                                }).toList(),
                               ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ],
-                    
-                    // Service type toggles
-                    if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
-                      if (_directions.isNotEmpty) SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
-                          SizedBox(width: 8),
-                          Text(
-                            isEnglish ? 'Service Type' : '班次類型',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: theme.colorScheme.onSurface,
                             ),
-                          ),
+                          ],
+                          
+                          // Service type toggles
+                          if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
+                            if (_directions.isNotEmpty) SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
+                                SizedBox(width: 8),
+                                Text(
+                                  isEnglish ? 'Service Type' : '班次類型',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 8),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: (_serviceTypes..sort()).map((st) {
+                                  final isSelected = _selectedServiceType == st;
+                                  final typeLabel = st == '1'
+                                      ? (isEnglish ? 'Normal Service' : '常規班次')
+                                      : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
+                                  
+                                  return Padding(
+                                    padding: EdgeInsets.only(right: UIConstants.spacingS),
+                                    child: AnimatedContainer(
+                                      duration: Duration(milliseconds: 200),
+                                      child: FilterChip(
+                                        label: Text(typeLabel),
+                                        selected: isSelected,
+                                        selectedColor: theme.colorScheme.primary,
+                                        backgroundColor: theme.colorScheme.surfaceVariant,
+                                        checkmarkColor: theme.colorScheme.onPrimary,
+                                        labelStyle: TextStyle(
+                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                        ),
+                                        elevation: isSelected ? 4 : 0,
+                                        pressElevation: 2,
+                                        onSelected: (selected) {
+                                          if (selected) {
+                                            setState(() => _selectedServiceType = st);
+                                            _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
+                                            _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
+                                            _restartEtaAutoRefresh();
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
-                      SizedBox(height: 8),
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: (_serviceTypes..sort()).map((st) {
-                            final isSelected = _selectedServiceType == st;
-                            final typeLabel = st == '1'
-                                ? (isEnglish ? 'Normal Service' : '常規班次')
-                                : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
-                            
-                            return Padding(
-                              padding: EdgeInsets.only(right: UIConstants.spacingS),
-                              child: AnimatedContainer(
-                                duration: Duration(milliseconds: 200),
-                                child: FilterChip(
-                                  label: Text(typeLabel),
-                                  selected: isSelected,
-                                  selectedColor: theme.colorScheme.primary,
-                                  backgroundColor: theme.colorScheme.surfaceVariant,
-                                  checkmarkColor: Colors.white,
-                                  labelStyle: TextStyle(
-                                    color: isSelected ? Colors.white : theme.colorScheme.onSurface,
-                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                  ),
-                                  elevation: isSelected ? 4 : 0,
-                                  pressElevation: 2,
-                                  onSelected: (selected) {
-                                    if (selected) {
-                                      setState(() => _selectedServiceType = st);
-                                      _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
-                                      _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
-                                      _restartEtaAutoRefresh();
-                                    }
-                                  },
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+                    ),
+                  ),
             ),
           ),
         ),
-      ),
     );
   }
 
@@ -994,7 +998,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             if (_directions.isNotEmpty) ...[
               Row(
                 children: [
-                  Icon(Icons.alt_route, size: 18, color: Theme.of(context).iconTheme.color ?? Colors.grey[700]),
+                  Icon(Icons.alt_route, size: 18, color: Theme.of(context).iconTheme.color ?? Theme.of(context).colorScheme.onSurfaceVariant),
                   SizedBox(width: 8),
                   Text(
                     isEnglish ? 'Direction' : '方向',
@@ -1027,14 +1031,14 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       }
                     },
                     selectedColor: isOutbound 
-                      ? Colors.green.withOpacity(0.2) 
-                      : Colors.orange.withOpacity(0.2),
-                    checkmarkColor: isOutbound ? Colors.green[700] : Colors.orange[700],
+                      ? Theme.of(context).colorScheme.primary.withOpacity(0.2) 
+                      : Theme.of(context).colorScheme.tertiary.withOpacity(0.2),
+                    checkmarkColor: isOutbound ? Theme.of(context).colorScheme.primary.withOpacity(0.85) : Theme.of(context).colorScheme.tertiary.withOpacity(0.85),
                     avatar: isSelected 
                       ? Icon(
                           isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
                           size: 18,
-                          color: isOutbound ? Colors.green[700] : Colors.orange[700],
+                          color: isOutbound ? Theme.of(context).colorScheme.primary.withOpacity(0.85) : Theme.of(context).colorScheme.tertiary.withOpacity(0.85),
                         )
                       : null,
                   );
@@ -1045,7 +1049,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               SizedBox(height: 12),
               Row(
                 children: [
-                  Icon(Icons.route, size: 18, color: Theme.of(context).iconTheme.color ?? Colors.grey[700]),
+                  Icon(Icons.route, size: 18, color: Theme.of(context).iconTheme.color ?? Theme.of(context).colorScheme.onSurfaceVariant),
                   SizedBox(width: 8),
                   Text(
                     isEnglish ? 'Service Type' : '服務類型',
@@ -1103,7 +1107,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           padding: const EdgeInsets.all(12.0),
           child: Column(
             children: [
-              Text('Route Details Error: $_routeDetailsError', style: TextStyle(color: Colors.red)),
+              Text('Route Details Error: $_routeDetailsError', style: TextStyle(color: Theme.of(context).colorScheme.error)),
               SizedBox(height: 8),
               ElevatedButton(
                 onPressed: () {
@@ -1178,12 +1182,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
-                      color: (bound == 'O' ? Colors.green : Colors.orange).withOpacity(0.15),
+                      color: (bound == 'O' ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.tertiary).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
                       bound == 'O' ? Icons.arrow_circle_right : Icons.arrow_circle_left,
-                      color: bound == 'O' ? Colors.green : Colors.orange,
+                      color: bound == 'O' ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.tertiary,
                       size: 20,
                     ),
                   ),
@@ -1225,7 +1229,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   Widget _buildRouteEtaCard() {
   if (_routeEtaLoading) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Center(child: CircularProgressIndicator())));
-  if (_routeEtaError != null) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('Error: $_routeEtaError', style: TextStyle(color: Colors.red))));
+  if (_routeEtaError != null) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('Error: $_routeEtaError', style: TextStyle(color: Theme.of(context).colorScheme.error))));
   if (_routeEtaEntries == null || _routeEtaEntries!.isEmpty) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('No route ETA data')));
 
     // Group entries by stop sequence
@@ -1425,6 +1429,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   // ===== ETA Auto-Refresh (modeled after LRT startAutoRefresh) =====
   void _maybeStartEtaAutoRefresh() {
+    if (!_enablePageLevelEtaAutoRefresh) return;
     if (_etaRefreshTimer != null && _etaRefreshTimer!.isActive) return;
     if (_selectedServiceType == null) return;
     final r = widget.route.trim().toUpperCase();
@@ -1442,6 +1447,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   void _restartEtaAutoRefresh({Duration? interval}) {
+    if (!_enablePageLevelEtaAutoRefresh) {
+      _stopEtaAutoRefresh();
+      return;
+    }
     if (interval != null) {
       _etaRefreshInterval = interval;
     }
@@ -1800,7 +1809,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
     
     if (_variantStopsError != null) {
-      return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading route stops: $_variantStopsError', style: TextStyle(color: Colors.red))));
+      return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading route stops: $_variantStopsError', style: TextStyle(color: Theme.of(context).colorScheme.error))));
     }
     
     // Fallback to cached route-stop data (from Route-Stop List API)
@@ -1809,7 +1818,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
-        if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Colors.red))));
+        if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))));
 
         final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
         final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
@@ -1984,19 +1993,20 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     
     // Direction icon
     IconData dirIcon = Icons.arrow_forward;
-    Color dirColor = Colors.blue;
+    final cs = Theme.of(context).colorScheme;
+    Color dirColor = cs.secondary;
     if (bound == 'O') {
       dirIcon = Icons.arrow_circle_right;
-      dirColor = Colors.green;
+      dirColor = cs.primary;
     } else if (bound == 'I') {
       dirIcon = Icons.arrow_circle_left;
-      dirColor = Colors.orange;
+      dirColor = cs.tertiary;
     }
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       elevation: 3,
-      color: Theme.of(context).primaryColor.withOpacity(0.05),
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
@@ -2020,12 +2030,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: cs.secondary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '${lang.type} $serviceType',
-                  style: TextStyle(fontSize: 11, color: Colors.blue[700]),
+                  style: TextStyle(fontSize: 11, color: cs.secondary.withOpacity(0.85)),
                 ),
               ),
           ],
@@ -2120,7 +2130,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               ),
               const SizedBox(height: 8),
               Expanded(
-                child: Center(child: Text('Error: ${snap.error}', style: const TextStyle(color: Colors.red))),
+                child: Center(child: Text('Error: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))),
               ),
             ],
           );
@@ -2540,6 +2550,10 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   bool _isExpanded = false;
   bool _etaRefreshing = false; // Local refetch loading state for expanded card
   bool _shouldShowRefreshAnimation = false; // Flag to show loading state on initial expand
+  bool _autoRefreshEnabled = false; // Toggle for per-stop periodic auto-refresh
+  Timer? _autoRefreshTimer; // Per-stop timer when auto-refresh enabled
+  bool _autoFetchRunning = false; // Guard to avoid overlapping auto fetches
+  bool _autoEnabledByNearby = false; // true when we programmatically turned on Auto due to proximity
 
   @override
   bool get wantKeepAlive => true; // Keep state alive during parent rebuilds
@@ -2550,13 +2564,22 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     // Auto-expand if stop is nearby (within 150m)
     if (widget.isNearby) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _autoExpandAndRefetch();
+        // If Auto isn't enabled yet, enable it and mark that we did so because of proximity
+        if (!_autoRefreshEnabled) {
+          setState(() {
+            _autoRefreshEnabled = true;
+            _autoEnabledByNearby = true;
+          });
+        }
+        _autoExpandAndRefetch(startNearbyTimer: true);
       });
     }
   }
 
   @override
   void dispose() {
+    // ensure auto-refresh timer stops
+    _autoRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -2615,14 +2638,36 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   @override
   void didUpdateWidget(ExpandableStopCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If stop became nearby (location loaded), auto-expand and refetch
-    if (!oldWidget.isNearby && widget.isNearby && !_isExpanded) {
-      _autoExpandAndRefetch();
+    // If stop became nearby (location loaded), auto-expand and refetch and start nearby timer
+    if (!oldWidget.isNearby && widget.isNearby) {
+      // enable the Auto toggle for this card unless user already enabled it
+      if (!_autoRefreshEnabled) {
+        setState(() {
+          _autoRefreshEnabled = true;
+          _autoEnabledByNearby = true;
+        });
+      }
+      _autoExpandAndRefetch(startNearbyTimer: true);
+    }
+
+    // If user moved away from this stop, stop any nearby-driven auto-refresh
+    if (oldWidget.isNearby && !widget.isNearby) {
+      // Clear any nearby auto-enable marker
+      _autoEnabledByNearby = false;
+      if (_autoEnabledByNearby) {
+        // revert the user's toggle if we set it automatically
+        setState(() {
+          _autoRefreshEnabled = false;
+          _autoEnabledByNearby = false;
+        });
+      }
+      // If after revert the toggle is disabled, stop the timer
+      if (!_autoRefreshEnabled) _stopAutoRefreshTimer();
     }
   }
 
   /// Auto-expand card and trigger refetch when stop is nearby
-  Future<void> _autoExpandAndRefetch() async {
+  Future<void> _autoExpandAndRefetch({bool startNearbyTimer = false}) async {
     setState(() => _isExpanded = true);
     
     // Small delay to allow widget to build before scrolling
@@ -2633,6 +2678,11 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     
     // Immediately trigger auto-refetch after expansion
     await _autoRefetchOnExpand();
+
+    // Start periodic auto-refresh if requested or if user previously enabled it
+    if (startNearbyTimer || _autoRefreshEnabled) {
+      _startAutoRefreshTimer();
+    }
   }
 
   /// Toggle expand state and trigger auto-refetch when expanding
@@ -2645,7 +2695,46 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     // Auto-refetch when expanding (only if not already expanded)
     if (!wasExpanded && _isExpanded) {
       _autoRefetchOnExpand();
+      // If auto-refresh toggle is enabled, start the per-card timer
+      if (_autoRefreshEnabled) {
+        _startAutoRefreshTimer();
+      }
     }
+    // If collapsing, stop the per-card auto-refresh timer so it does not continue
+    if (wasExpanded && !_isExpanded) {
+      _stopAutoRefreshTimer();
+    }
+  }
+
+  void _startAutoRefreshTimer({Duration? interval}) {
+    // Don't start if no stopId or already running
+    if (widget.stopId == null || widget.stopId!.isEmpty) return;
+    if (_autoRefreshTimer != null && _autoRefreshTimer!.isActive) return;
+
+    final refreshInterval = interval ?? const Duration(seconds: 15);
+
+    // Schedule periodic silent fetches. Use a guard so we don't overlap fetches.
+    _autoRefreshTimer = Timer.periodic(refreshInterval, (_) async {
+      if (!mounted) return;
+      if (_autoFetchRunning) return;
+      _autoFetchRunning = true;
+      try {
+        // Silent fetch - do not toggle manual spinner. We still want an initial visual
+        // animation to indicate refresh-on-open; auto-refresh runs quietly in background.
+        await Kmb.fetchStopEta(widget.stopId!);
+      } catch (_) {
+        // ignore errors for auto refresh
+      } finally {
+        _autoFetchRunning = false;
+      }
+    });
+  }
+
+  void _stopAutoRefreshTimer() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = null;
+    _autoFetchRunning = false;
+    _autoEnabledByNearby = false;
   }
 
   Future<void> _pinStop(BuildContext context) async {
@@ -2694,19 +2783,20 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   }
 
   Color _getEtaColor(dynamic raw) {
-    if (raw == null) return Colors.grey;
+    final cs = Theme.of(context).colorScheme;
+    if (raw == null) return cs.onSurface.withOpacity(0.6);
     try {
       final dt = DateTime.parse(raw.toString()).toLocal();
       final now = DateTime.now();
       final diff = dt.difference(now);
       
-      if (diff.isNegative) return Colors.grey;
-      if (diff.inMinutes <= 2) return Colors.red;
-      if (diff.inMinutes <= 5) return Colors.orange;
-      if (diff.inMinutes <= 10) return Colors.green;
-      return Colors.blue;
+      if (diff.isNegative) return cs.onSurface.withOpacity(0.6);
+      if (diff.inMinutes <= 2) return cs.error;
+      if (diff.inMinutes <= 5) return cs.tertiary;
+      if (diff.inMinutes <= 10) return cs.primary;
+      return cs.secondary;
     } catch (_) {
-      return Colors.grey;
+      return Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
     }
   }
 
@@ -2951,6 +3041,39 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                               label: Text(widget.isEnglish ? 'Refresh' : '刷新'),
                               style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
                             ),
+                            // Auto-refresh toggle (per-stop)
+                            TextButton.icon(
+                              onPressed: () async {
+                                final newState = !_autoRefreshEnabled;
+                                setState(() {
+                                  _autoRefreshEnabled = newState;
+                                  // user manually toggled it, clear any 'auto-enabled-by-nearby' marker
+                                  _autoEnabledByNearby = false;
+                                });
+
+                                if (newState && _isExpanded) {
+                                  // enabled: start timer and do immediate fetch to acknowledge
+                                  _startAutoRefreshTimer();
+                                  if (!_autoFetchRunning && widget.stopId != null && widget.stopId!.isNotEmpty) {
+                                    _autoFetchRunning = true;
+                                    try {
+                                      await Kmb.fetchStopEta(widget.stopId!);
+                                    } catch (_) {}
+                                    _autoFetchRunning = false;
+                                  }
+                                } else if (!newState) {
+                                  // disabled: make sure to stop any timer
+                                  _stopAutoRefreshTimer();
+                                }
+                              },
+                              icon: Icon(
+                                _autoRefreshEnabled ? Icons.autorenew : Icons.autorenew_outlined,
+                                size: 20,
+                                color: _autoRefreshEnabled ? colorScheme.secondary : null,
+                              ),
+                              label: Text(_autoRefreshEnabled ? (widget.isEnglish ? 'Auto' : '自動') : (widget.isEnglish ? 'Auto' : '自動')),
+                              style: TextButton.styleFrom(foregroundColor: _autoRefreshEnabled ? colorScheme.secondary : colorScheme.onSurfaceVariant),
+                            ),
                             TextButton.icon(
                               onPressed: () => _pinStop(context),
                               icon: Icon(Icons.push_pin_outlined, size: 20),
@@ -3068,7 +3191,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
   @override
   Widget build(BuildContext context) {
     if (loading) return Padding(padding: const EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator()));
-    if (error != null) return Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: $error', style: TextStyle(color: Colors.red)));
+    if (error != null) return Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: $error', style: TextStyle(color: Theme.of(context).colorScheme.error)));
     if (etas == null || etas!.isEmpty) return Padding(padding: const EdgeInsets.all(8.0), child: Text('No ETA data'));
 
     return Column(
@@ -3108,6 +3231,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   String? _error;
   Map<String, dynamic>? _routeData;
   Timer? _refreshTimer;
+  Timer? _errorRetryTimer; // Auto-retry on error
 
   @override
   void initState() {
@@ -3119,6 +3243,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _errorRetryTimer?.cancel();
     super.dispose();
   }
 
@@ -3127,6 +3252,16 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     _refreshTimer = Timer.periodic(Duration(seconds: 60), (timer) {
       if (mounted) {
         _fetchRouteData(silent: true);
+      }
+    });
+  }
+
+  void _startErrorRetry() {
+    // Auto-retry failed fetch after 5 seconds
+    _errorRetryTimer?.cancel();
+    _errorRetryTimer = Timer(Duration(seconds: 5), () {
+      if (mounted) {
+        _fetchRouteData(silent: false);
       }
     });
   }
@@ -3198,13 +3333,15 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     } catch (e) {
       if (!mounted) return; // Check if widget is still mounted
       
-      // Only show error message for non-silent updates to avoid disrupting UI
+      // Show error and start auto-retry
       if (!silent) {
         print('RouteDestinationWidget error for route ${widget.route}: $e');
         setState(() {
           _error = e.toString();
           _loading = false;
         });
+        // Start auto-retry timer on error
+        _startErrorRetry();
       } else {
         // Silent refresh failed - keep showing old data if available
         // Only update error if we don't have any data yet
@@ -3263,14 +3400,30 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
             padding: const EdgeInsets.all(12.0),
             child: Row(
               children: [
-                Icon(Icons.error_outline, color: Colors.red, size: 20),
+                Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 20),
                 SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    'Error loading route',
-                    style: TextStyle(color: Colors.red, fontSize: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Error loading route',
+                        style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Retrying in 5 seconds...',
+                        style: TextStyle(color: Theme.of(context).colorScheme.tertiary, fontSize: 11),
+                      ),
+                    ],
                   ),
                 ),
+                SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () => _fetchRouteData(silent: false),
+                  icon: Icon(Icons.refresh, size: 16),
+                  label: Text('Retry', style: TextStyle(fontSize: 11)),
+                )
               ],
             ),
           ),
@@ -3294,13 +3447,14 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
 
     // Direction icon
     IconData dirIcon = Icons.arrow_forward;
-    Color dirColor = Colors.blue;
+    final cs = Theme.of(context).colorScheme;
+    Color dirColor = cs.secondary;
     if (bound == 'O') {
       dirIcon = Icons.arrow_circle_right;
-      dirColor = Colors.green;
+      dirColor = cs.primary;
     } else if (bound == 'I') {
       dirIcon = Icons.arrow_circle_left;
-      dirColor = Colors.orange;
+      dirColor = cs.tertiary;
     }
 
     return Padding(
