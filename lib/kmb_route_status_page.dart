@@ -141,10 +141,20 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     try {
       final status = await Permission.location.status;
       if (status.isGranted) {
-        // Show locating banner
-        setState(() => _showLocationBanner = true);
-        
-        // Permission already granted, get location
+        // FAST: Get last known position first for instant nearby detection
+        try {
+          final lastPos = await Geolocator.getLastKnownPosition();
+          if (lastPos != null && mounted) {
+            setState(() => _userPosition = lastPos);
+          }
+        } catch (_) {}
+
+        // Show banner only if no position yet
+        if (_userPosition == null && mounted) {
+          setState(() => _showLocationBanner = true);
+        }
+
+        // ACCURATE: Get current position in background
         final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.best,
           timeLimit: const Duration(seconds: 5),
@@ -155,7 +165,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         if (mounted) {
           setState(() {
             _userPosition = pos;
-            _showLocationBanner = false; // Hide banner once complete
+            _showLocationBanner = false;
           });
         }
       }
@@ -646,6 +656,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           route: widget.route,
           direction: _selectedDirection,
           serviceType: _selectedServiceType,
+          cachedRouteData: _routeDetails,
         ),
         const SizedBox(height: 8),
         // Show route details card independently (even while loading stops)
@@ -691,8 +702,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
     
     return AnimatedPositioned(
-      duration: Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
+      duration: Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
       bottom: _showFloatingBar ? 0 : -100,
       left: 0,
       right: 0,
@@ -1161,13 +1172,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
                 width: 1.0,
@@ -1517,6 +1528,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   Widget _buildRouteInfoList(List<Map<String, dynamic>> list) {
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         title: Text('Route info (${list.length})'),
         children: list.map((item) {
@@ -1545,6 +1559,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     });
 
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         title: Text('Stops (${sorted.length})'),
         children: sorted.map((stop) {
@@ -1607,6 +1624,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   Widget _buildKeyValueCard(String title, Map<String, dynamic> map) {
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         title: Text(title),
         children: map.entries.map((e) {
@@ -1670,7 +1690,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             await Scrollable.ensureVisible(
               ctx,
               duration: const Duration(milliseconds: 500),
-              curve: Curves.easeInOut,
+              curve: Curves.easeOutCubic,
               alignment: 0.2,
             );
           } else if (_scrollController.hasClients) {
@@ -1679,7 +1699,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             _scrollController.animateTo(
               position,
               duration: const Duration(milliseconds: 500),
-              curve: Curves.easeInOut,
+              curve: Curves.easeOutCubic,
             );
           }
         } catch (_) {}
@@ -1958,6 +1978,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   Widget _buildRawJsonCard() {
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         title: Text('Raw JSON'),
         children: [
@@ -2007,7 +2030,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       elevation: 3,
               color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         child: Row(
@@ -2109,10 +2132,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           return Column(
             children: [
               RouteDestinationWidget(
-                route: widget.route,
-                direction: _selectedDirection,
-                serviceType: _selectedServiceType,
-              ),
+          route: widget.route,
+          direction: _selectedDirection,
+          serviceType: _selectedServiceType,
+          cachedRouteData: _routeDetails,
+        ),
               const SizedBox(height: 8),
               const Expanded(
                 child: Center(child: CircularProgressIndicator()),
@@ -2124,10 +2148,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           return Column(
             children: [
               RouteDestinationWidget(
-                route: widget.route,
-                direction: _selectedDirection,
-                serviceType: _selectedServiceType,
-              ),
+          route: widget.route,
+          direction: _selectedDirection,
+          serviceType: _selectedServiceType,
+          cachedRouteData: _routeDetails,
+        ),
               const SizedBox(height: 8),
               Expanded(
                 child: Center(child: Text('Error: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))),
@@ -2147,10 +2172,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           return Column(
             children: [
               RouteDestinationWidget(
-                route: widget.route,
-                direction: _selectedDirection,
-                serviceType: _selectedServiceType,
-              ),
+          route: widget.route,
+          direction: _selectedDirection,
+          serviceType: _selectedServiceType,
+          cachedRouteData: _routeDetails,
+        ),
               const SizedBox(height: 8),
               Expanded(
                 child: Center(child: Text(isEnglish ? 'No stop data available' : '無站點資料')),
@@ -2265,7 +2291,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       ),
                     // Main marker circle
                     AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
+                      duration: const Duration(milliseconds: 280),
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
                         color: isHighlighted 
@@ -2351,7 +2377,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               child: Stack(
                 children: [
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(20),
                     child: FlutterMap(
                       mapController: _mapController,
                       options: MapOptions(
@@ -2433,11 +2459,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             //   padding: const EdgeInsets.all(12),
             //   decoration: BoxDecoration(
             //     color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
-            //     borderRadius: BorderRadius.circular(12),
+            //     borderRadius: BorderRadius.circular(20),
             //     boxShadow: [
             //       BoxShadow(
             //         color: Theme.of(context).colorScheme.shadow.withOpacity(0.1),
-            //         blurRadius: 4,
+            //         blurRadius: 6,
             //         offset: const Offset(0, 2),
             //       ),
             //     ],
@@ -2547,6 +2573,10 @@ class ExpandableStopCard extends StatefulWidget {
 }
 
 class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticKeepAliveClientMixin {
+  // ETA Fetch Strategy:
+  // - Page-level _fetchRouteEta() gets ALL stop ETAs once (primary source)
+  // - Per-card refetch ONLY when: user expands card OR auto-refresh timer fires
+  // - No double-fetching on page load; nearby cards use page-level data initially
   bool _isExpanded = false;
   bool _etaRefreshing = false; // Local refetch loading state for expanded card
   bool _shouldShowRefreshAnimation = false; // Flag to show loading state on initial expand
@@ -2564,14 +2594,19 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     // Auto-expand if stop is nearby (within 150m)
     if (widget.isNearby) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        // If Auto isn't enabled yet, enable it and mark that we did so because of proximity
-        if (!_autoRefreshEnabled) {
-          setState(() {
-            _autoRefreshEnabled = true;
-            _autoEnabledByNearby = true;
-          });
-        }
-        _autoExpandAndRefetch(startNearbyTimer: true);
+        // Auto-expand nearby cards but don't refetch (page-level fetch already has all ETAs)
+        setState(() {
+          _isExpanded = true;
+          // Enable auto-refresh for nearby cards
+          _autoRefreshEnabled = true;
+          _autoEnabledByNearby = true;
+        });
+        // Start the auto-refresh timer for subsequent updates
+        _startAutoRefreshTimer();
+        // Scroll into view
+        Future.delayed(const Duration(milliseconds: 100), () {
+          scrollIntoView();
+        });
       });
     }
   }
@@ -2611,7 +2646,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
       await Scrollable.ensureVisible(
         context,
         duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
+        curve: Curves.easeOutCubic,
       );
     } catch (_) {
       // Silently fail if scroll context unavailable
@@ -2640,14 +2675,19 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     super.didUpdateWidget(oldWidget);
     // If stop became nearby (location loaded), auto-expand and refetch and start nearby timer
     if (!oldWidget.isNearby && widget.isNearby) {
-      // enable the Auto toggle for this card unless user already enabled it
+      // Enable auto-refresh for this card
       if (!_autoRefreshEnabled) {
         setState(() {
           _autoRefreshEnabled = true;
           _autoEnabledByNearby = true;
         });
       }
-      _autoExpandAndRefetch(startNearbyTimer: true);
+      // Expand and scroll but don't refetch (page-level already has data)
+      setState(() => _isExpanded = true);
+      Future.delayed(const Duration(milliseconds: 100), () {
+        scrollIntoView();
+      });
+      _startAutoRefreshTimer();
     }
 
     // If user moved away from this stop, stop any nearby-driven auto-refresh
@@ -2827,7 +2867,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
             ? (widget.isNearby ? nearbyBgColor : colorScheme.surfaceContainerHigh)
             : colorScheme.surfaceContainerLow,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16), // M3 Standard
+          borderRadius: BorderRadius.circular(20), // M3 Standard
           side: BorderSide(
             color: isActive
                 ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary.withOpacity(0.4))
@@ -2838,7 +2878,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: _toggleExpanded,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           child: Column(
             children: [
               Padding(
@@ -2875,7 +2915,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         children: [
                           // ETA Row - Show loading when refetching on expand, otherwise show ETAs or "No buses" when collapsed
                           AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 300),
+                            duration: const Duration(milliseconds: 280),
                             child: !_isExpanded
                                 ? Text(
                                     key: const ValueKey('collapsed'),
@@ -2883,6 +2923,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
                                     ),
+                                    textAlign: TextAlign.start,
                                   )
                                 : (_shouldShowRefreshAnimation
                                     ? Row(
@@ -2928,32 +2969,25 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
                                                 if (etaRaw != null) {
                                                   try {
-                                                    final dt = DateTime.parse(etaRaw.toString()).toLocal();
-                                                    final now = DateTime.now();
-                                                    final diff = dt.difference(now);
+                                                        final dt = DateTime.parse(etaRaw.toString()).toLocal();
+                                                        final mins = dt.difference(DateTime.now()).inMinutes;
 
-                                                    if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
-                                                      etaText = widget.isEnglish ? 'Arriving' : '到達中';
-                                                      isNearlyArrived = true;
-                                                    } else if (diff.isNegative) {
-                                                      etaText = '-';
-                                                      isDeparted = true;
-                                                    } else {
-                                                      final mins = diff.inMinutes;
-                                                      if (mins < 1) {
-                                                        etaText = widget.isEnglish ? 'Due' : '即將抵達';
-                                                        isNearlyArrived = true;
-                                                      } else {
-                                                        etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
-                                                      }
-                                                    }
+                                                        if (mins < -1) {
+                                                          etaText = widget.isEnglish ? '- min' : '- 分鐘';
+                                                          isDeparted = true;
+                                                        } else if (mins < 1) {
+                                                          etaText = widget.isEnglish ? 'Arriving' : '到達中';
+                                                          isNearlyArrived = true;
+                                                        } else {
+                                                          etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
+                                                        }
                                                   } catch (_) {}
                                                 }
 
                                                 yield Padding(
                                                   padding: const EdgeInsets.only(right: 16.0),
                                                   child: Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    crossAxisAlignment: CrossAxisAlignment.center,
                                                     children: [
                                                       Text(
                                                         etaText,
@@ -3012,8 +3046,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
               // Action Buttons (Expanded State)
               AnimatedSize(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutCubic,
                 child: _isExpanded
                     ? Container(
                         decoration: BoxDecoration(
@@ -3214,12 +3248,15 @@ class RouteDestinationWidget extends StatefulWidget {
   final String route;
   final String? direction;
   final String? serviceType;
+  /// Optional pre-fetched route data from parent to avoid duplicate API calls
+  final Map<String, dynamic>? cachedRouteData;
 
   const RouteDestinationWidget({
     Key? key,
     required this.route,
     this.direction,
     this.serviceType,
+    this.cachedRouteData,
   }) : super(key: key);
 
   @override
@@ -3236,7 +3273,20 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   @override
   void initState() {
     super.initState();
-    _fetchRouteData();
+    // Use cached data immediately if available (no API call needed)
+    if (widget.cachedRouteData != null) {
+      final data = widget.cachedRouteData!.containsKey('data')
+          ? (widget.cachedRouteData!['data'] as Map<String, dynamic>?)
+          : widget.cachedRouteData!;
+      if (data != null) {
+        _routeData = data;
+        _loading = false;
+      }
+    }
+    // Only fetch if no cached data
+    if (_routeData == null) {
+      _fetchRouteData();
+    }
     _startAutoRefresh();
   }
 
@@ -3248,12 +3298,10 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   }
 
   void _startAutoRefresh() {
-    // Refresh route data every 60 seconds (less frequent than ETAs since route info changes rarely)
-    _refreshTimer = Timer.periodic(Duration(seconds: 60), (timer) {
-      if (mounted) {
-        _fetchRouteData(silent: true);
-      }
-    });
+    // Route destination info is static - no need to refresh
+    // Only refresh if parent updates cachedRouteData prop
+    // This saves unnecessary API calls
+    _refreshTimer?.cancel();
   }
 
   void _startErrorRetry() {
@@ -3269,10 +3317,24 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   @override
   void didUpdateWidget(RouteDestinationWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Refetch if route parameters change
-    if (oldWidget.route != widget.route ||
+    // Use cached data if available (instant update, no API call)
+    if (widget.cachedRouteData != oldWidget.cachedRouteData && widget.cachedRouteData != null) {
+      final data = widget.cachedRouteData!.containsKey('data')
+          ? (widget.cachedRouteData!['data'] as Map<String, dynamic>?)
+          : widget.cachedRouteData!;
+      if (data != null) {
+        setState(() {
+          _routeData = data;
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
+    }
+    // Refetch only if route parameters change AND no cached data
+    if ((oldWidget.route != widget.route ||
         oldWidget.direction != widget.direction ||
-        oldWidget.serviceType != widget.serviceType) {
+        oldWidget.serviceType != widget.serviceType) && widget.cachedRouteData == null) {
       _refreshTimer?.cancel();
       _fetchRouteData();
       _startAutoRefresh();
@@ -3280,6 +3342,21 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   }
 
   Future<void> _fetchRouteData({bool silent = false}) async {
+    // Use cached data from parent if available (avoids duplicate API call)
+    if (widget.cachedRouteData != null) {
+      final data = widget.cachedRouteData!.containsKey('data')
+          ? (widget.cachedRouteData!['data'] as Map<String, dynamic>?)
+          : widget.cachedRouteData!;
+      if (data != null && mounted) {
+        setState(() {
+          _routeData = data;
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
+    }
+
     // Skip fetch if route is empty
     if (widget.route.isEmpty) {
       if (!silent) {
@@ -3365,14 +3442,14 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(18),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
             child: Container(
               height: 60,
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(18),
                 border: Border.all(
                   color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
                   width: 1.0,
@@ -3460,13 +3537,13 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
                 width: 1.0,
