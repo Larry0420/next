@@ -7,7 +7,31 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../kmb_route_status_page.dart';
-import '../main.dart' show LanguageProvider;
+import '../main.dart' show AccessibilityProvider, LanguageProvider;
+
+extension StringCasingExtension on String {
+  String toTitleCase() {
+    if (trim().isEmpty) {
+      return '';
+    }
+
+    // A RegExp pattern to check if the string starts with a letter or number
+    final alphaNumericStart = RegExp(r'^[a-zA-Z0-9]');
+
+    return replaceAll(RegExp(' +'), ' ')
+        .split(' ')
+        .map((str) {
+          // If the word does NOT start with a letter/number (e.g., starts with '('), return it as is.
+          if (!alphaNumericStart.hasMatch(str)) {
+            return str;
+          }
+          // Otherwise, apply the title-casing logic
+          return '${str[0].toUpperCase()}${str.substring(1).toLowerCase()}';
+        })
+        .join(' ');
+  }
+}
+
 
 class KmbNearbyPage extends StatefulWidget {
   const KmbNearbyPage({Key? key}) : super(key: key);
@@ -216,15 +240,22 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
   }
 
-  String _fmtDistance(double meters) {
-    if (meters < 1000) return '${meters.toStringAsFixed(0)} m';
+  String _fmtDistance(double meters, {LanguageProvider? langProv}) {
+    if (meters < 1000) return (langProv?.isEnglish ?? false ? '${meters.toStringAsFixed(0)} m' : '${meters.toStringAsFixed(0)} 米');
     return '${(meters / 1000).toStringAsFixed(2)} km';
   }
 
-  Widget _buildRangeChip(String label, double meters, LanguageProvider langProv) {
+  Widget _buildRangeChip(String label, double meters, LanguageProvider langProv, AccessibilityProvider accProv) {
+    // Fetch scale factor
+    final double textScale = accProv.textScale;
     final isSelected = _rangeMeters == meters;
     return FilterChip(
-      label: Text(label),
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12 * textScale,
+        ),
+      ),
       selected: isSelected,
       onSelected: (selected) {
         if (selected) {
@@ -234,18 +265,22 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           _init(); // Re-fetch with new range
         }
       },
-      selectedColor: Theme.of(context).colorScheme.primaryContainer,
+      selectedColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
       checkmarkColor: Theme.of(context).colorScheme.primary,
     );
   }
 
-  Widget _buildCustomRangeChip(LanguageProvider langProv) {
-    final isCustom = ![100.0, 200.0, 400.0].contains(_rangeMeters);
+  Widget _buildCustomRangeChip(LanguageProvider langProv, AccessibilityProvider accProv) {
+    final double textScale = accProv.textScale;
+    final isCustom = ![100.0, 150.0, 200.0, 400.0].contains(_rangeMeters);
     return FilterChip(
       label: Text(
         isCustom 
-          ? '${_rangeMeters.toInt()}m'
+          ? '${_rangeMeters.toInt()}'
           : (langProv.isEnglish ? 'Custom' : '自訂')
+      ),
+      labelStyle: TextStyle(
+        fontSize: 12 * textScale,
       ),
       selected: isCustom,
       onSelected: (selected) {
@@ -253,8 +288,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           _showCustomRangeDialog(langProv);
         }
       },
-      selectedColor: Theme.of(context).colorScheme.secondaryContainer,
-      checkmarkColor: Theme.of(context).colorScheme.secondary,
+      selectedColor: Theme.of(context).colorScheme.primaryContainer,
+      checkmarkColor: Theme.of(context).colorScheme.primary,
     );
   }
 
@@ -277,7 +312,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           decoration: InputDecoration(
             labelText: langProv.isEnglish ? 'Range (meters)' : '範圍（米）',
             hintText: '100',
-            suffixText: 'm',
+            suffixText: langProv.isEnglish ? 'm' : '米',
           ),
         ),
         actions: [
@@ -338,9 +373,10 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     // Range selector
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      // 1. Reduce Padding for the container
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Reduced from 16/8
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.2),
                         border: Border(
                           bottom: BorderSide(
                             color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
@@ -350,27 +386,51 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.straighten, size: 18),
-                          SizedBox(width: 8),
+                          // 2. Smaller Icon
+                          Icon(
+                            Icons.straighten, 
+                            size: 16, 
+                            color: Theme.of(context).colorScheme.primary
+                            ), // Reduced from 18
+                          SizedBox(width: 6), // Reduced from 8
+                          
+                          // 3. Smaller Label Text
                           Text(
-                            langProv.isEnglish ? 'Range:' : '範圍:',
-                            style: TextStyle(fontWeight: FontWeight.w500),
+                            langProv.isEnglish ? 'Range(m)' : '範圍(米)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 11, // Explicitly set smaller font size
+                            ),
                           ),
-                          SizedBox(width: 12),
+                          SizedBox(width: 8), // Reduced from 12
+                          
                           Expanded(
                             child: SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
                               child: Row(
                                 children: [
-                                  _buildRangeChip('100m', 100, langProv),
-                                  SizedBox(width: 8),
-                                  _buildRangeChip('150m', 150, langProv),
-                                  SizedBox(width: 8),
-                                  _buildRangeChip('200m', 200, langProv),
-                                  SizedBox(width: 8),
-                                  _buildRangeChip('400m', 400, langProv),
-                                  SizedBox(width: 8),
-                                  _buildCustomRangeChip(langProv),
+                                  // 4. Chips (Your existing methods already use small font size '8')
+                                  // Ensure the chips themselves are compact:
+                                  Theme(
+                                    data: Theme.of(context).copyWith(
+                                      // Force material chips to be denser/smaller
+                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, 
+                                      visualDensity: VisualDensity.compact, 
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        _buildRangeChip('100', 100, langProv, context.read<AccessibilityProvider>()),
+                                        SizedBox(width: 4), // Reduced spacing between chips
+                                        _buildRangeChip('150', 150, langProv, context.read<AccessibilityProvider>()),
+                                        SizedBox(width: 4),
+                                        _buildRangeChip('200', 200, langProv, context.read<AccessibilityProvider>()),
+                                        SizedBox(width: 4),
+                                        _buildRangeChip('400', 400, langProv, context.read<AccessibilityProvider>()),
+                                        SizedBox(width: 4),
+                                        _buildCustomRangeChip(langProv, context.read<AccessibilityProvider>()),
+                                      ],
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -378,12 +438,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                         ],
                       ),
                     ),
+
                     // Location header
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      // 1. Reduced Padding (was 16/12)
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                        color: Theme.of(context).colorScheme.surface.withOpacity(0.5),
                         border: Border(
                           bottom: BorderSide(
                             color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
@@ -393,12 +455,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       ),
                       child: Row(
                         children: [
+                          // 2. Reduced Icon Size (was 20)
                           Icon(
                             Icons.my_location,
-                            size: 20,
+                            size: 16, 
                             color: Theme.of(context).colorScheme.primary,
                           ),
-                          SizedBox(width: 8),
+                          // 3. Reduced Spacing (was 8)
+                          SizedBox(width: 8), 
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,21 +471,26 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                   crossAxisAlignment: CrossAxisAlignment.baseline,
                                   textBaseline: TextBaseline.alphabetic,
                                   children: [
-                                      Text(
-                                        (langProv.isEnglish ? 'Current Location' : '目前位置'),
-                                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                        ),
+                                    Text(
+                                      (langProv.isEnglish ? 'Current Location' : '目前位置'),
+                                      // 4. Explicitly smaller font (was labelMedium)
+                                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        fontWeight: FontWeight.w600, // Added weight for readability at small size
+                                        fontSize: 11, // Force specific size if needed
                                       ),
-                                      SizedBox(width: 8),
-                                      Text(
-                                        '${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}',
-                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
-                                          fontFeatures: [FontFeature.tabularFigures()],
-                                        ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      '${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}',
+                                      // 5. Explicitly smaller font (was labelSmall)
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                        fontSize: 10, // Even smaller for coordinates
+                                        fontFeatures: [FontFeature.tabularFigures()],
                                       ),
-                                    ],
+                                    ),
+                                  ],
                                 )
                               ],
                             ),
@@ -460,7 +529,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
     final displayName = langProv.isEnglish
         ? ((nameEn?.toString().isNotEmpty ?? false) ? nameEn.toString() : (nameTc?.toString().isNotEmpty ?? false ? nameTc.toString() : s.stopId))
-        : ((nameTc?.toString().isNotEmpty ?? false) ? nameTc.toString() : (nameEn?.toString().isNotEmpty ?? false ? nameEn.toString() : s.stopId));
+        : ((nameTc?.toString().isNotEmpty ?? false) ? nameTc.toString() : (nameEn?.toString().isNotEmpty ?? false ? nameEn.toString().toTitleCase() : s.stopId));
     
     // Get ETAs for this stop
     final etas = _stopEtaCache[s.stopId] ?? [];
@@ -499,7 +568,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     width: 28,
                     height: 28,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
+                      color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.54),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Center(
@@ -521,7 +590,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         AutoSizeText(
-                          displayName,
+                          displayName.toTitleCase(),
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -540,7 +609,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                               _fmtDistance(s.distanceMeters),
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Theme.of(context).colorScheme.secondary,
+                                color: Theme.of(context).colorScheme.onSecondaryContainer.withOpacity(0.7),
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -714,9 +783,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
     
     showDialog(
+      fullscreenDialog: false,
+      useSafeArea: true,
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(displayName,
+        title: Text( langProv.isEnglish ? 'KMB - ${displayName.toTitleCase()}' : '九巴 - ${displayName.toTitleCase()}',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 16,
@@ -733,7 +804,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               */
               
               Text(langProv.isEnglish ? 'Distance: ${_fmtDistance(stop.distanceMeters)}' : '距離: ${_fmtDistance(stop.distanceMeters)}', style: TextStyle(fontSize: 12)),
-              Text('Lat: ${stop.lat.toStringAsFixed(6)}, Lng: ${stop.lng.toStringAsFixed(6)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
+              //Text('Lat: ${stop.lat.toStringAsFixed(6)}, Lng: ${stop.lng.toStringAsFixed(6)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
               SizedBox(height: 12),
               if (etasByRoute.isEmpty)
                 Text(langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次', style: TextStyle(color: Colors.grey))

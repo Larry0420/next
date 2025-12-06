@@ -3717,7 +3717,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                         child: Icon(
                           Icons.autorenew_rounded,
                           size: 15 * accessibility.iconScale,
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(active ? 0.9 : 0.6),
                         ),
                       ),
                       const SizedBox(width: 5),

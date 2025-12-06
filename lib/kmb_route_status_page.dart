@@ -262,67 +262,62 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   /// Return a compact relative + absolute ETA string suitable for quick glance.
   /// Examples: "5 min (19:56)", "Due (19:56)", "Departed".
+    /// Return a compact relative + absolute ETA string suitable for quick glance.
+  /// Examples: "5 min (19:56)", "Due (19:56)", "Departed".
   String _formatEtaWithRelative(BuildContext context, dynamic raw) {
     if (raw == null) return '—';
     try {
+      final isEnglish = context.read<LanguageProvider>().isEnglish;
       final dt = DateTime.parse(raw.toString()).toLocal();
       final now = DateTime.now();
       final diff = dt.difference(now);
+      final absSeconds = diff.inSeconds.abs();
+
       String relative;
-      if (diff.inSeconds.abs() < 30) {
-        relative = 'Due';
+
+      // "Due" window: within 45 seconds either side (slightly relaxed from 30s)
+      if (absSeconds < 45) {
+        relative = isEnglish ? 'Due' : '即將到達';
       } else if (diff.isNegative) {
+        // Past
         final mins = diff.abs().inMinutes;
         if (mins < 1) {
-          relative = 'Departed';
+          // Between 45s and 60s ago
+          relative = isEnglish ? 'Departed' : '已離開';
         } else if (mins < 60) {
-          relative = '${mins} min ago';
+          relative = isEnglish ? '$mins min ago' : '$mins分鐘前';
         } else {
           final h = diff.abs().inHours;
           final m = diff.abs().inMinutes % 60;
-          relative = '${h}h${m > 0 ? ' ${m}m' : ''} ago';
+          relative = isEnglish
+              ? '${h}h${m > 0 ? ' ${m}m' : ''} ago'
+              : '$h小時${m > 0 ? '$m分' : ''}前';
         }
       } else {
+        // Future
         final mins = diff.inMinutes;
         if (mins < 1) {
-          relative = 'Due';
+          // Between 45s and 60s future
+          relative = isEnglish ? 'Due' : '即將到達';
         } else if (mins < 60) {
-          relative = '${mins} min';
+          relative = isEnglish ? '$mins min' : '$mins分鐘';
         } else {
           final h = diff.inHours;
           final m = diff.inMinutes % 60;
-          relative = '${h}h${m > 0 ? ' ${m}m' : ''}';
+          relative = isEnglish
+              ? '${h}h${m > 0 ? ' ${m}m' : ''}'
+              : '$h小時${m > 0 ? '$m分' : ''}';
         }
       }
+
       final abs = _formatEta(context, raw);
-      // If relative is 'Departed' with no extra info, show just that.
-      if (relative == 'Departed') return 'Departed ($abs)';
+      // Simplify output if it just says "Departed" to avoid redundancy like "Departed (10:00)" if preferred, 
+      // but keeping absolute time is usually helpful for context.
       return '$relative ($abs)';
     } catch (_) {
       return raw?.toString() ?? '—';
     }
   }
-
-  /// Get color for ETA based on time remaining
-  Color _getEtaColor(dynamic raw) {
-    final cs = Theme.of(context).colorScheme;
-    // neutral / fallback tone
-    if (raw == null) return cs.onSurface.withOpacity(0.6);
-    try {
-      final dt = DateTime.parse(raw.toString()).toLocal();
-      final now = DateTime.now();
-      final diff = dt.difference(now);
-      
-      if (diff.isNegative) return cs.onSurface.withOpacity(0.6); // Departed
-      if (diff.inMinutes <= 2) return cs.error; // Due soon
-      if (diff.inMinutes <= 5) return cs.tertiary; // Coming soon
-      if (diff.inMinutes <= 10) return cs.primary; // On time
-      return cs.secondary; // Later
-    } catch (_) {
-      return Theme.of(context).colorScheme.onSurface.withOpacity(0.8);
-    }
-  }
-
 
   bool _combinedLoading = false;
   String? _combinedError;
@@ -1287,9 +1282,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           final eta = _fmtEta(etaRaw);
           final dest = r['desten'] ?? r['desttc'] ?? r['dest'] ?? '';
           final remark = r['rmken'] ?? r['rmktc'] ?? r['rmk'] ?? '';
+          final etatime = r['eta_time'] != null ? 'time: ${r['eta_time']}' : '';
           return ListTile(
             title: Text('ETA #$etaseq · $dest'),
-            subtitle: Text('eta: $eta\n$remark'),
+            subtitle: Text('eta: $eta\n$remark\n$etatime'),
           );
         }).toList(),
       );
@@ -1624,9 +1620,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           final eta = _formatEtaWithRelative(context, entry['eta'] ?? entry['eta_time'] ?? null);
           final dest = entry['desten'] ?? entry['desttc'] ?? '';
           final remark = entry['rmken'] ?? entry['rmktc'] ?? '';
+          final etatime = entry['eta_time'] != null ? 'time: ${entry['eta_time']}' : '';
           return ListTile(
             title: Text('ETA #$etaseq · $dest'),
-            subtitle: Text('eta: $eta\n$remark'),
+            subtitle: Text('eta: $eta\n$remark\n$etatime'),
           );
         }).toList(),
       );
@@ -1696,7 +1693,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       
       // Scroll to nearest stop with context-aware ensureVisible (works for ListView or SingleChildScrollView)
       if (nearestIndex >= 0) {
-        await Future.delayed(Duration(milliseconds: 300)); // Wait for list to build
+        //await Future.delayed(Duration(milliseconds: 50)); // Wait for list to build
         try {
           final seqStr = stops[nearestIndex]['seq']?.toString() ?? '';
           final key = _stopKeys[seqStr];
@@ -2984,6 +2981,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
                                                 if (etaRaw != null) {
                                                   try {
+                                                        //Output: ETA Results
                                                         final dt = DateTime.parse(etaRaw.toString()).toLocal();
                                                         final mins = dt.difference(DateTime.now()).inMinutes;
 
@@ -3009,8 +3007,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                                         style: theme.textTheme.titleLarge?.copyWith(
                                                           fontWeight: FontWeight.bold,
                                                           color: isDeparted 
-                                                              ? colorScheme.onSurface.withOpacity(0.8)
-                                                              : (isNearlyArrived ? colorScheme.primary : colorScheme.onSurface),
+                                                              ? colorScheme.onSurface.withOpacity(0.6)
+                                                              : (isNearlyArrived ? colorScheme.secondary : colorScheme.primary),
                                                           fontSize: 20,
                                                         ),
                                                       ),
@@ -3249,9 +3247,10 @@ class _StopEtaTileState extends State<StopEtaTile> {
         final eta = _formatEtaLocal(e['eta'] ?? null);
         final dest = e['desten'] ?? e['desttc'] ?? '';
         final remark = e['rmken'] ?? e['rmktc'] ?? '';
+        final etatime = e['eta_time'] != null ? 'time: ${e['eta_time']}' : '';
         return ListTile(
           title: Text('$route → $dest'),
-          subtitle: Text('eta: $eta\n$remark'),
+          subtitle: Text('eta: $eta\n$remark\n$etatime'),
         );
       }).toList(),
     );
