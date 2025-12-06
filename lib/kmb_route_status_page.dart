@@ -319,7 +319,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       if (diff.inMinutes <= 10) return cs.primary; // On time
       return cs.secondary; // Later
     } catch (_) {
-      return Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
+      return Theme.of(context).colorScheme.onSurface.withOpacity(0.8);
     }
   }
 
@@ -759,10 +759,17 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                               child: Row(
                                 children: _directions.map((d) {
                                   final isSelected = _selectedDirection == d;
-                                  final isOutbound = d.toUpperCase().startsWith('O');
-                                  final dirLabel = isOutbound 
-                                    ? (isEnglish ? 'Outbound' : '去程')
-                                    : (isEnglish ? 'Inbound' : '回程');
+                                  final dUpper = d.toUpperCase();
+                                  final isOutbound = dUpper.startsWith('O');
+                                  final isInbound = dUpper.startsWith('I');
+                                  final isSpecial = !isOutbound && !isInbound;
+
+                                  // Direction label: show actual code for special services
+                                  final dirLabel = isSpecial
+                                    ? (isEnglish ? 'Direction $d' : '方向 $d')
+                                    : isOutbound 
+                                        ? (isEnglish ? 'Outbound' : '去程')
+                                        : (isEnglish ? 'Inbound' : '回程');
                                   
                                   return Padding(
                                     padding: EdgeInsets.only(right: UIConstants.spacingS),
@@ -773,23 +780,31 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Icon(
-                                              isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
+                                              isSpecial
+                                                  ? Icons.alt_route
+                                                  : (isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left),
                                               size: 16,
                                               color: isSelected 
                                                 ? theme.colorScheme.onPrimary
-                                                : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
+                                                : isSpecial
+                                                    ? theme.colorScheme.secondary
+                                                    : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
                                             ),
                                             SizedBox(width: 6),
                                             Text(dirLabel),
                                           ],
                                         ),
                                         selected: isSelected,
-                                        selectedColor: isOutbound 
-                                          ? theme.colorScheme.primary.withOpacity(0.9)
-                                          : theme.colorScheme.tertiary.withOpacity(0.9),
-                                        backgroundColor: isOutbound
-                                          ? theme.colorScheme.primary.withOpacity(0.1)
-                                          : theme.colorScheme.tertiary.withOpacity(0.1),
+                                        selectedColor: isSpecial
+                                          ? theme.colorScheme.secondary.withOpacity(0.9)
+                                          : isOutbound 
+                                              ? theme.colorScheme.primary.withOpacity(0.9)
+                                              : theme.colorScheme.tertiary.withOpacity(0.9),
+                                        backgroundColor: isSpecial
+                                          ? theme.colorScheme.secondary.withOpacity(0.1)
+                                          : isOutbound
+                                              ? theme.colorScheme.primary.withOpacity(0.1)
+                                              : theme.colorScheme.tertiary.withOpacity(0.1),
                                         checkmarkColor: theme.colorScheme.onPrimary,
                                         labelStyle: TextStyle(
                                           color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
@@ -1197,7 +1212,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
-                      bound == 'O' ? Icons.arrow_circle_right : Icons.arrow_circle_left,
+                      bound == 'O' ? Icons.arrow_circle_right : bound == 'I' ? Icons.arrow_circle_left : Icons.alt_route,
                       color: bound == 'O' ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.tertiary,
                       size: 20,
                     ),
@@ -1214,7 +1229,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                           style: TextStyle(
                             fontSize: 11, 
                             fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                           ),
                         ),
                         SizedBox(height: 2),
@@ -2836,7 +2851,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
       if (diff.inMinutes <= 10) return cs.primary;
       return cs.secondary;
     } catch (_) {
-      return Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
+      return Theme.of(context).colorScheme.onSurface.withOpacity(0.8);
     }
   }
 
@@ -2994,7 +3009,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                                         style: theme.textTheme.titleLarge?.copyWith(
                                                           fontWeight: FontWeight.bold,
                                                           color: isDeparted 
-                                                              ? colorScheme.onSurface.withOpacity(0.38)
+                                                              ? colorScheme.onSurface.withOpacity(0.8)
                                                               : (isNearlyArrived ? colorScheme.primary : colorScheme.onSurface),
                                                           fontSize: 20,
                                                         ),
@@ -3580,7 +3595,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
