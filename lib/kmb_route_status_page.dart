@@ -83,7 +83,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   int _etaConsecutiveErrors = 0;
   // When false, page-level periodic ETA refresh is disabled and per-card fetching is used.
   // Set to true to re-enable the legacy page-level timer behavior.
-  bool _enablePageLevelEtaAutoRefresh = false;
+  final bool _enablePageLevelEtaAutoRefresh = false;
   
   // Method to jump to a specific location on the map with animated highlight
   void _jumpToMapLocation(double latitude, double longitude, {String? stopId}) {
@@ -508,7 +508,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             icon: Icon(_showMapView ? Icons.splitscreen : Icons.map),
             tooltip: _showMapView 
               ? (isEnglish ? 'Show list only' : '僅顯示列表')
-              : (isEnglish ? 'Show map + list' : '顯示地圖+列表'),
+              : (isEnglish ? 'Show map' : '顯示地圖'),
             onPressed: () {
               setState(() {
                 _showMapView = !_showMapView;
@@ -1267,7 +1267,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   final widgets = byStop.entries.map((entry) {
       final stopId = entry.key;
       final rows = entry.value;
-      rows.sort((a, b) => (int.tryParse(a['etaseq']?.toString() ?? '') ?? 0).compareTo(int.tryParse(b['etaseq']?.toString() ?? '') ?? 0));
+      rows.sort((a, b) => (int.tryParse((a['etaseq'] ?? a['eta_seq'])?.toString() ?? '') ?? 0).compareTo(int.tryParse((b['etaseq'] ?? b['eta_seq'])?.toString() ?? '') ?? 0));
       return ExpansionTile(
         title: FutureBuilder<Map<String, dynamic>?>(
           future: Kmb.getStopById(stopId),
@@ -1406,8 +1406,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       // Use toList() to avoid concurrent modification during iteration
       for (final k in etaBySeq.keys.toList()) {
         etaBySeq[k]!.sort((a, b) {
-          final ai = int.tryParse(a['eta_seq']?.toString() ?? '') ?? 0;
-          final bi = int.tryParse(b['eta_seq']?.toString() ?? '') ?? 0;
+          final ai = int.tryParse((a['eta_seq'] ?? a['etaseq'])?.toString() ?? '') ?? 0;
+          final bi = int.tryParse((b['eta_seq'] ?? b['etaseq'])?.toString() ?? '') ?? 0;
           return ai.compareTo(bi);
         });
       }
@@ -1420,11 +1420,16 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         _etaConsecutiveErrors = 0;
       });
     } catch (e) {
-      setState(() { _routeEtaError = e.toString(); });
+      // Only show error on non-silent fetches
+      if (!silent) {
+        setState(() { _routeEtaError = e.toString(); });
+      }
       // Increase error counter for backoff handling
       _etaConsecutiveErrors += 1;
     } finally {
-      setState(() { _routeEtaLoading = false; });
+      if (!silent) {
+        setState(() { _routeEtaLoading = false; });
+      }
       // Adjust timer with simple exponential backoff on errors
       _maybeAdjustEtaTimer();
     }
@@ -1608,8 +1613,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       final stopId = e.key;
       final entries = e.value;
       entries.sort((a, b) {
-        final ai = int.tryParse(a['etaseq']?.toString() ?? '') ?? 0;
-        final bi = int.tryParse(b['etaseq']?.toString() ?? '') ?? 0;
+        final ai = int.tryParse((a['etaseq'] ?? a['eta_seq'])?.toString() ?? '') ?? 0;
+        final bi = int.tryParse((b['etaseq'] ?? b['eta_seq'])?.toString() ?? '') ?? 0;
         return ai.compareTo(bi);
       });
 
@@ -2600,6 +2605,21 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   @override
   bool get wantKeepAlive => true; // Keep state alive during parent rebuilds
 
+  Timer? _clockTimer;  // 新增:用於更新相對時間顯示
+
+  // ✅ 新增：追蹤已開出 ETA 的時間戳
+  final Map<String, DateTime> _departedEtaTimestamps = {};
+  Timer? _etaCleanupTimer;
+
+  bool _departedRefetchScheduled = false;
+  Timer? _departedRefetchTimer;
+
+  // ✅ 新增：本地 ETA 資料（優先使用，如果為空則 fallback 到 widget.etas）
+  List<Map<String, dynamic>>? _localEtas;
+  
+  // 用於顯示的 ETAs（優先本地，沒有則用父層傳入的）
+  List<Map<String, dynamic>> get _displayEtas => _localEtas ?? widget.etas;
+
   @override
   void initState() {
     super.initState();
@@ -2621,12 +2641,33 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         });
       });
     }
+    _startEtaCleanupTimer();
   }
+
+  void _startEtaCleanupTimer() {
+    _etaCleanupTimer?.cancel();
+    _etaCleanupTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      
+      // 清理超過 10 秒的已開出記錄
+      final now = DateTime.now();
+      _departedEtaTimestamps.removeWhere((key, timestamp) {
+        return now.difference(timestamp).inSeconds >= 10;
+      });
+      
+      // 觸發重建以更新顯示
+      setState(() {});
+    });
+  }
+
 
   @override
   void dispose() {
+    _departedRefetchTimer?.cancel();
     // ensure auto-refresh timer stops
     _autoRefreshTimer?.cancel();
+    _clockTimer?.cancel();
+    _etaCleanupTimer?.cancel();
     super.dispose();
   }
 
@@ -2638,8 +2679,37 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     setState(() => _shouldShowRefreshAnimation = true);
     
     try {
-      // Fetch fresh ETAs for this stop
-      await Kmb.fetchStopEta(widget.stopId!);
+      // Fetch fresh ETAs for this stop from the API
+      final allStopEtas = await Kmb.fetchStopEta(widget.stopId!);
+      
+      // Filter ETAs to match current route, direction, and stop
+      final filteredEtas = allStopEtas.where((e) {
+        // Match route (case-insensitive)
+        final eRoute = e['route']?.toString().trim().toUpperCase() ?? '';
+        if (eRoute != widget.route.toUpperCase()) return false;
+        
+        // Match direction (first character only)
+        if (widget.direction != null && widget.direction!.isNotEmpty) {
+          final eDir = e['dir']?.toString().trim().toUpperCase() ?? '';
+          final dirChar = widget.direction!.trim().toUpperCase()[0];
+          if (eDir.isEmpty || eDir[0] != dirChar) return false;
+        }
+        
+        // Match service type if provided
+        if (widget.selectedServiceType != null) {
+          final eSvc = e['service_type']?.toString() ?? '';
+          if (eSvc != widget.selectedServiceType) return false;
+        }
+        
+        return true;
+      }).toList();
+      
+      // Update local state with filtered ETAs
+      if (mounted) {
+        setState(() {
+          _localEtas = filteredEtas;
+        });
+      }
       
       // Wait minimum animation duration for smooth visual feedback
       await Future.delayed(const Duration(milliseconds: 1500));
@@ -2671,7 +2741,38 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
     setState(() => _etaRefreshing = true);
     try {
-      await Kmb.fetchStopEta(widget.stopId!);
+      // Fetch fresh ETAs for this stop from the API
+      final allStopEtas = await Kmb.fetchStopEta(widget.stopId!);
+      
+      // Filter ETAs to match current route, direction, and stop
+      final filteredEtas = allStopEtas.where((e) {
+        // Match route (case-insensitive)
+        final eRoute = e['route']?.toString().trim().toUpperCase() ?? '';
+        if (eRoute != widget.route.toUpperCase()) return false;
+        
+        // Match direction (first character only)
+        if (widget.direction != null && widget.direction!.isNotEmpty) {
+          final eDir = e['dir']?.toString().trim().toUpperCase() ?? '';
+          final dirChar = widget.direction!.trim().toUpperCase()[0];
+          if (eDir.isEmpty || eDir[0] != dirChar) return false;
+        }
+        
+        // Match service type if provided
+        if (widget.selectedServiceType != null) {
+          final eSvc = e['service_type']?.toString() ?? '';
+          if (eSvc != widget.selectedServiceType) return false;
+        }
+        
+        return true;
+      }).toList();
+      
+      // Update local state with filtered ETAs
+      if (mounted) {
+        setState(() {
+          _localEtas = filteredEtas;
+        });
+      }
+      
       // Brief animation
       await Future.delayed(const Duration(milliseconds: 800));
     } catch (e) {
@@ -2756,6 +2857,24 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     if (wasExpanded && !_isExpanded) {
       _stopAutoRefreshTimer();
     }
+    // 展開時啟動時鐘計時器
+    _startClockTimer();
+    if (wasExpanded && !_isExpanded) {
+      _stopAutoRefreshTimer();
+      _stopClockTimer();  // 收起時停止時鐘計時器
+    }
+  }
+
+  void _startClockTimer() {
+  _clockTimer?.cancel();
+  _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    if (mounted) setState(() {});
+  });
+  }
+
+  void _stopClockTimer() {
+    _clockTimer?.cancel();
+    _clockTimer = null;
   }
 
   void _startAutoRefreshTimer({Duration? interval}) {
@@ -2773,7 +2892,36 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
       try {
         // Silent fetch - do not toggle manual spinner. We still want an initial visual
         // animation to indicate refresh-on-open; auto-refresh runs quietly in background.
-        await Kmb.fetchStopEta(widget.stopId!);
+        final allStopEtas = await Kmb.fetchStopEta(widget.stopId!);
+        
+        // Filter ETAs to match current route, direction, and stop
+        final filteredEtas = allStopEtas.where((e) {
+          // Match route (case-insensitive)
+          final eRoute = e['route']?.toString().trim().toUpperCase() ?? '';
+          if (eRoute != widget.route.toUpperCase()) return false;
+          
+          // Match direction (first character only)
+          if (widget.direction != null && widget.direction!.isNotEmpty) {
+            final eDir = e['dir']?.toString().trim().toUpperCase() ?? '';
+            final dirChar = widget.direction!.trim().toUpperCase()[0];
+            if (eDir.isEmpty || eDir[0] != dirChar) return false;
+          }
+          
+          // Match service type if provided
+          if (widget.selectedServiceType != null) {
+            final eSvc = e['service_type']?.toString() ?? '';
+            if (eSvc != widget.selectedServiceType) return false;
+          }
+          
+          return true;
+        }).toList();
+        
+        // Update local state with filtered ETAs
+        if (mounted) {
+          setState(() {
+            _localEtas = filteredEtas;
+          });
+        }
       } catch (_) {
         // ignore errors for auto refresh
       } finally {
@@ -2868,6 +3016,30 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
     final isActive = _isExpanded || widget.isNearby;
 
+    final now = DateTime.now();
+    final hasDeparted = _displayEtas.any((e) {
+      final etaRaw = e['eta'] ?? e['eta_time'];
+      if (etaRaw == null) return false;
+      try {
+        final dt = DateTime.parse(etaRaw.toString()).toLocal();
+        final mins = dt.difference(now).inMinutes;
+        return mins < -1; // 對應你顯示 `- min` 的條件
+      } catch (_) {
+        return false;
+      }
+    });
+
+    // 在 build 末尾附近放這段（不影響 UI tree）
+    if (hasDeparted && !_departedRefetchScheduled && widget.stopId != null && widget.stopId!.isNotEmpty) {
+      _departedRefetchScheduled = true;
+      _departedRefetchTimer?.cancel();
+      _departedRefetchTimer = Timer(const Duration(seconds: 10), () {
+        if (!mounted) return;
+        _autoRefetchOnExpand(); // 內建的 per-stop 重新抓 ETA 方法
+        _departedRefetchScheduled = false;
+      });
+    }
+    
     // Android 16 / Material 3 Card Design
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
@@ -2959,7 +3131,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                           ),
                                         ],
                                       )
-                                    : (widget.etas.isEmpty
+                                    : (_displayEtas.isEmpty
                                         ? Text(
                                             key: const ValueKey('empty'),
                                             widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
@@ -2970,29 +3142,45 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                         : Row(
                                             key: const ValueKey('etas'),
                                             children: [
-                                              ...widget.etas.take(3).expand((e) sync* {
+                                              ..._displayEtas.take(3).expand((e) sync* {
                                                 final etaRaw = e['eta'] ?? e['eta_time'];
+                                                final stopSeq = e['seq'] as int? ?? 0;
                                                 final rmkEn = e['rmk_en']?.toString() ?? e['rmken']?.toString() ?? '';
                                                 final rmkTc = e['rmk_tc']?.toString() ?? e['rmktc']?.toString() ?? '';
+
 
                                                 String etaText = '—';
                                                 bool isDeparted = false;
                                                 bool isNearlyArrived = false;
+                                                String abs = '';
 
                                                 if (etaRaw != null) {
                                                   try {
                                                         //Output: ETA Results
                                                         final dt = DateTime.parse(etaRaw.toString()).toLocal();
-                                                        final mins = dt.difference(DateTime.now()).inMinutes;
+                                                        final diff = dt.difference(DateTime.now());
+                                                        final mins = diff.inMinutes;
+                                                        final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
+                                                        abs = use24 ? DateFormat.Hm().format(dt) : DateFormat.jm().format(dt);
 
-                                                        if (mins < -1) {
-                                                          etaText = widget.isEnglish ? '- min' : '- 分鐘';
-                                                          isDeparted = true;
-                                                        } else if (mins < 1) {
+                                                        if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
+                                                          // Within 0 to -60 seconds: arriving/about to arrive
                                                           etaText = widget.isEnglish ? 'Arriving' : '到達中';
                                                           isNearlyArrived = true;
+                                                        } else if (diff.isNegative) {
+                                                          // Past the ETA time: departed
+                                                          //etaText = widget.isEnglish ? 'Departed ($abs)' : '已開出 ($abs)';
+                                                          etaText = widget.isEnglish ? 'Departed' : '已開出';
+                                                          
+                                                          isDeparted = true;
                                                         } else {
-                                                          etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
+                                                          // Future time
+                                                          if (mins < 1) {
+                                                            etaText = widget.isEnglish ? 'Due' : '即將抵達';
+                                                            isNearlyArrived = true;
+                                                          } else {
+                                                            etaText = widget.isEnglish ? '$mins min' : '$mins分鐘';
+                                                          }
                                                         }
                                                   } catch (_) {}
                                                 }
@@ -3013,19 +3201,69 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                                         ),
                                                       ),
                                                       if ((widget.isEnglish ? rmkEn : rmkTc).isNotEmpty)
-                                                        Padding(
-                                                          padding: const EdgeInsets.only(top: 2.0),
-                                                          child: Text(
-                                                            widget.isEnglish ? rmkEn : rmkTc,
-                                                            style: theme.textTheme.labelSmall?.copyWith(
-                                                              color: colorScheme.onSurfaceVariant,
-                                                              fontSize: 10,
-                                                              height: 1.2,
-                                                            ),
-                                                            maxLines: 1,
-                                                            overflow: TextOverflow.ellipsis,
+                                                        Row(
+                                                          children: [
+                                                            const SizedBox(height: 4),
+                                                            /*Icon(
+                                                              Icons.info_outline,
+                                                              size: 12,
+                                                              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                                            ),*/
+                                                            const SizedBox(width: 4),
+                                                              Text(
+                                                                widget.isEnglish ? rmkEn : rmkTc,
+                                                                style: theme.textTheme.labelSmall?.copyWith(
+                                                                  color: colorScheme.onSurfaceVariant,
+                                                                  fontSize: 10,
+                                                                  height: 1.2,
+                                                                ),
+                                                                maxLines: 1,
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                              Text(
+                                                                ' ($abs)',
+                                                                style: theme.textTheme.labelSmall?.copyWith(
+                                                                  color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                                                  fontSize: 10,
+                                                                  height: 1.2,
+                                                                ),
+                                                                maxLines: 1,
+                                                                overflow: TextOverflow.ellipsis,
+                                                              )
+                                                            ],
+                                                        )
+                                                        else 
+                                                          Row(
+                                                          children: [
+                                                            const SizedBox(height: 4),
+                                                            /*Icon(
+                                                              Icons.info_outline,
+                                                              size: 12,
+                                                              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                                            ),*/
+                                                            const SizedBox(width: 4),
+                                                              Text(
+                                                                widget.isEnglish ? rmkEn : rmkTc,
+                                                                style: theme.textTheme.labelSmall?.copyWith(
+                                                                  color: colorScheme.onSurfaceVariant,
+                                                                  fontSize: 10,
+                                                                  height: 1.2,
+                                                                ),
+                                                                maxLines: 1,
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                              Text(
+                                                                widget.isEnglish ? 'Time $abs' : '時間 $abs',
+                                                                style: theme.textTheme.labelSmall?.copyWith(
+                                                                  color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                                                  fontSize: 10,
+                                                                  height: 1.2,
+                                                                ),
+                                                                maxLines: 1,
+                                                                overflow: TextOverflow.ellipsis,
+                                                              )
+                                                            ], //abs only if no remark on ETA
                                                           ),
-                                                        ),
                                                     ],
                                                   ),
                                                 );
