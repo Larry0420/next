@@ -95,6 +95,72 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     super.dispose();
   }
 
+  Future<bool> _showLocationRationaleDialog() async {
+    if (!mounted) return false;
+    
+    final langProv = context.read<LanguageProvider>();
+    final isEnglish = langProv.isEnglish;
+    
+    return await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(isEnglish ? 'Location Permission' : '位置權限'),
+        content: Text(
+          isEnglish
+              ? 'This app needs location access to show nearby stops and help you navigate.'
+              : '此應用程式需要位置權限以顯示附近站點並協助您導航。'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(isEnglish ? 'Cancel' : '取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(isEnglish ? 'Allow' : '允許'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  Future<bool> _showOpenSettingsDialog() async {
+    if (!mounted) return false;
+    
+    final langProv = context.read<LanguageProvider>();
+    final isEnglish = langProv.isEnglish;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    return await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(
+          isEnglish ? 'Location Permission Required' : '需要位置權限',
+          style: TextStyle(
+            color: isDarkMode ? Theme.of(context).colorScheme.primaryContainer : Colors.black,
+          ),
+        ),
+        content: Text(
+          isEnglish
+              ? 'Location permission is permanently denied. Please enable it in app settings.'
+              : '位置權限已永久拒絕。請在應用程式設定中啟用。'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(isEnglish ? 'Cancel' : '取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(isEnglish ? 'Open Settings' : '開啟設定'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
   Future<void> _init() async {
     setState(() {
       _loading = true;
@@ -102,22 +168,68 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       _nearby = [];
     });
 
-    // Get language preference early for error messages
+    // Get language preference early
     LanguageProvider? langProv;
     if (mounted) {
       langProv = context.read<LanguageProvider>();
     }
-
+  
     try {
-      // Request location permission using permission_handler for consistent UX
-      final status = await Permission.location.request();
-      if (!status.isGranted) {
-        setState(() {
-          _error = langProv?.isEnglish ?? true ? 'Location permission denied' : '位置權限被拒絕';
-          _loading = false;
-        });
+    var status = await Permission.location.status;
+    
+    // Show rationale dialog if permission denied but not permanently
+    if (status.isDenied) {
+      final shouldRequest = await _showLocationRationaleDialog();
+      if (!shouldRequest) {
+        if (mounted) {
+          setState(() {
+            _error = langProv?.isEnglish ?? true 
+                ? 'Location permission denied' 
+                : '位置權限被拒絕';
+            _loading = false;
+          });
+        }
         return;
       }
+      
+      // Request permission - this shows system popup
+      status = await Permission.location.request();
+    }
+    
+
+    // Handle permanently denied - direct to settings
+    if (status.isPermanentlyDenied) {
+      final shouldOpenSettings = await _showOpenSettingsDialog();
+      if (shouldOpenSettings) {
+        await openAppSettings();
+      }
+      if (mounted) {
+        setState(() {
+          _error = langProv?.isEnglish ?? true 
+              ? 'Location permission required' 
+              : '需要位置權限';
+          _loading = false;
+        });
+      }
+      return;
+    }
+    
+    // Still not granted after request
+    if (!status.isGranted) {
+      if (mounted) {
+        setState(() {
+          _error = langProv?.isEnglish ?? true 
+              ? 'Location permission denied' 
+              : '位置權限被拒絕';
+          _loading = false;
+        });
+      }
+      return;
+    }
+    
+
+
+    
 
       // Use Geolocator to obtain a position
       final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);

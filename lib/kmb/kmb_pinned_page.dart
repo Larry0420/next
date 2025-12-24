@@ -426,14 +426,40 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                       ],
                     ),
                   ),
-                  if (isPinned)
-                    Container(
-                      padding: EdgeInsets.all(6),
-                      decoration: BoxDecoration(color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5), borderRadius: BorderRadius.circular(8)),
-                      child: InkWell(onTap: onUnpin, child: Icon(Icons.push_pin, color: Theme.of(context).colorScheme.primary, size: 18)),
-                    )
-                  else
-                    Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4), size: 20),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    transitionBuilder: (child, animation) {
+                      return ScaleTransition(
+                        scale: animation,
+                        child: FadeTransition(
+                          opacity: animation,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: isPinned
+                        ? IconButton(
+                            key: const ValueKey('pinned'),
+                            onPressed: onUnpin,
+                            icon: const Icon(Icons.push_pin, size: 18),
+                            style: IconButton.styleFrom(
+                              backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                              foregroundColor: Theme.of(context).colorScheme.primary,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              //padding: const EdgeInsets.all(6),
+                              minimumSize: const Size(20, 20),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          )
+                        : Icon(
+                            key: const ValueKey('unpinned'),
+                            Icons.chevron_right,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
+                            size: 20,
+                          ),
+                  )
                 ],
               ),
             ),
@@ -699,9 +725,13 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                     else
                       SizedBox.shrink(),
                     SizedBox(width: 8),
-                    InkWell(
-                      onTap: widget.onUnpin,
-                      child: Padding(padding: const EdgeInsets.all(6.0), child: Icon(Icons.push_pin, size: 18, color: Theme.of(context).colorScheme.primary)),
+                    IconButton(
+                      onPressed: widget.onUnpin,
+                      icon: Icon(Icons.push_pin, size: 18),
+                      color: Theme.of(context).colorScheme.primary,
+                      padding: const EdgeInsets.all(6.0),
+                      constraints: const BoxConstraints(),
+                      iconSize: 18,
                     ),
                   ],
                 ),
