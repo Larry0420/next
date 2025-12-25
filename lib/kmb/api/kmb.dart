@@ -1401,6 +1401,10 @@ class Kmb {
       // Invalidate caches so next call will load the new files
       _routeStopsCache = null;
       _stopsCache = null;
+      _routeIndex = null;
+      _routeIndexAt = null;
+      _routesDetailsCache = null;
+      _routesDetailsCacheAt = null;
       return PrebuildResult(ok: true);
     } catch (e) {
       final errorMsg = e.toString();
@@ -1441,6 +1445,143 @@ class Kmb {
       try { stderr.writeln('copyBundledPrebuiltToDocuments error: $err'); } catch (_) {}
       return PrebuildResult(ok: false, error: err);
     }
+  }
+
+  // Preference keys for daily update tracking
+  static const String _lastPrebuiltUpdateKey = 'kmb_last_prebuilt_update';
+  static const String _lastPrebuiltUpdateAttemptKey = 'kmb_last_prebuilt_update_attempt';
+
+  /// Check if prebuilt data should be updated based on daily schedule.
+  /// Updates are checked after 05:00 AM daily (matching the API update schedule).
+  /// Returns true if an update was performed, false otherwise.
+  /// This method runs in the background and doesn't block the UI.
+  static Future<bool> checkAndUpdatePrebuiltDataDaily({bool force = false}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now();
+      
+      // Check if we should update (after 05:00 AM daily)
+      final todayFive = DateTime(now.year, now.month, now.day, 5);
+      
+      if (!force) {
+        // Check last update time
+        final lastUpdateStr = prefs.getString(_lastPrebuiltUpdateKey);
+        DateTime? lastUpdate;
+        if (lastUpdateStr != null) {
+          try {
+            lastUpdate = DateTime.parse(lastUpdateStr);
+          } catch (_) {
+            lastUpdate = null;
+          }
+        }
+        
+        // Check last attempt time to avoid too frequent attempts
+        final lastAttemptStr = prefs.getString(_lastPrebuiltUpdateAttemptKey);
+        DateTime? lastAttempt;
+        if (lastAttemptStr != null) {
+          try {
+            lastAttempt = DateTime.parse(lastAttemptStr);
+          } catch (_) {
+            lastAttempt = null;
+          }
+        }
+        
+        // Don't update if:
+        // 1. We already updated today after 05:00
+        // 2. We attempted to update in the last hour (to avoid repeated failures)
+        if (lastUpdate != null && lastUpdate.isAfter(todayFive)) {
+          return false; // Already updated today
+        }
+        
+        if (lastAttempt != null && now.difference(lastAttempt).inHours < 1) {
+          return false; // Attempted too recently
+        }
+        
+        // Only attempt update after 05:00 AM
+        if (now.isBefore(todayFive)) {
+          return false; // Too early in the day
+        }
+      }
+      
+      // Record attempt time
+      await prefs.setString(_lastPrebuiltUpdateAttemptKey, now.toIso8601String());
+      
+      // Attempt to update prebuilt data from API
+      print('🔄 Checking for daily KMB data update...');
+      final result = await writePrebuiltAssetsToDocuments(timeout: const Duration(seconds: 60));
+      
+      if (result.ok) {
+        // Update successful - record timestamp
+        await prefs.setString(_lastPrebuiltUpdateKey, now.toIso8601String());
+        print('✅ KMB prebuilt data updated successfully');
+        
+        // Also refresh route index cache
+        _routeIndex = null;
+        _routeIndexAt = null;
+        
+        return true;
+      } else {
+        print('⚠️ KMB prebuilt data update failed: ${result.error}');
+        return false;
+      }
+    } catch (e) {
+      print('❌ Error checking/updating KMB prebuilt data: $e');
+      return false;
+    }
+  }
+
+  /// Initialize and ensure prebuilt data is available.
+  /// This should be called at app startup to ensure data is ready.
+  /// It will:
+  /// 1. Check if app documents prebuilt data exists, if not copy from bundled assets
+  /// 2. Check if daily update is needed and perform it in background if needed
+  static Future<void> initializePrebuiltData({bool checkUpdate = true}) async {
+    try {
+      Directory docDir;
+      try {
+        docDir = await getApplicationDocumentsDirectory();
+      } catch (_) {
+        // Fallback for platforms where getApplicationDocumentsDirectory fails
+        return;
+      }
+      
+      final outDir = Directory('${docDir.path}/prebuilt');
+      final routeFile = File('${outDir.path}/kmb_route_stops.json');
+      final stopsFile = File('${outDir.path}/kmb_stops.json');
+      
+      // If prebuilt data doesn't exist in app documents, copy from bundled assets
+      if (!routeFile.existsSync() || !stopsFile.existsSync()) {
+        print('📦 Copying bundled prebuilt data to app documents...');
+        final copyResult = await copyBundledPrebuiltToDocuments();
+        if (!copyResult.ok) {
+          print('⚠️ Failed to copy bundled prebuilt data: ${copyResult.error}');
+        }
+      }
+      
+      // Check for daily update in background (non-blocking)
+      if (checkUpdate) {
+        // Run update check in background without blocking
+        checkAndUpdatePrebuiltDataDaily().catchError((e) {
+          print('Background update check failed: $e');
+          return false;
+        });
+      }
+    } catch (e) {
+      print('Error initializing prebuilt data: $e');
+    }
+  }
+
+  /// Get the last update timestamp for prebuilt data.
+  /// Returns null if never updated.
+  static Future<DateTime?> getLastPrebuiltUpdateTime() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastUpdateStr = prefs.getString(_lastPrebuiltUpdateKey);
+      if (lastUpdateStr != null) {
+        return DateTime.parse(lastUpdateStr);
+      }
+    } catch (_) {}
+    return null;
   }
 }
 

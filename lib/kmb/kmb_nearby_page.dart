@@ -978,12 +978,17 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       ),
                       onTap: () {
                         Navigator.of(context).pop();
-                        // Navigate to route status page
+                        // Get seq from first ETA entry for auto-expand
+                        final seq = routeEtas.first['seq']?.toString();
+                        final stopIdFromEta = routeEtas.first['stop']?.toString();
+                        // Navigate to route status page with auto-expand
                         Navigator.of(context).push(MaterialPageRoute(
                           builder: (_) => KmbRouteStatusPage(
                             route: route,
                             bound: bound.toString().isNotEmpty ? bound.toString().toUpperCase() : null,
                             serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
+                            autoExpandSeq: seq,
+                            autoExpandStopId: stopIdFromEta,
                           ),
                         ));
                       },

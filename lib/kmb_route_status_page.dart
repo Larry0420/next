@@ -16,18 +16,33 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class KmbRouteStatusPage extends StatefulWidget {
   final String route;
   final String? bound;
   final String? serviceType;
-  const KmbRouteStatusPage({Key? key, required this.route, this.bound, this.serviceType}) : super(key: key);
+  /// Optional stop ID to auto-expand when page loads
+  final String? autoExpandStopId;
+  /// Optional sequence number to auto-expand when page loads
+  final String? autoExpandSeq;
+  const KmbRouteStatusPage({
+    Key? key, 
+    required this.route, 
+    this.bound, 
+    this.serviceType,
+    this.autoExpandStopId,
+    this.autoExpandSeq,
+  }) : super(key: key);
 
   @override
   State<KmbRouteStatusPage> createState() => _KmbRouteStatusPageState();
 }
 
 class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
+  // Preference key for map view state
+  static const String _mapViewPreferenceKey = 'kmb_route_status_map_view_enabled';
+  
   Map<String, dynamic>? data;
   String? error;
   bool loading = false;
@@ -110,6 +125,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       setState(() {
         _showMapView = true;
       });
+      // Save preference when map is enabled
+      _saveMapViewPreference(true);
       // Wait for map to build, then move to location
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Future.delayed(const Duration(milliseconds: 300), () {
@@ -127,6 +144,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   @override
   void initState() {
     super.initState();
+    _loadMapViewPreference();
     _fetch();
     _addToHistory();
     _scrollController.addListener(_onScroll);
@@ -135,6 +153,31 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeStartEtaAutoRefresh();
     });
+  }
+  
+  /// Load saved map view preference from SharedPreferences
+  Future<void> _loadMapViewPreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedPreference = prefs.getBool(_mapViewPreferenceKey);
+      if (savedPreference != null && mounted) {
+        setState(() {
+          _showMapView = savedPreference;
+        });
+      }
+    } catch (_) {
+      // Silently fail - use default value
+    }
+  }
+  
+  /// Save map view preference to SharedPreferences
+  Future<void> _saveMapViewPreference(bool showMapView) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_mapViewPreferenceKey, showMapView);
+    } catch (_) {
+      // Silently fail
+    }
   }
   
   /// Initialize user location if permission is granted
@@ -511,9 +554,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               ? (isEnglish ? 'Show list only' : '僅顯示列表')
               : (isEnglish ? 'Show map' : '顯示地圖'),
             onPressed: () {
+              final newValue = !_showMapView;
               setState(() {
-                _showMapView = !_showMapView;
+                _showMapView = newValue;
               });
+              // Save preference for next time
+              _saveMapViewPreference(newValue);
             },
           ),
           // Location-based scroll button - available in both modes
@@ -661,21 +707,83 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         if (_routeDetails != null && devSettings.useFloatingRouteToggles)
           _buildRouteDetailsCard(),
         
-        // Show stop list or loading state
+        // Show stop list or loading state with smooth animations
         Expanded(
-          child: loading
-              ? const Center(child: CircularProgressIndicator())
-              : (error != null
-                  ? Center(child: Text('Error: $error', style: TextStyle(color: Theme.of(context).colorScheme.error)))
-                  : (data == null
-                      ? const Center(child: Text('No data'))
-                      : Column(
-                          children: [
-                            if (_combinedLoading) Padding(padding: UIConstants.cardPadding, child: const Center(child: CircularProgressIndicator())),
-                            if (_combinedError != null) Padding(padding: UIConstants.cardPadding, child: Text('Combined error: $_combinedError', style: TextStyle(color: Theme.of(context).colorScheme.error))),
-                            Expanded(child: _buildStructuredView()),
-                          ],
-                    ))),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+                    CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+                  ),
+                  child: child,
+                ),
+              );
+            },
+            child: loading
+                ? Center(
+                    key: const ValueKey('loading'),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3.0,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  )
+                : (error != null
+                    ? Center(
+                        key: const ValueKey('error'),
+                        child: Text(
+                          'Error: $error',
+                          style: TextStyle(color: Theme.of(context).colorScheme.error),
+                        ),
+                      )
+                    : (data == null
+                        ? Center(
+                            key: const ValueKey('no_data'),
+                            child: Text('No data'),
+                          )
+                        : Column(
+                            key: const ValueKey('content'),
+                            children: [
+                              if (_combinedLoading)
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 250),
+                                  child: Padding(
+                                    key: const ValueKey('combined_loading'),
+                                    padding: UIConstants.cardPadding,
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.5,
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          Theme.of(context).colorScheme.secondary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (_combinedError != null)
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 250),
+                                  child: Padding(
+                                    key: const ValueKey('combined_error'),
+                                    padding: UIConstants.cardPadding,
+                                    child: Text(
+                                      'Combined error: $_combinedError',
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.error,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              Expanded(child: _buildStructuredView()),
+                            ],
+                          ))),
+          ),
         ),
       ],
     );
@@ -1745,13 +1853,37 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     // Use cached ETA HashMap for O(1) lookup - no API call needed!
     final etaByStop = _etaBySeqCache ?? <String, List<Map<String, dynamic>>>{};
     
-    // Loading state
+    // Loading state with smooth animation
     if (_routeEtaLoading) {
-      return Card(
-        margin: const EdgeInsets.all(12),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Center(child: CircularProgressIndicator()),
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.9, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+              ),
+              child: child,
+            ),
+          );
+        },
+        child: Card(
+          key: const ValueKey('variant_loading'),
+          margin: const EdgeInsets.all(12),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 3.0,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+          ),
         ),
       );
     }
@@ -1911,13 +2043,37 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         // Cache is already filtered by direction and sorted in _fetchRouteEta
         final etaByStop = _etaBySeqCache ?? <String, List<Map<String, dynamic>>>{};
         
-        // Loading state
+        // Loading state with smooth animation
         if (_routeEtaLoading) {
-          return Card(
-            margin: const EdgeInsets.all(12),
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Center(child: CircularProgressIndicator()),
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.9, end: 1.0).animate(
+                    CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+                  ),
+                  child: child,
+                ),
+              );
+            },
+            child: Card(
+              key: const ValueKey('optimized_loading'),
+              margin: const EdgeInsets.all(12),
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3.0,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ),
             ),
           );
         }
@@ -2114,6 +2270,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       }
     }
     
+    // Check if this stop should be auto-expanded
+    final shouldAutoExpand = (widget.autoExpandSeq != null && seq == widget.autoExpandSeq) ||
+        (widget.autoExpandStopId != null && stopId == widget.autoExpandStopId);
+    
     return KeyedSubtree(
       key: _stopKeys.putIfAbsent(seq, () => GlobalKey()),
       child: ExpandableStopCard(
@@ -2133,6 +2293,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         destTc: destTc,
         direction: _selectedDirection,
         isNearby: isNearby,
+        autoExpand: shouldAutoExpand,
         onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
       ),
     );
@@ -2291,6 +2452,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                               setState(() {
                                 _showMapView = false;
                               });
+                              // Save preference when switching to list view
+                              _saveMapViewPreference(false);
                               // Optionally scroll to this stop
                             },
                           ),
@@ -2564,6 +2727,7 @@ class ExpandableStopCard extends StatefulWidget {
   final String? destTc;
   final String? direction;
   final bool isNearby;
+  final bool autoExpand;
   final void Function(double lat, double lng)? onJumpToMap;
 
   const ExpandableStopCard({
@@ -2583,6 +2747,7 @@ class ExpandableStopCard extends StatefulWidget {
     this.destTc,
     this.direction,
     this.isNearby = false,
+    this.autoExpand = false,
     this.onJumpToMap,
   }) : super(key: key);
 
@@ -2614,13 +2779,15 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   @override
   void initState() {
     super.initState();
-    if (widget.isNearby) {
+    if (widget.isNearby || widget.autoExpand) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         setState(() {
           _isExpanded = true;
           _autoRefreshEnabled = true;
-          _autoEnabledByNearby = true;
+          if (widget.isNearby) {
+            _autoEnabledByNearby = true;
+          }
         });
         _startAutoRefreshTimer();
         Future.delayed(const Duration(milliseconds: 100), scrollIntoView);
@@ -2751,6 +2918,19 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         });
       }
       if (!_autoRefreshEnabled) _stopAutoRefreshTimer();
+    }
+    
+    // Handle auto-expand when widget updates (e.g., data loads)
+    if (!oldWidget.autoExpand && widget.autoExpand && !_isExpanded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _isExpanded = true;
+          _autoRefreshEnabled = true;
+        });
+        _startAutoRefreshTimer();
+        Future.delayed(const Duration(milliseconds: 100), scrollIntoView);
+      });
     }
   }
 
@@ -3661,29 +3841,52 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
 
-    // Loading state
+    // Loading state with smooth animation
     if (_loading) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              height: 60,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
-                  width: 1.0,
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, -0.1),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+              child: child,
+            ),
+          );
+        },
+        child: Padding(
+          key: const ValueKey('route_dest_loading'),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                height: 60,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                    width: 1.0,
+                  ),
                 ),
-              ),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -3692,40 +3895,58 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
       );
     }
 
-    // Error state
+    // Error state with smooth animation
     if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Row(
-              children: [
-                Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Error loading route',
-                        style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12, fontWeight: FontWeight.w600),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Retrying in 5 seconds...',
-                        style: TextStyle(color: Theme.of(context).colorScheme.tertiary, fontSize: 11),
-                      ),
-                    ],
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, -0.1),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+              child: child,
+            ),
+          );
+        },
+        child: Padding(
+          key: ValueKey('route_dest_error_$_error'),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                children: [
+                  Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Error loading route',
+                          style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Retrying in 5 seconds...',
+                          style: TextStyle(color: Theme.of(context).colorScheme.tertiary, fontSize: 11),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: () => _fetchRouteData(silent: false),
-                  icon: Icon(Icons.refresh, size: 16),
-                  label: Text('Retry', style: TextStyle(fontSize: 11)),
-                )
-              ],
+                  SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: () => _fetchRouteData(silent: false),
+                    icon: Icon(Icons.refresh, size: 16),
+                    label: Text('Retry', style: TextStyle(fontSize: 11)),
+                  )
+                ],
+              ),
             ),
           ),
         ),
@@ -3758,73 +3979,91 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
       dirColor = cs.tertiary;
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
-                width: 1.0,
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) {
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -0.1),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+            child: child,
+          ),
+        );
+      },
+      child: Padding(
+        key: ValueKey('route_dest_${widget.route}_${widget.direction}_${widget.serviceType}'),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                  width: 1.0,
+                ),
               ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
-                children: [
-                  // Direction icon
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: dirColor.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(
+                  children: [
+                    // Direction icon
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: dirColor.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        dirIcon,
+                        color: dirColor,
+                        size: 20,
+                      ),
                     ),
-                    child: Icon(
-                      dirIcon,
-                      color: dirColor,
-                      size: 20,
-                    ),
-                  ),
-                  SizedBox(width: 12),
+                    SizedBox(width: 12),
 
-                  // Route origin and destination
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (orig.isNotEmpty) ...[
-                          Text(
-                            '${isEnglish ? 'From' : '由'}: $orig',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                    // Route origin and destination
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (orig.isNotEmpty) ...[
+                            Text(
+                              '${isEnglish ? 'From' : '由'}: $orig',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            maxLines: 1,
+                            SizedBox(height: 2),
+                          ],
+                          Text(
+                            '${isEnglish ? 'To' : '往'}: $dest',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          SizedBox(height: 2),
                         ],
-                        Text(
-                          '${isEnglish ? 'To' : '往'}: $dest',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

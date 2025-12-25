@@ -689,7 +689,13 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => KmbRouteStatusPage(route: route, bound: widget.stop['direction'], serviceType: widget.stop['serviceType'])),
+                  MaterialPageRoute(builder: (context) => KmbRouteStatusPage(
+                    route: route, 
+                    bound: widget.stop['direction'], 
+                    serviceType: widget.stop['serviceType'],
+                    autoExpandSeq: widget.stop['seq']?.toString(),
+                    autoExpandStopId: widget.stop['stopId']?.toString(),
+                  )),
                 );
               },
               borderRadius: BorderRadius.circular(12),
@@ -760,7 +766,13 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => KmbRouteStatusPage(route: route, bound: widget.stop['direction'], serviceType: widget.stop['serviceType'])),
+                    MaterialPageRoute(builder: (context) => KmbRouteStatusPage(
+                      route: route, 
+                      bound: widget.stop['direction'], 
+                      serviceType: widget.stop['serviceType'],
+                      autoExpandSeq: widget.stop['seq']?.toString(),
+                      autoExpandStopId: widget.stop['stopId']?.toString(),
+                    )),
                   );
                 },
                 borderRadius: BorderRadius.circular(14),

@@ -25,6 +25,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 //Tailor Made .dart imported
 import 'mtr/mtr_schedule_page.dart';
+import 'kmb/api/kmb.dart';
 import 'kmb/kmb_dialer.dart';
 import 'kmb/kmb_nearby_page.dart';
 import 'kmb/kmb_pinned_page.dart';
@@ -737,6 +738,12 @@ void main() async {
   
   // 測試API響應時間以優化自動刷新間隔
   await LrtApiService.testResponseTime();
+  
+  // 初始化 KMB 預構建數據（在背景執行，不阻塞應用啟動）
+  // 這會檢查並更新每日路線/站點數據
+  Kmb.initializePrebuiltData(checkUpdate: true).catchError((e) {
+    debugPrint('KMB prebuilt data initialization error: $e');
+  });
   
   runApp(const LrtApp());
 }
