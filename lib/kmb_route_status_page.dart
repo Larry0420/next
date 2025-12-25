@@ -38,7 +38,7 @@ class KmbRouteStatusPage extends StatefulWidget {
   @override
   State<KmbRouteStatusPage> createState() => _KmbRouteStatusPageState();
 }
-
+String? _autoExpandSeq;
 class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   // Preference key for map view state
   static const String _mapViewPreferenceKey = 'kmb_route_status_map_view_enabled';
@@ -222,23 +222,23 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
   
   void _onScroll() {
-    // Show/hide floating bar based on scroll direction
     if (_scrollController.hasClients) {
       final currentOffset = _scrollController.offset;
-      if (currentOffset > _lastScrollOffset && currentOffset > 100) {
-        // Scrolling down - hide bar
-        if (_showFloatingBar) {
-          setState(() => _showFloatingBar = false);
-        }
-      } else if (currentOffset < _lastScrollOffset) {
-        // Scrolling up - show bar
-        if (!_showFloatingBar) {
-          setState(() => _showFloatingBar = true);
-        }
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      
+      // 接近底部 100px 時隱藏
+      if (maxScroll - currentOffset < 100) {
+        if (_showFloatingBar) setState(() => _showFloatingBar = false);
       }
+      // 離開底部時顯示
+      else if (maxScroll - currentOffset > 150) {
+        if (!_showFloatingBar) setState(() => _showFloatingBar = true);
+      }
+      
       _lastScrollOffset = currentOffset;
     }
   }
+
 
   @override
   void dispose() {
@@ -808,196 +808,200 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     return AnimatedPositioned(
       duration: Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
-      bottom: _showFloatingBar ? 0 : -100,
+      
+      bottom: _showFloatingBar ? 0 : -200,
       left: 0,
       right: 0,
-      child: ClipRRect(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface.withOpacity(0.85),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              boxShadow: [
-                BoxShadow(
-                  color: theme.colorScheme.onSurface.withOpacity(0.2),
-                  blurRadius: 20,
-                  offset: Offset(0, -5),
-                ),
-              ],
-              border: Border(
-                top: BorderSide(
-                  color: theme.colorScheme.outline.withOpacity(0.3),
-                  width: 1,
+      child: IgnorePointer(  // ✅ 隱藏時阻止點擊
+        ignoring: !_showFloatingBar,
+        child: ClipRRect(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface.withOpacity(0.85),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.colorScheme.onSurface.withOpacity(0.2),
+                    blurRadius: 20,
+                    offset: Offset(0, -5),
+                  ),
+                ],
+                border: Border(
+                  top: BorderSide(
+                    color: theme.colorScheme.outline.withOpacity(0.3),
+                    width: 1,
+                  ),
                 ),
               ),
-            ),
-                  child: SafeArea(
-                    top: false,
-                    child: Padding(
-                      // Reduce vertical padding so floating toggle bar is more compact
-                      padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingL, vertical: UIConstants.spacingS),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Direction toggles
-                          if (_directions.isNotEmpty) ...[
-                            Row(
-                              children: [
-                                Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
-                                SizedBox(width: 8),
-                                Text(
-                                  isEnglish ? 'Direction' : '方向',
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
+                    child: SafeArea(
+                      top: false,
+                      child: Padding(
+                        // Reduce vertical padding so floating toggle bar is more compact
+                        padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingL, vertical: UIConstants.spacingS),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Direction toggles
+                            if (_directions.isNotEmpty) ...[
+                              Row(
+                                children: [
+                                  Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    isEnglish ? 'Direction' : '方向',
+                                    style: theme.textTheme.labelMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: theme.colorScheme.onSurface,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 8),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: _directions.map((d) {
-                                  final isSelected = _selectedDirection == d;
-                                  final dUpper = d.toUpperCase();
-                                  final isOutbound = dUpper.startsWith('O');
-                                  final isInbound = dUpper.startsWith('I');
-                                  final isSpecial = !isOutbound && !isInbound;
+                                ],
+                              ),
+                              SizedBox(height: 8),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: _directions.map((d) {
+                                    final isSelected = _selectedDirection == d;
+                                    final dUpper = d.toUpperCase();
+                                    final isOutbound = dUpper.startsWith('O');
+                                    final isInbound = dUpper.startsWith('I');
+                                    final isSpecial = !isOutbound && !isInbound;
 
-                                  // Direction label: show actual code for special services
-                                  final dirLabel = isSpecial
-                                    ? (isEnglish ? 'Direction $d' : '方向 $d')
-                                    : isOutbound 
-                                        ? (isEnglish ? 'Outbound' : '去程')
-                                        : (isEnglish ? 'Inbound' : '回程');
-                                  
-                                  return Padding(
-                                    padding: EdgeInsets.only(right: UIConstants.spacingS),
-                                    child: AnimatedContainer(
-                                      duration: Duration(milliseconds: 200),
-                                      child: FilterChip(
-                                        label: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              isSpecial
-                                                  ? Icons.alt_route
-                                                  : (isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left),
-                                              size: 16,
-                                              color: isSelected 
-                                                ? theme.colorScheme.onPrimary
-                                                : isSpecial
-                                                    ? theme.colorScheme.secondary
-                                                    : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
-                                            ),
-                                            SizedBox(width: 6),
-                                            Text(dirLabel),
-                                          ],
+                                    // Direction label: show actual code for special services
+                                    final dirLabel = isSpecial
+                                      ? (isEnglish ? 'Direction $d' : '方向 $d')
+                                      : isOutbound 
+                                          ? (isEnglish ? 'Outbound' : '去程')
+                                          : (isEnglish ? 'Inbound' : '回程');
+                                    
+                                    return Padding(
+                                      padding: EdgeInsets.only(right: UIConstants.spacingS),
+                                      child: AnimatedContainer(
+                                        duration: Duration(milliseconds: 200),
+                                        child: FilterChip(
+                                          label: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                isSpecial
+                                                    ? Icons.alt_route
+                                                    : (isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left),
+                                                size: 16,
+                                                color: isSelected 
+                                                  ? theme.colorScheme.onPrimary
+                                                  : isSpecial
+                                                      ? theme.colorScheme.secondary
+                                                      : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
+                                              ),
+                                              SizedBox(width: 6),
+                                              Text(dirLabel),
+                                            ],
+                                          ),
+                                          selected: isSelected,
+                                          selectedColor: isSpecial
+                                            ? theme.colorScheme.secondary.withOpacity(0.9)
+                                            : isOutbound 
+                                                ? theme.colorScheme.primary.withOpacity(0.9)
+                                                : theme.colorScheme.tertiary.withOpacity(0.9),
+                                          backgroundColor: isSpecial
+                                            ? theme.colorScheme.secondary.withOpacity(0.1)
+                                            : isOutbound
+                                                ? theme.colorScheme.primary.withOpacity(0.1)
+                                                : theme.colorScheme.tertiary.withOpacity(0.1),
+                                          checkmarkColor: theme.colorScheme.onPrimary,
+                                          labelStyle: TextStyle(
+                                            color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                          ),
+                                          elevation: isSelected ? 4 : 0,
+                                          pressElevation: 2,
+                                          onSelected: (selected) {
+                                            if (selected) {
+                                              setState(() {
+                                                _selectedDirection = d;
+                                              });
+                                              _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
+                                              _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
+                                              _restartEtaAutoRefresh();
+                                            }
+                                          },
                                         ),
-                                        selected: isSelected,
-                                        selectedColor: isSpecial
-                                          ? theme.colorScheme.secondary.withOpacity(0.9)
-                                          : isOutbound 
-                                              ? theme.colorScheme.primary.withOpacity(0.9)
-                                              : theme.colorScheme.tertiary.withOpacity(0.9),
-                                        backgroundColor: isSpecial
-                                          ? theme.colorScheme.secondary.withOpacity(0.1)
-                                          : isOutbound
-                                              ? theme.colorScheme.primary.withOpacity(0.1)
-                                              : theme.colorScheme.tertiary.withOpacity(0.1),
-                                        checkmarkColor: theme.colorScheme.onPrimary,
-                                        labelStyle: TextStyle(
-                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                        ),
-                                        elevation: isSelected ? 4 : 0,
-                                        pressElevation: 2,
-                                        onSelected: (selected) {
-                                          if (selected) {
-                                            setState(() {
-                                              _selectedDirection = d;
-                                            });
-                                            _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
-                                            _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
-                                            _restartEtaAutoRefresh();
-                                          }
-                                        },
                                       ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ],
-                          
-                          // Service type toggles
-                          if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
-                            if (_directions.isNotEmpty) SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
-                                SizedBox(width: 8),
-                                Text(
-                                  isEnglish ? 'Service Type' : '班次類型',
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
+                                    );
+                                  }).toList(),
                                 ),
-                              ],
-                            ),
-                            SizedBox(height: 8),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: (_serviceTypes..sort()).map((st) {
-                                  final isSelected = _selectedServiceType == st;
-                                  final typeLabel = st == '1'
-                                      ? (isEnglish ? 'Normal Service' : '常規班次')
-                                      : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
-                                  
-                                  return Padding(
-                                    padding: EdgeInsets.only(right: UIConstants.spacingS),
-                                    child: AnimatedContainer(
-                                      duration: Duration(milliseconds: 200),
-                                      child: FilterChip(
-                                        label: Text(typeLabel),
-                                        selected: isSelected,
-                                        selectedColor: theme.colorScheme.primary,
-                                        backgroundColor: theme.colorScheme.surfaceVariant,
-                                        checkmarkColor: theme.colorScheme.onPrimary,
-                                        labelStyle: TextStyle(
-                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                        ),
-                                        elevation: isSelected ? 4 : 0,
-                                        pressElevation: 2,
-                                        onSelected: (selected) {
-                                          if (selected) {
-                                            setState(() => _selectedServiceType = st);
-                                            _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
-                                            _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
-                                            _restartEtaAutoRefresh();
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
                               ),
-                            ),
+                            ],
+                            
+                            // Service type toggles
+                            if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
+                              if (_directions.isNotEmpty) SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    isEnglish ? 'Service Type' : '班次類型',
+                                    style: theme.textTheme.labelMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: theme.colorScheme.onSurface,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 8),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: (_serviceTypes..sort()).map((st) {
+                                    final isSelected = _selectedServiceType == st;
+                                    final typeLabel = st == '1'
+                                        ? (isEnglish ? 'Normal Service' : '常規班次')
+                                        : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
+                                    
+                                    return Padding(
+                                      padding: EdgeInsets.only(right: UIConstants.spacingS),
+                                      child: AnimatedContainer(
+                                        duration: Duration(milliseconds: 200),
+                                        child: FilterChip(
+                                          label: Text(typeLabel),
+                                          selected: isSelected,
+                                          selectedColor: theme.colorScheme.primary,
+                                          backgroundColor: theme.colorScheme.surfaceVariant,
+                                          checkmarkColor: theme.colorScheme.onPrimary,
+                                          labelStyle: TextStyle(
+                                            color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                          ),
+                                          elevation: isSelected ? 4 : 0,
+                                          pressElevation: 2,
+                                          onSelected: (selected) {
+                                            if (selected) {
+                                              setState(() => _selectedServiceType = st);
+                                              _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
+                                              _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
+                                              _restartEtaAutoRefresh();
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
-                  ),
+              ),
             ),
           ),
-        ),
+      )
     );
   }
 
@@ -1462,7 +1466,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       setState(() {
         _directions = variants['directions'] ?? [];
         _serviceTypes = variants['serviceTypes'] ?? [];
-        _selectedDirection = initialDirection != null && _directions.contains(initialDirection) ? initialDirection : (_directions.isNotEmpty ? _directions.first : null);
+        _selectedDirection = initialDirection != null && _directions.contains(initialDirection) ? initialDirection : (_directions.isNotEmpty ? (_directions.contains('O') ? 'O' : _directions.first) : null);
         _selectedServiceType = initialServiceType != null && _serviceTypes.contains(initialServiceType) ? initialServiceType : (_serviceTypes.isNotEmpty ? _serviceTypes.first : null);
       });
       if (_selectedServiceType != null) {
@@ -2274,9 +2278,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final shouldAutoExpand = (widget.autoExpandSeq != null && seq == widget.autoExpandSeq) ||
         (widget.autoExpandStopId != null && stopId == widget.autoExpandStopId);
     
-    return KeyedSubtree(
-      key: _stopKeys.putIfAbsent(seq, () => GlobalKey()),
-      child: ExpandableStopCard(
+    //return KeyedSubtree(
+      //key: _stopKeys.putIfAbsent(seq, () => GlobalKey()),
+      return ExpandableStopCard(
         key: ValueKey('${widget.route}_${_selectedDirection}_${_selectedServiceType}_$seq'),
         seq: seq,
         stopId: stopId,
@@ -2295,8 +2299,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         isNearby: isNearby,
         autoExpand: shouldAutoExpand,
         onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
-      ),
-    );
+      );
+    //);
   }
 
   /// Build OpenStreetMap view showing all route stops
@@ -2423,7 +2427,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               width: 80,
               height: 80,
               child: KeyedSubtree(
-                key: ValueKey('marker_$stopId'),
+                key: ValueKey('marker_$seq'),
                 child: GestureDetector(
                 onTap: () {
                   // Show stop details in a bottom sheet
@@ -2451,10 +2455,24 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                               Navigator.pop(context);
                               setState(() {
                                 _showMapView = false;
+                                _autoExpandSeq = seq;  // ✅ 標記要展開的 seq
                               });
-                              // Save preference when switching to list view
                               _saveMapViewPreference(false);
-                              // Optionally scroll to this stop
+                              
+                              // Scroll to this stop card
+                              WidgetsBinding.instance.addPostFrameCallback((_) async {
+                                await Future.delayed(const Duration(milliseconds: 300));
+                                final key = _stopKeys[seq];
+                                final ctx = key?.currentContext;
+                                if (ctx != null && mounted) {
+                                  await Scrollable.ensureVisible(
+                                    ctx,
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeOutCubic,
+                                    alignment: 0.2,
+                                  );
+                                }
+                              });
                             },
                           ),
                         ],
@@ -2505,8 +2523,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                   ],
                 ),
               ),
-              ),
-            ),
+            ),            
+          ),
           );
         }
 
@@ -2540,10 +2558,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           final lngDiff = maxLng - minLng;
           final maxDiff = latDiff > lngDiff ? latDiff : lngDiff;
           
-          if (maxDiff > 0.1) zoom = 11.0;
-          else if (maxDiff > 0.05) zoom = 12.0;
-          else if (maxDiff > 0.02) zoom = 13.0;
-          else zoom = 14.0;
+          if (maxDiff > 0.1) zoom = 13.0;
+          else if (maxDiff > 0.05) zoom = 14.0;
+          else if (maxDiff > 0.02) zoom = 15.0;
+          else zoom = 16.0;
         } else {
           // Default to Hong Kong
           center = const LatLng(22.3193, 114.1694);
@@ -2569,9 +2587,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       ),
                       children: [
                         TileLayer(
-                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.example.lrt_next_train',
+                          urlTemplate: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+                          subdomains: const ['a', 'b', 'c'],
+                          userAgentPackageName: 'com.example.lrtnexttrain',
                           maxZoom: 19,
+                          panBuffer: 1,
+                          tileSize: 256,
+                          retinaMode: true,
                         ),
                         // Polyline showing route path
                         if (polylinePoints.length > 1)
