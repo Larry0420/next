@@ -17,6 +17,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:marquee/marquee.dart';
+import 'optionalMarquee.dart';
 
 class KmbRouteStatusPage extends StatefulWidget {
   final String route;
@@ -3260,7 +3262,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     }
     
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+      padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 4.0),
       child: Card(
         elevation: isActive ? 1 : 0,
         margin: EdgeInsets.zero,
@@ -3302,7 +3304,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                           
 
               Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: const EdgeInsets.all(14.0),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -3319,14 +3321,14 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         widget.seq,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 12,
+                          fontSize: 14,
                           color: isActive 
                               ? (widget.isNearby ? colorScheme.onTertiary : colorScheme.onPrimary)
                               : colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 8),
                     
 
                   
@@ -3339,16 +3341,16 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                           
                           const SizedBox(height: 4), // Tighter grouping for better visual hierarchy
 
-                          AutoSizeText(
-                            widget.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          OptionalMarquee(
+                            text: widget.displayName,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                               color: widget.isNearby ? nearbyTextPrimary : colorScheme.onSurface,
-                              letterSpacing: -0.1, // Modern typography tweak
-                            ),
-                          ),
+                              letterSpacing: -0.1,
+                            ) ?? const TextStyle(),
+                          )
+
+
                         ],
                       ),
                     ),
@@ -3784,11 +3786,11 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
         },
         child: Padding(
           key: const ValueKey('route_dest_loading'),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(18),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+              filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
               child: Container(
                 height: 60,
                 decoration: BoxDecoration(
@@ -3920,7 +3922,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
       },
       child: Padding(
         key: ValueKey('route_dest_${widget.route}_${widget.direction}_${widget.serviceType}'),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
           child: BackdropFilter(
@@ -3935,53 +3937,107 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                 ),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 child: Row(
-                  children: [
-                    // Direction icon
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: dirColor.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        dirIcon,
-                        color: dirColor,
-                        size: 20,
-                      ),
-                    ),
-                    SizedBox(width: 12),
-
+                      children: [
+                        Padding(  // 🆕 添加 padding
+                          padding: EdgeInsets.fromLTRB(0, 10, 0, 10),  // 或使用 EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+                          child: Row(
+                            children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 6.0,),
+                                  child: AutoSizeText(
+                                    widget.route,
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                    maxLines: 1,
+                                  ),
+                                ),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: dirColor.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  dirIcon,
+                                  color: dirColor,
+                                  size: 20,
+                                ),
+                              )
+                            ]
+                          ),
+                        ),
+                    SizedBox(width: 6),
                     // Route origin and destination
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Origin Line (From)
                           if (orig.isNotEmpty) ...[
-                            Text(
-                              '${isEnglish ? 'From' : '由'}: $orig',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center, // 確保垂直居中對齊
+                              children: [
+                                Text(
+                                  '${isEnglish ? 'From' : '由'}: ',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                    height: 0, // 🔴 固定行高
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: OptionalMarquee(
+                                    text: orig,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w500,
+                                      height: 0, // 🔴 必須與標籤一致
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                             SizedBox(height: 2),
                           ],
-                          Text(
-                            '${isEnglish ? 'To' : '往'}: $dest',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+
+                          // Destination Line (To)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center, // 確保垂直居中對齊
+                            children: [
+                              Text(
+                                '${isEnglish ? 'To' : '往'}: ',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  height: 0, // 🔴 固定行高
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              Expanded(
+                                child: OptionalMarquee(
+                                  text: dest,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1, // 🔴 必須與標籤一致
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
+
+
+
                         ],
                       ),
                     ),

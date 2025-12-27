@@ -28,6 +28,9 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
   flutter_map_location_marker: ^9.1.0
+  marquee: ^2.3.0
+  package_info_plus: ^4.0.3
+  url_launcher: ^6.1.10
 
 dev_dependencies:
   flutter_test:
