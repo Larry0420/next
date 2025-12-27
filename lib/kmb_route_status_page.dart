@@ -19,6 +19,7 @@ import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:marquee/marquee.dart';
 import 'optionalMarquee.dart';
+import 'toTitleCase.dart';
 
 class KmbRouteStatusPage extends StatefulWidget {
   final String route;
@@ -1106,6 +1107,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final payload = data!['data'];
     final devSettings = context.watch<DeveloperSettingsProvider>();
 
+print('🔍 buildStructuredView payload type: ${payload.runtimeType}');
+  print('🔍 buildStructuredView payload length: ${payload is List ? payload.length : 0}');
+
     List<Widget> sections = [];
 
     // Hide technical response info - users don't need to see this
@@ -1128,7 +1132,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       // Route-stop list (contains seq and stop)
       if (first.containsKey('seq') && first.containsKey('stop')) {
         // Hide technical stops list - keep only user-friendly version
-        // sections.add(_buildStopsList(payload.cast<Map<String, dynamic>>()));
+        //sections.add(_buildStopsList(payload.cast<Map<String, dynamic>>()));
+
         sections.add(_buildOptimizedStationList());
       }
 
@@ -1749,56 +1754,46 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     
+    // 🔴 去重 - 按 seq 去除重複項目
+    final uniqueStopsMap = <String, Map<String, dynamic>>{};
+    for (final stop in stops) {
+      final seq = stop['seq']?.toString() ?? '';
+      if (seq.isNotEmpty && !uniqueStopsMap.containsKey(seq)) {
+        uniqueStopsMap[seq] = stop;
+      }
+    }
+    
     // Sort by sequence
-    final sortedStops = List<Map<String, dynamic>>.from(stops);
+    final sortedStops = uniqueStopsMap.values.toList();
     sortedStops.sort((a, b) {
       final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
       final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
       return ai.compareTo(bi);
     });
-    
-    // Use cached ETA HashMap for O(1) lookup - no API call needed!
+
+    // 🔴 調試信息
+    print('🚌 Variant stops count: ${stops.length} -> unique: ${sortedStops.length}');
+
+    // Use cached ETA HashMap for O(1) lookup
     final etaByStop = _etaBySeqCache ?? <String, List<Map<String, dynamic>>>{};
     
-    // Loading state with smooth animation
+    // 🔴 簡化 loading 狀態 - 移除 AnimatedSwitcher
     if (_routeEtaLoading) {
-      return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, animation) {
-          return FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.9, end: 1.0).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-              child: child,
-            ),
-          );
-        },
-        child: Card(
-          key: const ValueKey('variant_loading'),
-          margin: const EdgeInsets.all(12),
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Center(
-              child: CircularProgressIndicator(
-                strokeWidth: 3.0,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  Theme.of(context).colorScheme.primary,
-                ),
-              ),
+      return Center(
+        key: const ValueKey('variant_loading'),
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: CircularProgressIndicator(
+            strokeWidth: 3.0,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              Theme.of(context).colorScheme.primary,
             ),
           ),
         ),
       );
     }
 
-    // Build optimized stop cards using cached data
-    // Auto-scroll to nearest stop when data first loads
-    // Build optimized stop cards using cached data
-    // Auto-scroll to nearest stop when data first loads - check BEFORE registering callback
+    // Auto-scroll logic
     final variantKey = '${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant';
     if (_lastAutoScrollVariantKey != variantKey) {
       _lastAutoScrollVariantKey = variantKey;
@@ -1809,61 +1804,50 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       }
     }
     
-    return Column(
-      children: [
-          AnimatedSwitcher(
-            duration: Duration(milliseconds: 200),
-            child: ListView.builder(
-              key: PageStorageKey<String>('kmb_list_${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant'),
-            controller: _scrollController,
-            shrinkWrap: false,
-            padding: EdgeInsets.only(
-              bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 96.0 : 12.0,
-            ),
-            itemCount: sortedStops.length,
-            itemBuilder: (context, index) {
-              final s = sortedStops[index];
-              final seq = s['seq']?.toString() ?? '';
-              final stopId = s['stop']?.toString() ?? '';
-              
-              // Get stop names from enriched data
-              final nameEn = (s['name_en'] ?? s['nameen'] ?? '')?.toString() ?? '';
-              final nameTc = (s['name_tc'] ?? s['nametc'] ?? '')?.toString() ?? '';
-              final displayName = isEnglish
-                  ? (nameEn.isNotEmpty ? nameEn : (nameTc.isNotEmpty ? nameTc : stopId))
-                  : (nameTc.isNotEmpty ? nameTc : (nameEn.isNotEmpty ? nameEn : stopId));
-              
-              // Get coordinates
-              final lat = (s['lat'] ?? s['latitude'])?.toString();
-              final lng = (s['long'] ?? s['lng'] ?? s['longitude'])?.toString();
-              
-              // O(1) HashMap lookup - instant access!
-              final List<Map<String, dynamic>> etas = etaByStop[seq] ?? [];
-              
-              // Highlight nearest stop if location is available
-              final isNearby = _userPosition != null && lat != null && lng != null
-                ? _isNearbyStop(lat, lng)
-                : false;
+    return ListView.builder(  // 🔴 直接返回 ListView，不需要 Column + Expanded
+      key: ValueKey('kmb_${widget.route}_${_selectedDirection}_${_selectedServiceType}'),
+      controller: _scrollController,
+      padding: EdgeInsets.only(
+        bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 96.0 : 12.0,
+      ),
+      itemCount: sortedStops.length,
+      itemBuilder: (context, index) {
+        final s = sortedStops[index];
+        final seq = s['seq']?.toString() ?? '';
+        final stopId = s['stop']?.toString() ?? '';
+        
+        final nameEn = (s['name_en'] ?? s['nameen'] ?? '')?.toString() ?? '';
+        final nameTc = (s['name_tc'] ?? s['nametc'] ?? '')?.toString() ?? '';
+        final displayName = isEnglish
+            ? (nameEn.isNotEmpty ? nameEn : (nameTc.isNotEmpty ? nameTc : stopId))
+            : (nameTc.isNotEmpty ? nameTc : (nameEn.isNotEmpty ? nameEn : stopId));
+        
+        final lat = (s['lat'] ?? s['latitude'])?.toString();
+        final lng = (s['long'] ?? s['lng'] ?? s['longitude'])?.toString();
+        
+        final List<Map<String, dynamic>> etas = etaByStop[seq] ?? [];
+        
+        final isNearby = _userPosition != null && lat != null && lng != null
+          ? _isNearbyStop(lat, lng)
+          : false;
 
-              return _buildCompactStopCard(
-                context: context,
-                seq: seq,
-                stopId: stopId,
-                displayName: displayName,
-                nameEn: nameEn,
-                nameTc: nameTc,
-                etas: etas,
-                isEnglish: isEnglish,
-                latitude: lat,
-                longitude: lng,
-                isNearby: isNearby,
-              );
-            },
-            ),
-          ),
-      ],
+        return _buildCompactStopCard(
+          context: context,
+          seq: seq,
+          stopId: stopId,
+          displayName: displayName,
+          nameEn: nameEn,
+          nameTc: nameTc,
+          etas: etas,
+          isEnglish: isEnglish,
+          latitude: lat,
+          longitude: lng,
+          isNearby: isNearby,
+        );
+      },
     );
   }
+
   
   bool _isNearbyStop(String? latStr, String? lngStr) {
     if (_userPosition == null || latStr == null || lngStr == null) return false;
@@ -1876,11 +1860,15 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
 
   Widget _buildOptimizedStationList() {
+      print('🔍 buildOptimizedStationList called');
+  print('🔍 variantStops: ${_variantStops?.length}');
+  print('🔍 data: ${data?['data']?.length}');
     // If we have variant-specific stops (from Route-Stop API), use those instead of cached data
     if (_variantStops != null && _selectedDirection != null && _selectedServiceType != null) {
       return _buildVariantStationList(_variantStops!);
     }
-    
+        
+  
     if (_variantStopsLoading) {
       return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
     }
@@ -1925,26 +1913,34 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         final selectedService = _selectedServiceType;
 
         // Filter by bound O/I AND service_type (keep all if not selected), then sort by seq
-        final stops = List<Map<String, dynamic>>.from(
-            entries.where((e) {
-              if (!e.containsKey('seq')) return false;
-              
-              // Filter by bound/direction if selected
-              if (selectedBoundChar != null && _normChar(e['bound']) != selectedBoundChar) return false;
-              
-              // Filter by service_type if selected
-              if (selectedService != null) {
-                final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
-                if (entryServiceType != selectedService) return false;
-              }
-              
-              return true;
-            }));
+        // Filter and deduplicate stops
+        final uniqueStopsMap = <String, Map<String, dynamic>>{};
+        for (final e in entries) {
+          if (!e.containsKey('seq')) continue;
+          final seq = e['seq']?.toString() ?? '';
+          if (seq.isEmpty) continue;
+          
+          // Filter by bound/direction if selected
+          if (selectedBoundChar != null && _normChar(e['bound']) != selectedBoundChar) continue;
+          // Filter by service_type if selected
+          if (selectedService != null) {
+            final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
+            if (entryServiceType != selectedService) continue;
+          }
+          
+          // Only add if not already in map (deduplicate by seq)
+          if (!uniqueStopsMap.containsKey(seq)) {
+            uniqueStopsMap[seq] = e;
+          }
+        }
+
+        final stops = uniqueStopsMap.values.toList();
         stops.sort((a, b) {
           final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
           final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
           return ai.compareTo(bi);
         });
+
 
         // Use cached ETA HashMap for O(1) lookup instead of FutureBuilder
         // Cache is already filtered by direction and sorted in _fetchRouteEta
@@ -2019,8 +2015,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
                   // Get stop metadata
                   final meta = stopMap[stopId];
-                  final nameEn = meta != null ? (meta['name_en'] ?? meta['nameen'] ?? '')?.toString() ?? '' : '';
-                  final nameTc = meta != null ? (meta['name_tc'] ?? meta['nametc'] ?? '')?.toString() ?? '' : '';
+                  final nameEn = meta != null 
+                      ? ((meta['name_en'] ?? meta['nameen'] ?? meta['name_en'] ?? '')?.toString() ?? '') 
+                      : '';
+                  final nameTc = meta != null 
+                      ? ((meta['name_tc'] ?? meta['nametc'] ?? meta['name_tc'] ?? '')?.toString() ?? '') 
+                      : '';
                   final displayName = isEnglish
                       ? (nameEn.isNotEmpty ? nameEn : (nameTc.isNotEmpty ? nameTc : stopId))
                       : (nameTc.isNotEmpty ? nameTc : (nameEn.isNotEmpty ? nameEn : stopId));
@@ -2037,11 +2037,17 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                     ? _isNearbyStop(lat, lng)
                     : false;
 
+                  // ✅ 添加 nameEn 和 nameTc 參數，並加入空值檢查
+                  if (seq.isEmpty || stopId.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
                   return _buildCompactStopCard(
                     context: context,
                     seq: seq,
                     stopId: stopId,
                     displayName: displayName,
+                    nameEn: nameEn,  // ✅ 添加
+                    nameTc: nameTc,  // ✅ 添加
                     etas: etas,
                     isEnglish: isEnglish,
                     latitude: lat,
@@ -2940,6 +2946,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
               widget.isEnglish 
                 ? 'Stop pinned: ${widget.displayName}' 
                 : '已釘選站點: ${widget.displayName}'
+              ,
             ),
             duration: const Duration(seconds: 2),
           ),
@@ -3007,7 +3014,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     required ColorScheme colorScheme,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(right: 5.0, top: 0.0, bottom: 0.0, left: 1.0),
+      padding: const EdgeInsets.only(right: 10.0, top: 0.0, bottom: 8.0, left: 2.0),
       child: IntrinsicWidth(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -3020,7 +3027,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                 color: isDeparted 
                     ? colorScheme.onSurface.withOpacity(0.6)
                     : (isNearlyArrived ? colorScheme.secondary : colorScheme.primary),
-                fontSize: 20,
+                fontSize: 24,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -3036,41 +3043,44 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   Widget _buildEtaSubtitle(String remark, String abs, ThemeData theme, ColorScheme colorScheme) {
     final hasRemark = remark.isNotEmpty;
     
-    return RichText(
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      text: TextSpan(
+    return hasRemark
+    ? Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (hasRemark) ...[
-            TextSpan(
-              text: remark,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 10,
-                height: 1.2,
-              ),
+          Text(
+            remark,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 10,
+              height: 1.2,
             ),
-            TextSpan(
-              text: ' ($abs)',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                fontSize: 10,
-                height: 1.2,
-              ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            '($abs)',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+              fontSize: 10,
+              height: 1.2,
             ),
-          ] else ...[
-            TextSpan(
-              text: abs,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                fontSize: 10,
-                height: 1.2,
-              ),
-            ),
-          ],
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
-      ),
-    );
+      )
+    : Text(
+        abs,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+          fontSize: 10,
+          height: 1.2,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+
   }
 
   // Extracted: Build ETA items list
@@ -3262,7 +3272,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     }
     
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 4.0),
+      padding: const EdgeInsets.symmetric(horizontal: 1.0, vertical: 6.0),
       child: Card(
         elevation: isActive ? 1 : 0,
         margin: EdgeInsets.zero,
@@ -3284,7 +3294,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
               if (isActive && isNear)
                             Container(
                               width: double.infinity,
-                              padding: const EdgeInsets.fromLTRB(16.0, 6.0, 16.0, 6.0), // left, top, right, bottom
+                              padding: const EdgeInsets.fromLTRB(16.0, 2.0, 0.0, 2.0), // left, top, right, bottom
                               decoration: BoxDecoration(
                                 color: nearbyTextSecondary?.withOpacity(0.1),
                                 border: Border(
@@ -3328,7 +3338,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
                     
 
                   
@@ -3339,10 +3349,10 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                           // Animated Status Area
                           _buildStatusSection(theme, colorScheme, nearbyTextSecondary),
                           
-                          const SizedBox(height: 4), // Tighter grouping for better visual hierarchy
+                          const SizedBox(height: 1), // Tighter grouping for better visual hierarchy
 
                           OptionalMarquee(
-                            text: widget.displayName,
+                            text: widget.displayName.toTitleCase(),
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                               color: widget.isNearby ? nearbyTextPrimary : colorScheme.onSurface,
@@ -3985,7 +3995,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                               crossAxisAlignment: CrossAxisAlignment.center, // 確保垂直居中對齊
                               children: [
                                 Text(
-                                  '${isEnglish ? 'From' : '由'}: ',
+                                  '${isEnglish ? 'From' : '由'}:  ',
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w500,
@@ -3995,7 +4005,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                 ),
                                 Expanded(
                                   child: OptionalMarquee(
-                                    text: orig,
+                                    text: orig.toString().toTitleCase(),
                                     style: TextStyle(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w500,
@@ -4014,7 +4024,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                             crossAxisAlignment: CrossAxisAlignment.center, // 確保垂直居中對齊
                             children: [
                               Text(
-                                '${isEnglish ? 'To' : '往'}: ',
+                                '${isEnglish ? 'To' : '往'}:  ',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
@@ -4024,7 +4034,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                               ),
                               Expanded(
                                 child: OptionalMarquee(
-                                  text: dest,
+                                  text: dest.toString().toTitleCase(),
                                   style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w600,

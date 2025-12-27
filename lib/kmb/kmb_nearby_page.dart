@@ -8,29 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../kmb_route_status_page.dart';
 import '../main.dart' show AccessibilityProvider, LanguageProvider;
-
-extension StringCasingExtension on String {
-  String toTitleCase() {
-    if (trim().isEmpty) {
-      return '';
-    }
-
-    // A RegExp pattern to check if the string starts with a letter or number
-    final alphaNumericStart = RegExp(r'^[a-zA-Z0-9]');
-
-    return replaceAll(RegExp(' +'), ' ')
-        .split(' ')
-        .map((str) {
-          // If the word does NOT start with a letter/number (e.g., starts with '('), return it as is.
-          if (!alphaNumericStart.hasMatch(str)) {
-            return str;
-          }
-          // Otherwise, apply the title-casing logic
-          return '${str[0].toUpperCase()}${str.substring(1).toLowerCase()}';
-        })
-        .join(' ');
-  }
-}
+import '../toTitleCase.dart';
 
 
 class KmbNearbyPage extends StatefulWidget {

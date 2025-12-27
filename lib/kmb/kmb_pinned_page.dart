@@ -9,6 +9,8 @@ import 'api/kmb.dart';
 import '../kmb_route_status_page.dart';
 import '../main.dart' show LanguageProvider;
 
+import '../toTitleCase.dart';
+
 class KmbPinnedPage extends StatefulWidget {
   const KmbPinnedPage({Key? key}) : super(key: key);
 
@@ -414,11 +416,12 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                         ),
                         SizedBox(height: 4),
                         AutoSizeText(
-                          destinationText,
+                          destinationText.toTitleCase(),
                           style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.3),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        
                         if (timeText != null) ...[
                           SizedBox(height: 2),
                           Text(timeText, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6))),
@@ -441,7 +444,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                         ? IconButton(
                             key: const ValueKey('pinned'),
                             onPressed: onUnpin,
-                            icon: const Icon(Icons.push_pin, size: 18),
+                            icon: const Icon(Icons.push_pin, size: 20),
                             style: IconButton.styleFrom(
                               backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
                               foregroundColor: Theme.of(context).colorScheme.primary,
@@ -449,7 +452,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               //padding: const EdgeInsets.all(6),
-                              minimumSize: const Size(20, 20),
+                              minimumSize: const Size(40, 40),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
                           )
@@ -635,12 +638,12 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     final route = widget.stop['route'] ?? '';
     final nameEn = widget.stop['stopNameEn'] ?? widget.stop['stopName'] ?? '';
     final nameTc = widget.stop['stopNameTc'] ?? widget.stop['stopName'] ?? '';
-    final stopName = widget.lang.isEnglish ? (nameEn.isNotEmpty ? nameEn : nameTc) : (nameTc.isNotEmpty ? nameTc : nameEn);
+    final stopName = widget.lang.isEnglish ? (nameEn.isNotEmpty ? nameEn.toString().toTitleCase()  : nameTc) : (nameTc.isNotEmpty ? nameTc : nameEn.toString().toTitleCase());
     final latitude = widget.stop['latitude'];
     final longitude = widget.stop['longitude'];
     final destEn = widget.stop['destEn'];
     final destTc = widget.stop['destTc'];
-    final dest = widget.lang.isEnglish ? (destEn ?? destTc ?? '') : (destTc ?? destEn ?? '');
+    final dest = widget.lang.isEnglish ? (destEn.toString().toTitleCase() ?? destTc ?? '') : (destTc ?? destEn.toString().toTitleCase() ?? '');
     final direction = widget.stop['direction']?.toString() ?? 'O';
 
     final cs = Theme.of(context).colorScheme;
@@ -732,13 +735,20 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                       SizedBox.shrink(),
                     SizedBox(width: 8),
                     IconButton(
+                      key: const ValueKey('pinned'),
                       onPressed: widget.onUnpin,
-                      icon: Icon(Icons.push_pin, size: 18),
-                      color: Theme.of(context).colorScheme.primary,
-                      padding: const EdgeInsets.all(6.0),
-                      constraints: const BoxConstraints(),
-                      iconSize: 18,
-                    ),
+                      icon: const Icon(Icons.push_pin, size: 29),
+                      style: IconButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                        foregroundColor: Theme.of(context).colorScheme.primary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        //padding: const EdgeInsets.all(6),
+                        minimumSize: const Size(20, 20),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    )
                   ],
                 ),
               ),
@@ -753,7 +763,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
           child: Container(
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
@@ -801,14 +811,14 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
                             if (dest.isNotEmpty) ...[
                               SizedBox(height: 3),
                               Row(
                                 children: [
                                   Icon(directionIcon, size: 11, color: directionColor.withOpacity(0.8)),
                                   SizedBox(width: 4),
-                                  Expanded(child: Text(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9), fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                  Expanded(child: AutoSizeText(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9), fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis)),
                                 ],
                               ),
                             ],

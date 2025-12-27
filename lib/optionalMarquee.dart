@@ -14,8 +14,8 @@ class OptionalMarquee extends StatelessWidget {
     required this.text,
     required this.style,
     this.scrollAxis = Axis.horizontal,
-    this.blankSpace = 20.0,
-    this.velocity = 30.0,
+    this.blankSpace = 30.0,
+    this.velocity = 120.0,
     this.pauseAfterRound = const Duration(seconds: 1),
   }) : super(key: key);
 
