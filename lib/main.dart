@@ -10065,7 +10065,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
     
     // ✅ PERFORMANCE OPTIMIZATION 1: Reduced animation duration for snappier UX
     // Faster animations reduce perceived latency and improve responsiveness
-    const animationDuration = Duration(milliseconds: 200); // Was contentTransition (~300ms)
+    const animationDuration = Duration(milliseconds: 300); // Was contentTransition (~300ms)
     
     // Main expansion animation - GPU-accelerated size/height changes
     _animationController = AnimationController(
