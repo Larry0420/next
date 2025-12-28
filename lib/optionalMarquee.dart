@@ -23,7 +23,7 @@ class OptionalMarquee extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 🔴 檢查約束是否有效
+        // 🔴 Check for valid constraints
         if (!constraints.hasBoundedWidth || constraints.maxWidth <= 0 || constraints.maxWidth.isInfinite) {
           return Text(
             text,
@@ -33,40 +33,41 @@ class OptionalMarquee extends StatelessWidget {
           );
         }
 
-        // 使用 TextPainter 計算文字寬度
+        // Use TextPainter to calculate text dimensions
         final textPainter = TextPainter(
           text: TextSpan(text: text, style: style),
           textDirection: TextDirection.ltr,
           maxLines: 1,
         )..layout(maxWidth: double.infinity);
 
-        // 檢查是否超過容器寬度
+        // Check overflow
         final bool overflows = textPainter.width > constraints.maxWidth;
 
         if (overflows) {
-          // 🔴 使用精確的行高計算，與靜態 Text 一致
-          final double lineHeight = (style.fontSize ?? 14.0) * (style.height ?? 1.2);
+          // 🔴 Use textPainter.height to include descenders like 'g'
+          // Add a small buffer (e.g., 2.0) if font metrics are tight
+          final double computedHeight = textPainter.height;
 
           return SizedBox(
-            width: constraints.maxWidth, // 🔴 必須明確設定寬度，防止佈局錯誤
-            height: lineHeight, // 🔴 使用計算出的行高
+            width: constraints.maxWidth,
+            height: computedHeight, 
             child: Marquee(
               text: text,
               style: style,
               scrollAxis: scrollAxis,
-              crossAxisAlignment: CrossAxisAlignment.center, // 🔴 改成 center 確保垂直居中
+              crossAxisAlignment: CrossAxisAlignment.center,
               blankSpace: blankSpace,
               velocity: velocity,
               pauseAfterRound: pauseAfterRound,
               startPadding: 0.0,
-              accelerationDuration: Duration(seconds: 1),
+              accelerationDuration: const Duration(seconds: 1),
               accelerationCurve: Curves.linear,
-              decelerationDuration: Duration(milliseconds: 500),
+              decelerationDuration: const Duration(milliseconds: 500),
               decelerationCurve: Curves.easeOut,
             ),
           );
         } else {
-          // 否則顯示靜態文字
+          // Show static text
           return Text(
             text,
             style: style,

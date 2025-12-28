@@ -155,7 +155,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     _loadMapViewPreference();
     _fetch();
     _addToHistory();
-    _scrollController.addListener(_onScroll);
+    //_scrollController.addListener(_onScroll);
     _initializeLocation(); // Get user location on startup
     // Start ETA auto-refresh after first frame when selections are available
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -230,23 +230,23 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
   
   void _onScroll() {
-    if (_scrollController.hasClients) {
-      final currentOffset = _scrollController.offset;
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      
-      // 接近底部 100px 時隱藏
-      if (maxScroll - currentOffset < 100) {
-        if (_showFloatingBar) setState(() => _showFloatingBar = false);
-      }
-      // 離開底部時顯示
-      else if (maxScroll - currentOffset > 150) {
-        if (!_showFloatingBar) setState(() => _showFloatingBar = true);
-      }
-      
-      _lastScrollOffset = currentOffset;
-    }
-  }
+    if (!_scrollController.hasClients) return;
 
+    final currentOffset = _scrollController.offset;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+
+    // Only toggle floating bar, do NOT call _fetch() here
+    if (maxScroll - currentOffset < 100) {
+      if (_showFloatingBar) {
+        setState(() => _showFloatingBar = false);
+      }
+    } else if (maxScroll - currentOffset > 150) {
+      if (!_showFloatingBar) {
+        setState(() => _showFloatingBar = true);
+      }
+    }
+    _lastScrollOffset = currentOffset;
+  }
 
   @override
   void dispose() {
@@ -1107,9 +1107,6 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final payload = data!['data'];
     final devSettings = context.watch<DeveloperSettingsProvider>();
 
-print('🔍 buildStructuredView payload type: ${payload.runtimeType}');
-  print('🔍 buildStructuredView payload length: ${payload is List ? payload.length : 0}');
-
     List<Widget> sections = [];
 
     // Hide technical response info - users don't need to see this
@@ -1170,7 +1167,10 @@ print('🔍 buildStructuredView payload type: ${payload.runtimeType}');
     // Hide raw JSON at the end - users don't need debug info
     // sections.add(_buildRawJsonCard());
 
+    
+
     return SingleChildScrollView(
+      //controller: _scrollController, // <--- Attach the controller here!
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: sections,
@@ -1860,9 +1860,6 @@ print('🔍 buildStructuredView payload type: ${payload.runtimeType}');
 
 
   Widget _buildOptimizedStationList() {
-      print('🔍 buildOptimizedStationList called');
-  print('🔍 variantStops: ${_variantStops?.length}');
-  print('🔍 data: ${data?['data']?.length}');
     // If we have variant-specific stops (from Route-Stop API), use those instead of cached data
     if (_variantStops != null && _selectedDirection != null && _selectedServiceType != null) {
       return _buildVariantStationList(_variantStops!);
@@ -1917,6 +1914,17 @@ print('🔍 buildStructuredView payload type: ${payload.runtimeType}');
         final uniqueStopsMap = <String, Map<String, dynamic>>{};
         for (final e in entries) {
           if (!e.containsKey('seq')) continue;
+
+          // [Fix 1] 加入嚴格過濾：檢查站點資料中的 route 是否與當前 route 匹配
+          // 許多 KMB API 資料會包含 'route': '44' 這樣的欄位
+          // 如果資料是混雜的，這個檢查能過濾掉不屬於本線的站點
+          final entryRoute = e['route']?.toString().trim().toUpperCase();
+          final currentRoute = widget.route.trim().toUpperCase();
+          // 如果 entry 裡有 route 欄位且不等於當前路線，則跳過 (防鬼站)
+          if (entryRoute != null && entryRoute.isNotEmpty && entryRoute != currentRoute) {
+            continue;
+          }
+          
           final seq = e['seq']?.toString() ?? '';
           if (seq.isEmpty) continue;
           
@@ -2281,22 +2289,29 @@ print('🔍 buildStructuredView payload type: ${payload.runtimeType}');
         entries = List<Map<String, dynamic>>.from(
           entries.where((e) {
             if (!e.containsKey('seq')) return false;
-            
             if (_selectedDirection != null) {
               final bound = e['bound']?.toString().trim().toUpperCase() ?? '';
-              if (bound.isNotEmpty && _selectedDirection!.isNotEmpty && 
-                  bound[0] != _selectedDirection![0]) return false;
+              if (bound.isNotEmpty && _selectedDirection!.isNotEmpty && bound[0] != _selectedDirection![0]) return false;
             }
-            
             if (_selectedServiceType != null) {
               final st = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
               if (st != _selectedServiceType) return false;
             }
-            
             return true;
-          })
+          }),
         );
 
+        // ADD DEDUPLICATION HERE - before sorting
+        final uniqueStopsMap = <String, Map<String, dynamic>>{};
+        for (final e in entries) {
+          final seq = e['seq']?.toString() ?? '';
+          if (seq.isNotEmpty && !uniqueStopsMap.containsKey(seq)) {
+            uniqueStopsMap[seq] = e;
+          }
+        }
+        entries = uniqueStopsMap.values.toList();
+        
+        // Sort after deduplication
         entries.sort((a, b) {
           final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
           final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
@@ -2974,7 +2989,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
     if (seconds < -10) {
       return (
-        text: widget.isEnglish ? 'Departed' : '已開出',
+        text: widget.isEnglish ? '- min' : '- 分鐘',
         isDeparted: true,
         isNearlyArrived: false,
       );
@@ -2982,7 +2997,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     
     if (seconds <= 0) {
       return (
-        text: widget.isEnglish ? '- min' : '- 分鐘',
+        text: widget.isEnglish ? 'NOW' : '而家',
         isDeparted: false,
         isNearlyArrived: true,
       );
@@ -2990,7 +3005,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     
     if (mins < 1) {
       return (
-        text: widget.isEnglish ? 'Due' : '即將抵達',
+        text: widget.isEnglish ? 'Now' : '即將',
         isDeparted: false,
         isNearlyArrived: true,
       );
@@ -3346,17 +3361,18 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          const SizedBox(height: 2),
                           // Animated Status Area
                           _buildStatusSection(theme, colorScheme, nearbyTextSecondary),
                           
-                          const SizedBox(height: 1), // Tighter grouping for better visual hierarchy
+                          const SizedBox(height: 0), // Tighter grouping for better visual hierarchy
 
                           OptionalMarquee(
                             text: widget.displayName.toTitleCase(),
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                               color: widget.isNearby ? nearbyTextPrimary : colorScheme.onSurface,
-                              letterSpacing: -0.1,
+                              letterSpacing: -0.2,
                             ) ?? const TextStyle(),
                           )
 
