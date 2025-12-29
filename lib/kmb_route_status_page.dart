@@ -3005,7 +3005,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     
     if (mins < 1) {
       return (
-        text: widget.isEnglish ? 'Now' : '即將',
+        text: widget.isEnglish ? 'NOW' : '即將',
         isDeparted: false,
         isNearlyArrived: true,
       );
