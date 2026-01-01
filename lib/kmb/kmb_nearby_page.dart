@@ -73,6 +73,19 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     super.dispose();
   }
 
+  // ✅ 正確：定義在類的頂層（與其他方法平級）
+  String _fmtDistance(double meters, {LanguageProvider? langProv}) {
+    final bool isEnglish = langProv?.isEnglish ?? true;
+    
+    if (meters < 1000) {
+      final val = meters.toStringAsFixed(0);
+      return isEnglish ? '$val m' : '$val 米';
+    } else {
+      final val = (meters / 1000).toStringAsFixed(2);
+      return isEnglish ? '$val km' : '$val 公里';
+    }
+  }
+
   Future<bool> _showLocationRationaleDialog() async {
     if (!mounted) return false;
     
@@ -328,11 +341,6 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         }
       });
     }
-  }
-
-  String _fmtDistance(double meters, {LanguageProvider? langProv}) {
-    if (meters < 1000) return (langProv?.isEnglish ?? false ? '${meters.toStringAsFixed(0)} m' : '${meters.toStringAsFixed(0)} 米');
-    return '${(meters / 1000).toStringAsFixed(2)} km';
   }
 
   Widget _buildRangeChip(String label, double meters, LanguageProvider langProv, AccessibilityProvider accProv) {
@@ -696,7 +704,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             Icon(Icons.location_on, size: 11, color: Theme.of(context).colorScheme.primary),
                             SizedBox(width: 3),
                             Text(
-                              _fmtDistance(s.distanceMeters),
+                              _fmtDistance(s.distanceMeters, langProv: langProv),
                               style: TextStyle(
                                 fontSize: 11,
                                 color: Theme.of(context).colorScheme.onSecondaryContainer.withOpacity(0.7),
@@ -854,6 +862,52 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     );
   }
 
+  // Helper widget for sort chips
+  Widget _buildSortChip({
+    required BuildContext context,
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: isSelected 
+          ? Theme.of(context).colorScheme.primaryContainer 
+          : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: isSelected 
+                    ? Theme.of(context).colorScheme.onPrimaryContainer
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected 
+                      ? Theme.of(context).colorScheme.onPrimaryContainer
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showStopDetails(BuildContext context, _StopDistance stop, List<Map<String, dynamic>> etas) {
     final langProv = context.read<LanguageProvider>();
     
@@ -871,8 +925,413 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       if (route.isEmpty) continue;
       etasByRoute.putIfAbsent(route, () => []).add(eta);
     }
+    final distance = stop.distanceMeters;
     
-    showDialog(
+    // 在 showModalBottomSheet 調用處直接使用
+    final sortOptionNotifier = ValueNotifier<int>(0); // 在這裡創建
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return ValueListenableBuilder<int>(
+          valueListenable: sortOptionNotifier,
+          builder: (context, sortOption, _) {
+            // Sort function
+            List<MapEntry<String, List<Map<String, dynamic>>>> getSortedEntries() {
+              final entries = etasByRoute.entries.toList();
+              
+              entries.sort((a, b) {
+                final routeA = a.key;
+                final routeB = b.key;
+                final etasA = a.value;
+                final etasB = b.value;
+                
+                // Extract numeric part
+                int? extractNumber(String route) {
+                  final match = RegExp(r'\d+').firstMatch(route);
+                  return match != null ? int.tryParse(match.group(0)!) : null;
+                }
+                
+                if (sortOption == 1) {
+                  // ✅ Sort by route number ONLY
+                  final numA = extractNumber(routeA);
+                  final numB = extractNumber(routeB);
+                  
+                  if (numA != null && numB != null) {
+                    final numCompare = numA.compareTo(numB);
+                    if (numCompare != 0) return numCompare;
+                  }
+                  return routeA.compareTo(routeB);
+                }
+                
+                // ✅ Sort by ETA priority (sortOption == 0)
+                final hasEtaA = etasA.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
+                final hasEtaB = etasB.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
+                if (hasEtaA != hasEtaB) return hasEtaB ? 1 : -1;
+                
+                if (hasEtaA && hasEtaB) {
+                  try {
+                    final earliestA = etasA
+                        .where((eta) => (eta['eta']?.toString() ?? '').isNotEmpty)
+                        .map((eta) => DateTime.parse(eta['eta'].toString()))
+                        .reduce((a, b) => a.isBefore(b) ? a : b);
+                    final earliestB = etasB
+                        .where((eta) => (eta['eta']?.toString() ?? '').isNotEmpty)
+                        .map((eta) => DateTime.parse(eta['eta'].toString()))
+                        .reduce((a, b) => a.isBefore(b) ? a : b);
+                    final comparison = earliestA.compareTo(earliestB);
+                    if (comparison != 0) return comparison;
+                  } catch (_) {}
+                }
+                
+                // Fallback: route number
+                final numA = extractNumber(routeA);
+                final numB = extractNumber(routeB);
+                if (numA != null && numB != null) {
+                  return numA.compareTo(numB);
+                }
+                return routeA.compareTo(routeB);
+              });
+              
+              return entries;
+            }
+            
+            final sortedEntries = getSortedEntries();
+            
+            return DraggableScrollableSheet(
+              initialChildSize: 0.7,
+              minChildSize: 0.5,
+              maxChildSize: 0.95,
+              builder: (context, scrollController) => Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: Column(
+                  children: [
+                    // Drag handle
+                    Container(
+                      margin: EdgeInsets.only(top: 12, bottom: 8),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    
+                    // Header
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              langProv.isEnglish 
+                                  ? 'KMB - ${displayName.toTitleCase()}' 
+                                  : '九巴 - ${displayName.toTitleCase()}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close),
+                            onPressed: () {
+                              sortOptionNotifier.dispose(); // 清理
+                              Navigator.of(context).pop();
+                            },
+                            style: IconButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Sort options
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.sort,
+                            size: 16,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  _buildSortChip(
+                                    context: context,
+                                    label: langProv.isEnglish ? 'Time' : '時間',
+                                    icon: Icons.access_time,
+                                    isSelected: sortOption == 0,
+                                    onTap: () => sortOptionNotifier.value = 0, // ✅ 更新狀態
+                                  ),
+                                  SizedBox(width: 8),
+                                  _buildSortChip(
+                                    context: context,
+                                    label: langProv.isEnglish ? 'Route No.' : '路線編號',
+                                    icon: Icons.numbers,
+                                    isSelected: sortOption == 1,
+                                    onTap: () => sortOptionNotifier.value = 1, // ✅ 更新狀態
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Distance info
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.location_on,
+                                size: 14,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                '${langProv.isEnglish ? "Distance" : "距離"}: ${_fmtDistance(distance, langProv: langProv)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    Divider(height: 8),
+                    
+                    // Content - ListView with sorted entries
+                    Expanded(
+                      child: sortedEntries.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.access_time, size: 48, color: Colors.grey[400]),
+                                  SizedBox(height: 12),
+                                  Text(
+                                    langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次',
+                                    style: TextStyle(color: Colors.grey[600], fontSize: 15),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : ListView.builder(
+                              controller: scrollController,
+                              padding: EdgeInsets.fromLTRB(12, 0, 12, 16),
+                              itemCount: sortedEntries.length,
+                              itemBuilder: (context, index) {
+                                final entry = sortedEntries[index];
+                                final route = entry.key;
+                                final routeEtas = entry.value;
+                                
+                                // ... 其餘的 ListView.builder 代碼保持不變
+                                routeEtas.sort((a, b) {
+                                  final etaA = a['eta']?.toString() ?? '';
+                                  final etaB = b['eta']?.toString() ?? '';
+                                  return etaA.compareTo(etaB);
+                                });
+                                
+                                final destEn = routeEtas.first['dest_en'] ?? routeEtas.first['desten'] ?? '';
+                                final destTc = routeEtas.first['dest_tc'] ?? routeEtas.first['desttc'] ?? '';
+                                final displayDest = langProv.isEnglish ? destEn : (destTc.isNotEmpty ? destTc : destEn);
+                                final bound = routeEtas.first['dir'] ?? routeEtas.first['bound'] ?? '';
+                                final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
+                                final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
+                                
+                                return Container(
+                                  margin: EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: hasValidEta 
+                                          ? Theme.of(context).colorScheme.primary.withOpacity(0.3)
+                                          : Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                                      width: hasValidEta ? 1.5 : 1,
+                                    ),
+                                  ),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () {
+                                        Navigator.of(context).pop();
+                                        final seq = routeEtas.first['seq']?.toString();
+                                        final stopIdFromEta = routeEtas.first['stop']?.toString();
+                                        Navigator.of(context).push(MaterialPageRoute(
+                                          builder: (_) => KmbRouteStatusPage(
+                                            route: route,
+                                            bound: bound.toString().isNotEmpty ? bound.toString().toUpperCase() : null,
+                                            serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
+                                            autoExpandSeq: seq,
+                                            autoExpandStopId: stopIdFromEta,
+                                          ),
+                                        ));
+                                      },
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Padding(
+                                        padding: EdgeInsets.all(12),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Container(
+                                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                  decoration: BoxDecoration(
+                                                    color: Theme.of(context).colorScheme.primaryContainer,
+                                                    borderRadius: BorderRadius.circular(6),
+                                                  ),
+                                                  child: Text(
+                                                    route,
+                                                    style: TextStyle(
+                                                      fontWeight: FontWeight.bold,
+                                                      fontSize: 14,
+                                                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                                    ),
+                                                  ),
+                                                ),
+                                                SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    langProv.isEnglish ? 'To $displayDest' : '往 $displayDest',
+                                                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                                              ],
+                                            ),
+                                            SizedBox(height: 8),
+                                            ...routeEtas.take(3).map((eta) {
+                                              final etaStr = eta['eta']?.toString() ?? '';
+                                              final rmkEn = eta['rmk_en'] ?? eta['rmken'] ?? '';
+                                              final rmkTc = eta['rmk_tc'] ?? eta['rmktc'] ?? '';
+                                              final rmk = langProv.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
+                                              
+                                              String timeDisplay = '—', abs = '';
+              
+                                              Color timeColor = Colors.grey;
+                                              if (etaStr.isNotEmpty) {
+                                                try {
+                                                  final dt = DateTime.parse(etaStr).toLocal();
+                                                  final now = DateTime.now();
+                                                  final diff = dt.difference(now);
+                                                  if (diff.inMinutes <= 0) {
+                                                    timeDisplay = langProv.isEnglish ? 'Due' : '即將到站';
+                                                    timeColor = Colors.red;
+                                                    abs = DateFormat.Hm().format(dt);
+                                                  } else if (diff.inMinutes <= 5) {
+                                                    timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
+                                                    timeColor = Colors.orange;
+                                                    abs = DateFormat.Hm().format(dt);
+                                                  } else if (diff.inMinutes < 60) {
+                                                    timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
+                                                    timeColor = Colors.green;
+                                                    abs = DateFormat.Hm().format(dt);
+                                                  } else {
+                                                    timeDisplay = DateFormat.Hm().format(dt);
+                                                    timeColor = Colors.blue;
+                                                  }
+                                                } catch (_) {}
+                                              }
+                                              
+                                              return Padding(
+                                                padding: EdgeInsets.only(top: 4),
+                                                child: Row(
+                                                  children: [
+                                                    Text(
+                                                      abs,
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        fontWeight: FontWeight.w600,
+                                                        color: timeColor,
+                                                      ),
+                                                    ),
+                                                    SizedBox(width: 8),
+                                                    Container(
+                                                      width: 4,
+                                                      height: 4,
+                                                      decoration: BoxDecoration(
+                                                        color: timeColor,
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                    ),
+                                                    SizedBox(width: 8),
+                                                    Text(
+                                                      timeDisplay,
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        fontWeight: FontWeight.w600,
+                                                        color: timeColor,
+                                                      ),
+                                                    ),
+                                                    if (rmk.toString().isNotEmpty) ...[
+                                                      SizedBox(width: 8),
+                                                      Expanded(
+                                                        child: Text(
+                                                          rmk,
+                                                          style: TextStyle(
+                                                            fontSize: 13,
+                                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                          ),
+                                                          maxLines: 2,
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    /*showDialog(
       fullscreenDialog: false,
       useSafeArea: true,
       context: context,
@@ -893,7 +1352,12 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               /*Text(langProv.isEnglish ? 'Stop ID: ${stop.stopId}' : '站點編號: ${stop.stopId}', style: TextStyle(fontSize: 12)),
               */
               
-              Text(langProv.isEnglish ? 'Distance: ${_fmtDistance(stop.distanceMeters)}' : '距離: ${_fmtDistance(stop.distanceMeters)}', style: TextStyle(fontSize: 12)),
+              // 修改後
+              Text(
+                '${langProv.isEnglish ? "Distance" : "距離"}: ${_fmtDistance(distance, langProv: langProv)}',
+                style: TextStyle(fontSize: 12),
+              ),
+
               //Text('Lat: ${stop.lat.toStringAsFixed(6)}, Lng: ${stop.lng.toStringAsFixed(6)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
               SizedBox(height: 12),
               if (etasByRoute.isEmpty)
@@ -983,7 +1447,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           ),
         ],
       ),
-    );
+    );*/
   }
 }
 

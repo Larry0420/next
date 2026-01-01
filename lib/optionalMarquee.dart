@@ -8,6 +8,7 @@ class OptionalMarquee extends StatelessWidget {
   final double blankSpace;
   final double velocity;
   final Duration pauseAfterRound;
+  final double? width;
 
   const OptionalMarquee({
     Key? key,
@@ -17,45 +18,53 @@ class OptionalMarquee extends StatelessWidget {
     this.blankSpace = 30.0,
     this.velocity = 120.0,
     this.pauseAfterRound = const Duration(seconds: 1),
+    this.width,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 🔴 Check for valid constraints
-        if (!constraints.hasBoundedWidth || constraints.maxWidth <= 0 || constraints.maxWidth.isInfinite) {
+        final double maxWidth = width ?? constraints.maxWidth;
+
+        // 定義統一的 StrutStyle，強制行高一致
+        // forceStrutHeight: true 是關鍵
+        final StrutStyle strutStyle = StrutStyle.fromTextStyle(
+          style,
+          forceStrutHeight: true, 
+        );
+
+        if (maxWidth <= 0 || maxWidth.isInfinite) {
           return Text(
             text,
             style: style,
+            strutStyle: strutStyle, // 套用 StrutStyle
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           );
         }
 
-        // Use TextPainter to calculate text dimensions
         final textPainter = TextPainter(
           text: TextSpan(text: text, style: style),
           textDirection: TextDirection.ltr,
           maxLines: 1,
+          strutStyle: strutStyle, // 測量時也套用 StrutStyle
         )..layout(maxWidth: double.infinity);
 
-        // Check overflow
-        final bool overflows = textPainter.width > constraints.maxWidth;
+        final bool overflows = textPainter.width > maxWidth;
+        
+        // 使用含有 strutStyle 的 textPainter 測量出的高度
+        final double textHeight = textPainter.height;
 
         if (overflows) {
-          // 🔴 Use textPainter.height to include descenders like 'g'
-          // Add a small buffer (e.g., 2.0) if font metrics are tight
-          final double computedHeight = textPainter.height;
-
           return SizedBox(
-            width: constraints.maxWidth,
-            height: computedHeight, 
+            width: maxWidth,
+            height: textHeight,
             child: Marquee(
               text: text,
               style: style,
               scrollAxis: scrollAxis,
-              crossAxisAlignment: CrossAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               blankSpace: blankSpace,
               velocity: velocity,
               pauseAfterRound: pauseAfterRound,
@@ -67,12 +76,19 @@ class OptionalMarquee extends StatelessWidget {
             ),
           );
         } else {
-          // Show static text
-          return Text(
-            text,
-            style: style,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          return SizedBox(
+            width: maxWidth,
+            height: textHeight,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                text,
+                style: style,
+                strutStyle: strutStyle, // 套用 StrutStyle
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           );
         }
       },

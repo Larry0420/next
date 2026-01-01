@@ -9393,7 +9393,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
   List<StationGroup> _allGroups = [];
   List<StationGroup> _filteredGroups = [];
   List<StationInfo> _recentStations = [];
-  bool _isSearching = false;
+  bool _isRecent = false;
   
   // 優化的動畫控制器
   late AnimationController _animationController;
@@ -9560,7 +9560,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
   void _onSearchChanged() {
     final query = _searchController.text.toLowerCase();
     setState(() {
-      _isSearching = query.isNotEmpty;
+      _isRecent = query.isNotEmpty;
       
       // ✅ LAZY LOADING: Build groups on-demand only when searching
       final allGroups = _buildStationGroupsOnDemand();
@@ -9614,7 +9614,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
               focusNode: _searchFocusNode,
               decoration: InputDecoration(
                 hintText: widget.isEnglish ? 'Search stations...' : '搜尋車站...',
-                prefixIcon: Icon(Icons.search, size: 20 * accessibility.iconScale),
+                prefixIcon: Icon(Icons.history, size: 20 * accessibility.iconScale),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
                         icon: Icon(Icons.clear, size: 20 * accessibility.iconScale),
@@ -9638,7 +9638,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
       body: Column(
         children: [
           // 最近使用的車站 - 使用 RepaintBoundary 優化
-          if (_recentStations.isNotEmpty && !_isSearching)
+          if (_recentStations.isNotEmpty && !_isRecent)
             RepaintBoundary(
               child: Container(
                 padding: const EdgeInsets.all(8),
@@ -9717,7 +9717,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                 // ✅ TRUE LAZY LOADING: Only build when user actually views the list
                 List<StationGroup> displayGroups;
                 
-                if (_isSearching) {
+                if (_isRecent) {
                   // When searching, use filtered results
                   displayGroups = _filteredGroups;
                 } else if (_filteredGroups.isNotEmpty) {
@@ -10032,9 +10032,9 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   final FocusNode _searchFocusNode = FocusNode();
   final ScrollController _districtScrollController = ScrollController();
   List<StationInfo> _filteredStations = [];
-  bool _isSearching = false;
+  bool _isRecent = false;
   int? _pressedStationId;
-  bool _showSearch = false;
+  bool _showRecent = false;
   Map<String, List<StationInfo>> _stationsByDistrict = {};
   List<String> _districtNames = [];
   String _selectedDistrict = '';
@@ -10425,7 +10425,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   }
 
   Widget _buildIndexHint(BuildContext context) {
-    if (!_showIndexHint || _isSearching || _isDraggingIndex.value) return const SizedBox.shrink();
+    if (!_showIndexHint || _isRecent || _isDraggingIndex.value) return const SizedBox.shrink();
     final accessibility = context.watch<AccessibilityProvider>();
     final isEnglish = widget.isEnglish;
     return Positioned(
@@ -10472,7 +10472,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   void _onSearchChanged() {
     final query = _searchController.text.toLowerCase().trim();
     setState(() {
-      _isSearching = query.isNotEmpty;
+      _isRecent = query.isNotEmpty;
       
       if (query.isEmpty) {
         // 重置為所有車站
@@ -10593,7 +10593,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       _contentAnimationController.reverse();
       _searchController.clear();
       _searchFocusNode.unfocus();
-      _showSearch = false;
+      _showRecent = false;
       HapticFeedback.lightImpact();
     } else {
       // Expanding: start animations immediately and in parallel
@@ -10625,7 +10625,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       setState(() {}); // Single setState batches all animation starts
     }
     
-    _showSearch = true;
+    _showRecent = true;
     
     // ✅ PERFORMANCE OPTIMIZATION 5: Defer focus request after paint
     // This prevents layout thrashing during animation startup
@@ -10848,16 +10848,16 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                         duration: const Duration(milliseconds: 200), // ✅ Reduced from contentTransition
                         decoration: ShapeDecoration(
                           shape: const CircleBorder(),
-                          color: (_showSearch || _isSearching)
+                          color: (_showRecent || _isRecent)
                               ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
                               : Colors.transparent,
                         ),
                         child: Padding(
                           padding: const EdgeInsets.all(6),
                           child: Icon(
-                            Icons.search,
+                            Icons.history,
                             size: (isLandscape ? 18 : 20) * accessibility.iconScale,
-                            color: (_showSearch || _isSearching)
+                            color: (_showRecent || _isRecent)
                                 ? Theme.of(context).colorScheme.primary
                                 : AppColors.getPrimaryTextColor(context),
                           ),
@@ -10890,7 +10890,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
   }
   
   // 模組化組件：搜索框（包含最近車站）
-  Widget _buildSearchField({
+  Widget _buildRecentStop({
     required BuildContext context,
     required LanguageProvider lang,
     required AccessibilityProvider accessibility,
@@ -10907,42 +10907,9 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       ),
       child: Row(
         children: [
-          // 搜索輸入框（減少寬度）
-          Expanded(
-            flex: 2,
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              decoration: InputDecoration(
-                hintText: lang.searchStations,
-                prefixIcon: Icon(Icons.search, size: 20 * accessibility.iconScale),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(Icons.clear, size: 20 * accessibility.iconScale),
-                        onPressed: () {
-                          _searchController.clear();
-                          _searchFocusNode.unfocus();
-                        },
-                      )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(
-                    color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.1),
-                    width: UIConstants.borderWidthThin,
-                  ),
-                ),
-                filled: true,
-                fillColor: Theme.of(context).colorScheme.surface,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              ),
-              textInputAction: TextInputAction.search,
-            ),
-          ),
-          
           // 最近車站區域（只在非搜索狀態下顯示）
-          if (_recentStations.isNotEmpty && !_isSearching) ...[
-            const SizedBox(width: 8),
+          if (_recentStations.isNotEmpty && !_isRecent) ...[
+            //const SizedBox(width: 0),
             Expanded(
               flex: 2,
               child: Container(
@@ -10955,33 +10922,46 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.history,
-                          size: 12 * accessibility.iconScale,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          widget.isEnglish ? 'Recent' : '最近',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.primary,
-                            fontSize: 10 * accessibility.textScale,
+                    
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // ✅ 優化：使用 SizedBox 包裹圖標確保居中
+                          SizedBox(
+                            width: 16 * accessibility.iconScale,
+                            height: 16 * accessibility.iconScale,
+                            child: Icon(
+                              Icons.history,
+                              size: 16 * accessibility.iconScale,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 4),
+                          // ✅ 優化：設定 height 確保文字垂直居中
+                          Text(
+                            widget.isEnglish ? 'Recent' : '最近',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 16 * accessibility.textScale,
+                              height: 1.0, // ✅ 關鍵：緊湊行高確保垂直對齊
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 2),
+
+                    const SizedBox(height: 10),
                     SingleChildScrollView(
                       physics: EnhancedScrollPhysics.enhanced(),
                       scrollDirection: Axis.horizontal,
                       child: Row(
                         children: () {
-                          final width = MediaQuery.of(context).size.width;
-                          final int maxChips = width < 360 ? 2 : (width < 520 ? 3 : 4);
+                          //final width = MediaQuery.of(context).size.width;
+                          final int maxChips = 4;
                           final items = _recentStations.take(maxChips).toList();
                           return items.asMap().entries.map((entry) {
                           final index = entry.key;
@@ -11005,18 +10985,18 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                                     child: ActionChip(
                                       avatar: Icon(
                                         Icons.tram,
-                                        size: 10 * accessibility.iconScale,
+                                        size: 16 * accessibility.iconScale,
                                         color: Theme.of(context).colorScheme.onSurface,
                                       ),
                                       label: Text(
                                         station.displayName(widget.isEnglish),
                                         overflow: TextOverflow.ellipsis,
                                         maxLines: 1,
-                                        style: TextStyle(fontSize: 9.5 * accessibility.textScale),
+                                        style: TextStyle(fontSize: 16 * accessibility.textScale),
                                       ),
                                       onPressed: () => _selectStation(station),
                                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                      visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
+                                      visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
                                     ),
                                   ),
                                 ),
@@ -11290,12 +11270,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                 );
               },
               // ✅ Use const ValueKey for search results - avoids string recreation
-              child: _isSearching
-                  ? KeyedSubtree(
-                      key: const ValueKey('searchGrid'),
-                      child: _buildSearchResults(accessibility),
-                    )
-                  : KeyedSubtree(
+              child: KeyedSubtree(
                       key: ValueKey('districtGrid_$_selectedDistrict'),
                       child: _buildDistrictGrid(accessibility),
                     ),
@@ -11382,141 +11357,13 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                 ),
               );
             },
-            child: _isSearching
-                ? KeyedSubtree(
-                    key: const ValueKey('searchGrid'),
-                    child: _buildSearchResults(accessibility),
-                  )
-                : KeyedSubtree(
+            child: KeyedSubtree(
                     key: ValueKey('districtGrid_$_selectedDistrict'),
                     child: _buildDistrictGrid(accessibility),
                   ),
           ),
         ),
       ],
-    );
-  }
-  
-  Widget _buildSearchResults(AccessibilityProvider accessibility) {
-    final lang = context.watch<LanguageProvider>();
-    
-    if (_filteredStations.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.search_off,
-                size: 32 * accessibility.iconScale,
-                color: AppColors.getPrimaryTextColor(context),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                lang.noStationsFound,
-                style: TextStyle(
-                  fontSize: 14 * accessibility.textScale,
-                  color: AppColors.getPrimaryTextColor(context),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    
-    return ClipRect(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Calculate responsive grid based on available width
-          int crossAxisCount = 2; // Default for narrow screens
-          double aspectRatio = 1.3;
-          double crossAxisSpacing = 6;
-          double mainAxisSpacing = 6;
-          
-          // Responsive adjustments based on screen width
-          if (constraints.maxWidth > 600) {
-            crossAxisCount = 3; // 3 columns for medium screens
-            aspectRatio = 1.4;
-          }
-          if (constraints.maxWidth > 900) {
-            crossAxisCount = 4; // 4 columns for large screens
-            aspectRatio = 1.5;
-            crossAxisSpacing = 8;
-            mainAxisSpacing = 8;
-          }
-          if (constraints.maxWidth > 1200) {
-            crossAxisCount = 5; // 5 columns for extra large screens
-            aspectRatio = 1.6;
-            crossAxisSpacing = 10;
-            mainAxisSpacing = 10;
-          }
-          
-          // Calculate estimated rows based on item count and columns
-          final estimatedRows = (_filteredStations.length / crossAxisCount).ceil();
-          final gridWidth = constraints.maxWidth - 16; // Accounting for padding
-          
-          // Display grid with adaptive columns
-          return Stack(
-            children: [
-              // Grid view
-              GridView.builder(
-                key: const ValueKey('searchGridView'),
-                physics: EnhancedScrollPhysics.enhanced(),
-                padding: const EdgeInsets.all(8),
-                cacheExtent: 100, // Cache 100 pixels above/below viewport for smooth scrolling
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  childAspectRatio: aspectRatio,
-                  crossAxisSpacing: crossAxisSpacing,
-                  mainAxisSpacing: mainAxisSpacing,
-                ),
-                itemCount: _filteredStations.length,
-                itemBuilder: (context, index) {
-                  final station = _filteredStations[index];
-                  final isSelected = station.id == widget.stationProvider.selectedStationId;
-                  
-                  return _buildAnimatedStationCard(
-                    station: station,
-                    isSelected: isSelected,
-                    accessibility: accessibility,
-                    index: index,
-                  );
-                },
-              ),
-            
-            // Grid size debug label
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Consumer<DeveloperSettingsProvider>(
-                builder: (context, devSettings, _) {
-                  // Only show grid info if the setting is enabled
-                  if (!devSettings.showGridDebug) return const SizedBox.shrink();
-                  
-                  return Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      '${crossAxisCount}x$estimatedRows | W:${gridWidth.toInt()}',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12 * accessibility.textScale,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
-      ),
     );
   }
   
@@ -11542,94 +11389,145 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       child: LayoutBuilder(
         builder: (context, constraints) {
           // Calculate responsive grid based on available width
-          int crossAxisCount = 3; // Default for narrow screens
+          int crossAxisCount = 3;
           double aspectRatio = 1.2;
           double crossAxisSpacing = 4;
           double mainAxisSpacing = 4;
           
-          // Responsive adjustments based on screen width
           if (constraints.maxWidth > 600) {
-            crossAxisCount = 4; // 4 columns for medium screens
+            crossAxisCount = 4;
             aspectRatio = 1.3;
           }
           if (constraints.maxWidth > 900) {
-            crossAxisCount = 5; // 5 columns for large screens
+            crossAxisCount = 5;
             aspectRatio = 1.4;
             crossAxisSpacing = 6;
             mainAxisSpacing = 6;
           }
           if (constraints.maxWidth > 1200) {
-            crossAxisCount = 6; // 6 columns for extra large screens
+            crossAxisCount = 6;
             aspectRatio = 1.5;
             crossAxisSpacing = 8;
             mainAxisSpacing = 8;
           }
           
-          // Calculate estimated rows based on item count and columns
           final estimatedRows = (stations.length / crossAxisCount).ceil();
-          final gridWidth = constraints.maxWidth - 16; // Accounting for padding
+          final gridWidth = constraints.maxWidth - 16;
           
+          // ✅ OPTIMIZED: Replace GridView.builder with CustomScrollView + SliverGrid
           return Stack(
             children: [
-              // Grid view
-              GridView.builder(
-                key: ValueKey('districtGridView_$_selectedDistrict'),
+              CustomScrollView(
+                key: ValueKey('districtGridView_sliver_$_selectedDistrict'),
+                controller: _districtScrollController,
                 physics: EnhancedScrollPhysics.enhanced(),
-                padding: const EdgeInsets.all(8),
-                cacheExtent: 100, // Cache 100 pixels above/below viewport for smooth scrolling
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  childAspectRatio: aspectRatio,
-                  crossAxisSpacing: crossAxisSpacing,
-                  mainAxisSpacing: mainAxisSpacing,
-                ),
-                itemCount: stations.length,
-                itemBuilder: (context, index) {
-                  final station = stations[index];
-                  final isSelected = station.id == widget.stationProvider.selectedStationId;
-                  
-                  return _buildAnimatedStationCard(
-                    station: station,
-                    isSelected: isSelected,
-                    accessibility: accessibility,
-                    index: index,
-                  );
-                },
-              ),
-            
-            // Grid size debug label
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Consumer<DeveloperSettingsProvider>(
-                builder: (context, devSettings, _) {
-                  // Only show grid info if the setting is enabled
-                  if (!devSettings.showGridDebug) return const SizedBox.shrink();
-                  
-                  return Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      '${crossAxisCount}x$estimatedRows | W:${gridWidth.toInt()}',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12 * accessibility.textScale,
-                        fontWeight: FontWeight.w600,
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.all(8),
+                    sliver: SliverGrid(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final station = stations[index];
+                          final isSelected = station.id == widget.stationProvider.selectedStationId;
+                          
+                          return _buildAnimatedStationCard(
+                            station: station,
+                            isSelected: isSelected,
+                            accessibility: accessibility,
+                            index: index,
+                          );
+                        },
+                        childCount: stations.length,
+                      ),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: aspectRatio,
+                        crossAxisSpacing: crossAxisSpacing,
+                        mainAxisSpacing: mainAxisSpacing,
                       ),
                     ),
-                  );
-                },
+                  ),
+                ],
               ),
-            ),
-          ],
-        );
-      },
+              
+              // Grid size debug label
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Consumer<DeveloperSettingsProvider>(
+                  builder: (context, devSettings, _) {
+                    if (!devSettings.showGridDebug) return const SizedBox.shrink();
+                    
+                    return Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '${crossAxisCount}x$estimatedRows | W:${gridWidth.toInt()}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12 * accessibility.textScale,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              
+              // Top gradient fade
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 16,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Theme.of(context).colorScheme.surface,
+                          Theme.of(context).colorScheme.surface.withOpacity(0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              
+              // Bottom gradient fade
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 16,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Theme.of(context).colorScheme.surface,
+                          Theme.of(context).colorScheme.surface.withOpacity(0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
+
+
   // Enhanced animated station card with stagger effect
   Widget _buildAnimatedStationCard({
     required StationInfo station,
@@ -11766,10 +11664,10 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.center,
-                          child: Text(
+                          child: AutoSizeText(
                             station.displayName(widget.isEnglish),
                             style: TextStyle(
-                              fontSize: 12 * accessibility.textScale,
+                              fontSize: 20 * accessibility.textScale,
                               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                               color: isSelected 
                                   ? Theme.of(context).colorScheme.onSurface
@@ -11896,8 +11794,8 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                           ),
                         );
                       },
-                      child: _showSearch
-                          ? _buildSearchField(
+                      child: _showRecent
+                          ? _buildRecentStop(
                               context: context,
                               lang: lang,
                               accessibility: accessibility,
@@ -11905,10 +11803,10 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                           : const SizedBox.shrink(),
                     ),
                     
-                    if (_showSearch) const SizedBox(height: 8),
+                    if (_showRecent) const SizedBox(height: 8),
                     
                     // 地區標籤頁選擇器 - 使用模組化組件
-                    if (!_isSearching && _districtNames.isNotEmpty)
+                    if (!_isRecent && _districtNames.isNotEmpty)
                       _buildDistrictSelector(
                         context: context,
                         accessibility: accessibility,

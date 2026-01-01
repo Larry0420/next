@@ -463,11 +463,11 @@ class _KmbDialerState extends State<KmbDialer> {
                                   final ordered = bounds.toList()..sort();
                                   for (final b in ordered) {
                                     final destForBound = _destinationForRouteBound(route, b, isEnglish);
-                  final label = (b == 'I')
-                    ? (isEnglish ? 'Inbound' : '返程')
-                    : (b == 'O')
-                      ? (isEnglish ? 'Outbound' : '往程')
-                      : b;
+                                    final label = (b == 'I')
+                                      ? (isEnglish ? 'Inbound' : '返程')
+                                      : (b == 'O')
+                                        ? (isEnglish ? 'Outbound' : '往程')
+                                        : b;
                                     boundTiles.add(ListTile(
                                       title: _buildHighlightedText(route, input),
                                       subtitle: destForBound != null ? Text(destForBound) : Text(label),

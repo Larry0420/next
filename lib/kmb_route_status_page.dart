@@ -698,7 +698,378 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     );
   }
 
-  /// Build the list view showing route details and stops
+    /// Build the list view using Slivers for better performance and flexibility
+  Widget _buildListView(DeveloperSettingsProvider devSettings) {
+    final bottomPadding = devSettings.useFloatingRouteToggles ? 96.0 : 12.0;
+
+    return CustomScrollView(
+      controller: _scrollController,
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        // 1. Route Header (Fixed at top when floating toggles are disabled)
+        if (!devSettings.useFloatingRouteToggles)
+          SliverToBoxAdapter(
+            child: Column(
+              children: [
+                RouteDestinationWidget(
+                  route: widget.route,
+                  direction: _selectedDirection,
+                  serviceType: _selectedServiceType,
+                  cachedRouteData: _routeDetails,
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+
+        // 2. Main Content States (Loading / Error / Data)
+        if (loading)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              key: const ValueKey('loading'),
+              child: CircularProgressIndicator(
+                strokeWidth: 3.0,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+          )
+        else if (error != null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              key: const ValueKey('error'),
+              child: Text(
+                'Error: $error',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          )
+        else if (data == null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              key: const ValueKey('no_data'),
+              child: Text('No data'),
+            ),
+          )
+        else ...[
+          // 3. Selectors (Direction/Service Type)
+          if (_serviceTypes.isNotEmpty && !devSettings.useFloatingRouteToggles)
+            SliverToBoxAdapter(child: _buildSelectorsCard()),
+
+          // 4. Combined Data Loading/Error Indicators
+          if (_combinedLoading)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: UIConstants.cardPadding,
+                child: Center(
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Theme.of(context).colorScheme.secondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_combinedError != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: UIConstants.cardPadding,
+                child: Text(
+                  'Combined error: $_combinedError',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            ),
+
+          // 5. Station List (Sliver Implementation)
+          _buildSliverStationList(bottomPadding),
+        ],
+      ],
+    );
+  }
+
+  /// Helper to build the correct SliverList based on data source (Variant or Cached)
+  Widget _buildSliverStationList(double bottomPadding) {
+    // A. Priority: Use Variant Stops (Route-Stop API) if available
+    if (_variantStops != null && _selectedDirection != null && _selectedServiceType != null) {
+      return _buildSliverVariantList(_variantStops!, bottomPadding);
+    }
+
+    // Variant loading state
+    if (_variantStopsLoading) {
+      return const SliverToBoxAdapter(
+        child: Card(
+          margin: EdgeInsets.all(12),
+          child: Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ),
+      );
+    }
+
+    // Variant error state
+    if (_variantStopsError != null) {
+      return SliverToBoxAdapter(
+        child: Card(
+          margin: const EdgeInsets.all(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Text(
+              'Error loading route stops: $_variantStopsError',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // B. Fallback: Use Cached Route-To-Stops Map
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const SliverToBoxAdapter(
+            child: Card(
+              margin: EdgeInsets.all(12),
+              child: Padding(
+                padding: EdgeInsets.all(24.0),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ),
+          );
+        }
+
+        if (snap.hasError) {
+          return SliverToBoxAdapter(
+            child: Card(
+              margin: const EdgeInsets.all(12),
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Text(
+                  'Error loading maps: ${snap.error}',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            ),
+          );
+        }
+
+        // Process cached data
+        final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
+        final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
+
+        final r = widget.route.trim().toUpperCase();
+        final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
+        final entries = routeMap[r] ?? routeMap[base] ?? [];
+
+        if (entries.isEmpty) {
+          return const SliverToBoxAdapter(
+            child: Card(
+              margin: EdgeInsets.all(12),
+              child: Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Text('No stop data for route'),
+              ),
+            ),
+          );
+        }
+
+        // Filter and Deduplicate Logic
+        final lang = context.watch<LanguageProvider>();
+        final isEnglish = lang.isEnglish;
+
+        String? _normChar(dynamic v) {
+          if (v == null) return null;
+          final s = v.toString().trim().toUpperCase();
+          if (s.isEmpty) return null;
+          final c = s[0];
+          return (c == 'I' || c == 'O') ? c : null;
+        }
+
+        final selectedBoundChar = _normChar(_selectedDirection);
+        final selectedService = _selectedServiceType;
+        final uniqueStopsMap = <String, Map<String, dynamic>>{};
+
+        for (final e in entries) {
+          if (!e.containsKey('seq')) continue;
+          
+          final entryRoute = e['route']?.toString().trim().toUpperCase();
+          final currentRoute = widget.route.trim().toUpperCase();
+          if (entryRoute != null && entryRoute.isNotEmpty && entryRoute != currentRoute) continue;
+
+          final seq = e['seq']?.toString() ?? '';
+          if (seq.isEmpty) continue;
+
+          if (selectedBoundChar != null && _normChar(e['bound']) != selectedBoundChar) continue;
+          
+          if (selectedService != null) {
+            final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
+            if (entryServiceType != selectedService) continue;
+          }
+
+          if (!uniqueStopsMap.containsKey(seq)) {
+            uniqueStopsMap[seq] = e;
+          }
+        }
+
+        final stops = uniqueStopsMap.values.toList();
+        stops.sort((a, b) {
+          final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
+          final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
+          return ai.compareTo(bi);
+        });
+
+        // ETA Loading State
+        if (_routeEtaLoading) {
+           return SliverToBoxAdapter(
+             child: Card(
+               margin: const EdgeInsets.all(12),
+               child: Padding(
+                 padding: const EdgeInsets.all(24.0),
+                 child: Center(
+                   child: CircularProgressIndicator(
+                     valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                   ),
+                 ),
+               ),
+             ),
+           );
+        }
+
+        // Auto-scroll logic
+        final variantKey = '${r}_${selectedBoundChar}_${selectedService}_cached';
+        if (_lastAutoScrollVariantKey != variantKey) {
+          _lastAutoScrollVariantKey = variantKey;
+          if (_userPosition != null && !_locationLoading && stops.isNotEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _getUserLocationAndScrollToNearest(stops);
+            });
+          }
+        }
+
+        return _buildSliverListDelegate(stops, stopMap, bottomPadding);
+      },
+    );
+  }
+
+  /// Reusable SliverList builder for both Variant and Cached data
+  Widget _buildSliverVariantList(List<Map<String, dynamic>> stops, double bottomPadding) {
+    // Deduplicate and Sort
+    final uniqueStopsMap = <String, Map<String, dynamic>>{};
+    for (final stop in stops) {
+      final seq = stop['seq']?.toString() ?? '';
+      if (seq.isNotEmpty && !uniqueStopsMap.containsKey(seq)) {
+        uniqueStopsMap[seq] = stop;
+      }
+    }
+    final sortedStops = uniqueStopsMap.values.toList();
+    sortedStops.sort((a, b) {
+      final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
+      final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
+      return ai.compareTo(bi);
+    });
+
+    // Variant Loading Check
+    if (_routeEtaLoading) {
+      return SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Auto-scroll
+    final variantKey = '${widget.route}_${_selectedDirection}_${_selectedServiceType}_variant';
+    if (_lastAutoScrollVariantKey != variantKey) {
+      _lastAutoScrollVariantKey = variantKey;
+      if (_userPosition != null && !_locationLoading && sortedStops.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _getUserLocationAndScrollToNearest(sortedStops);
+        });
+      }
+    }
+
+    // Since variant stops already have metadata enriched, we pass an empty map or rely on internal data
+    return _buildSliverListDelegate(sortedStops, {}, bottomPadding); 
+  }
+
+  /// Core delegate builder to avoid code duplication
+  Widget _buildSliverListDelegate(
+    List<Map<String, dynamic>> stops, 
+    Map<String, Map<String, dynamic>> stopMap, // Optional external map for cached mode
+    double bottomPadding
+  ) {
+    final lang = context.watch<LanguageProvider>();
+    final isEnglish = lang.isEnglish;
+    final etaByStop = _etaBySeqCache ?? <String, List<Map<String, dynamic>>>{};
+
+    return SliverPadding(
+      padding: EdgeInsets.only(bottom: bottomPadding),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final s = stops[index];
+            final seq = s['seq']?.toString() ?? '';
+            final stopId = s['stop']?.toString() ?? '';
+
+            if (seq.isEmpty || stopId.isEmpty) return const SizedBox.shrink();
+
+            // Resolve Metadata (Variant data has it inside, Cached data needs lookup)
+            final meta = stopMap[stopId]; 
+            
+            final nameEn = (meta != null 
+                ? (meta['name_en'] ?? meta['nameen']) 
+                : (s['name_en'] ?? s['nameen']))?.toString() ?? '';
+                
+            final nameTc = (meta != null 
+                ? (meta['name_tc'] ?? meta['nametc']) 
+                : (s['name_tc'] ?? s['nametc']))?.toString() ?? '';
+
+            final displayName = isEnglish
+                ? (nameEn.isNotEmpty ? nameEn : (nameTc.isNotEmpty ? nameTc : stopId))
+                : (nameTc.isNotEmpty ? nameTc : (nameEn.isNotEmpty ? nameEn : stopId));
+
+            final latStr = (meta != null ? (meta['lat'] ?? meta['latitude']) : (s['lat'] ?? s['latitude']))?.toString();
+            final lngStr = (meta != null ? (meta['long'] ?? meta['lng']) : (s['long'] ?? s['lng']))?.toString();
+
+            // ETAs and Nearby check
+            final List<Map<String, dynamic>> etas = etaByStop[seq] ?? [];
+            final isNearby = _userPosition != null && latStr != null && lngStr != null
+                ? _isNearbyStop(latStr, lngStr)
+                : false;
+
+            return _buildCompactStopCard(
+              context: context,
+              seq: seq,
+              stopId: stopId,
+              displayName: displayName,
+              nameEn: nameEn,
+              nameTc: nameTc,
+              etas: etas,
+              isEnglish: isEnglish,
+              latitude: latStr,
+              longitude: lngStr,
+              isNearby: isNearby,
+            );
+          },
+          childCount: stops.length,
+        ),
+      ),
+    );
+  }
+
+  /*/// Build the list view showing route details and stops
   Widget _buildListView(DeveloperSettingsProvider devSettings) {
     return Column(
       children: [
@@ -808,7 +1179,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         ),
       ],
     );
-  }
+  }*/
 
   Widget _buildFloatingBottomBar() {
     final lang = context.watch<LanguageProvider>();
@@ -885,7 +1256,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                   SafeArea(
                     top: false,
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingM, vertical: UIConstants.spacingXS),
+                      padding: EdgeInsets.only(
+                        left: UIConstants.spacingM, 
+                        right: UIConstants.spacingM, 
+                        bottom: UIConstants.spacingL, 
+                        top: UIConstants.spacingXS
+                      ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -915,7 +1291,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                 ),
                               ],
                             ),
-                            SizedBox(height: 8),
+                            SizedBox(height: 1),
                             SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
                               physics: ClampingScrollPhysics(),
@@ -936,7 +1312,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                   return Padding(
                                     padding: EdgeInsets.only(right: UIConstants.spacingS),
                                     child: AnimatedContainer(
-                                      duration: Duration(milliseconds: 200),
+                                      duration: Duration(milliseconds: 300),
                                       child: FilterChip(
                                         label: Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -992,7 +1368,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                           
                           // Service type toggles
                           if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
-                            if (_directions.isNotEmpty) SizedBox(height: 12),
+                            if (_directions.isNotEmpty) SizedBox(height: 2),
                             Row(
                               children: [
                                 Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
@@ -1006,7 +1382,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                 ),
                               ],
                             ),
-                            SizedBox(height: 8),
+                            SizedBox(height: 1),
                             SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
                               physics: ClampingScrollPhysics(),
@@ -1018,7 +1394,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                       : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
                                   
                                   return Padding(
-                                    padding: EdgeInsets.only(right: UIConstants.spacingS),
+                                    padding: EdgeInsets.only(right: UIConstants.spacingS, bottom: maxSize),
                                     child: AnimatedContainer(
                                       duration: Duration(milliseconds: 200),
                                       child: FilterChip(
@@ -3133,62 +3509,6 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     }).toList();
   }
 
-  Widget _buildStatusPresentation(ThemeData theme, ColorScheme colorScheme, Color? nearbyTextSecondary) {
-  final statusStyle = theme.textTheme.bodySmall!.copyWith(
-    color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
-    height: 1.2, // Fixed line height for vertical consistency
-  );
-  
-
-  if (!_isExpanded) {
-    return SizedBox(
-      key: const ValueKey('collapsed'),
-      width: double.infinity, // Ensures left alignment in AnimatedSwitcher
-      child: Text(
-        widget.isEnglish ? 'Hidden' : '班次隱藏',
-        style: statusStyle,
-      ),
-    );
-  }
-
-  if (_shouldShowRefreshAnimation) {
-    return SizedBox(
-      key: const ValueKey('loading'),
-      height: 20, // Match visual height of text
-      child: Row(
-        children: [
-          SizedBox(
-            width: 12, 
-            height: 12,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.0,
-              valueColor: AlwaysStoppedAnimation(colorScheme.primary),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            widget.isEnglish ? 'Fetching...' : '更新中...',
-            style: statusStyle.copyWith(color: colorScheme.primary, fontWeight: FontWeight.w600),
-          ),
-        ],
-      ),
-    );
-  }
-
-  if (_displayEtas.isEmpty) {
-    return Text(
-      key: const ValueKey('empty'),
-      widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-      style: statusStyle,
-    );
-  }
-
-  return Row(
-    key: const ValueKey('etas'),
-    children: _buildEtaItems(theme, colorScheme),
-  );
-}
-
   Widget _buildStatusSection(ThemeData theme, ColorScheme colorScheme, Color? nearbyTextSecondary) {
   final statusStyle = theme.textTheme.bodySmall!.copyWith(
     color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
@@ -3361,7 +3681,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const SizedBox(height: 2),
+                          //const SizedBox(height: 2),
                           // Animated Status Area
                           _buildStatusSection(theme, colorScheme, nearbyTextSecondary),
                           
@@ -4013,8 +4333,9 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                 Text(
                                   '${isEnglish ? 'From' : '由'}:  ',
                                   style: TextStyle(
+                                    letterSpacing: -0.05,
                                     fontSize: 10,
-                                    fontWeight: FontWeight.w500,
+                                    fontWeight: FontWeight.w400,
                                     height: 0, // 🔴 固定行高
                                     color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                   ),
@@ -4023,8 +4344,9 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                   child: OptionalMarquee(
                                     text: orig.toString().toTitleCase(),
                                     style: TextStyle(
+                                      letterSpacing: -0.05,
                                       fontSize: 10,
-                                      fontWeight: FontWeight.w500,
+                                      fontWeight: FontWeight.w400,
                                       height: 0, // 🔴 必須與標籤一致
                                       color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                     ),
@@ -4042,19 +4364,21 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                               Text(
                                 '${isEnglish ? 'To' : '往'}:  ',
                                 style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
                                   height: 0, // 🔴 固定行高
                                   color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  letterSpacing: -0.2,
                                 ),
                               ),
                               Expanded(
                                 child: OptionalMarquee(
                                   text: dest.toString().toTitleCase(),
                                   style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1, // 🔴 必須與標籤一致
+                                    letterSpacing: -0.05,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                    height: 0, // 🔴 必須與標籤一致
                                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                                 ),

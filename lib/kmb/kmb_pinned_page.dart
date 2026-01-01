@@ -149,13 +149,13 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
               child: Padding(
                 padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).padding.bottom + 12),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(50),
                   child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                     child: Container(
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(50),
                         border: Border.all(
                           color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
                           width: 1.0,
@@ -163,10 +163,10 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                       ),
                       child: TabBar(
                         controller: _tabController,
-                        splashBorderRadius: BorderRadius.circular(12),
+                        splashBorderRadius: BorderRadius.circular(50),
                         indicator: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
+                          borderRadius: BorderRadius.circular(50),
+                          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6),
                         ),
                         indicatorSize: TabBarIndicatorSize.tab,
                         indicatorPadding: EdgeInsets.all(4),
@@ -497,14 +497,20 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
         itemBuilder: (context, index) {
           final stop = _pinnedStops[index];
           return PinnedStopCard(
-            stop: stop,
+            stop: _pinnedStops[index],
             lang: lang,
+            compact: false,
             onUnpin: () async {
-              await Kmb.unpinStop(stop['route'], stop['stopId'], stop['seq']);
+              await Kmb.unpinStop(
+                _pinnedStops[index]['route'],
+                _pinnedStops[index]['direction'],
+                _pinnedStops[index]['stopId'],
+              );
               _loadData();
             },
-            compact: _pinnedStops.length > 8,
+
           );
+
         },
       ),
     );
@@ -742,7 +748,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                         backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
                         foregroundColor: Theme.of(context).colorScheme.primary,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         //padding: const EdgeInsets.all(6),
                         minimumSize: const Size(20, 20),
@@ -881,15 +887,21 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                           ],
                         ),
                       ),
-                      Ink(
-                        padding: EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5), borderRadius: BorderRadius.circular(100)),
-                        child: InkWell(
-                          onTap: widget.onUnpin,
-                          borderRadius: BorderRadius.circular(100),
-                          child: Icon(Icons.push_pin, color: Theme.of(context).colorScheme.primary, size: 25),
+                      IconButton(
+                        key: const ValueKey('pinned'),
+                        onPressed: widget.onUnpin,
+                        icon: const Icon(Icons.push_pin, size: 29),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                          foregroundColor: Theme.of(context).colorScheme.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          //padding: const EdgeInsets.all(6),
+                          minimumSize: const Size(20, 20),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                      ),
+                      )
                     ],
                   ),
                 ),
