@@ -497,20 +497,14 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
         itemBuilder: (context, index) {
           final stop = _pinnedStops[index];
           return PinnedStopCard(
-            stop: _pinnedStops[index],
+            stop: stop,
             lang: lang,
-            compact: false,
             onUnpin: () async {
-              await Kmb.unpinStop(
-                _pinnedStops[index]['route'],
-                _pinnedStops[index]['direction'],
-                _pinnedStops[index]['stopId'],
-              );
+              await Kmb.unpinStop(stop['route'], stop['stopId'], stop['seq']);
               _loadData();
             },
-
+            compact: _pinnedStops.length > 8,
           );
-
         },
       ),
     );
@@ -748,7 +742,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                         backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
                         foregroundColor: Theme.of(context).colorScheme.primary,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(50),
                         ),
                         //padding: const EdgeInsets.all(6),
                         minimumSize: const Size(20, 20),
@@ -888,20 +882,17 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                         ),
                       ),
                       IconButton(
-                        key: const ValueKey('pinned'),
                         onPressed: widget.onUnpin,
-                        icon: const Icon(Icons.push_pin, size: 29),
+                        icon: const Icon(Icons.push_pin, size: 20),
                         style: IconButton.styleFrom(
                           backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
                           foregroundColor: Theme.of(context).colorScheme.primary,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          //padding: const EdgeInsets.all(6),
-                          minimumSize: const Size(20, 20),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.all(10),
                         ),
-                      )
+                      ),
                     ],
                   ),
                 ),

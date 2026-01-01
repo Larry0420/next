@@ -4328,7 +4328,8 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                           // Origin Line (From)
                           if (orig.isNotEmpty) ...[
                             Row(
-                              crossAxisAlignment: CrossAxisAlignment.center, // 確保垂直居中對齊
+                              crossAxisAlignment: CrossAxisAlignment.baseline, // ✅ 關鍵
+                              textBaseline: TextBaseline.alphabetic,          // ✅ 關鍵
                               children: [
                                 Text(
                                   '${isEnglish ? 'From' : '由'}:  ',
@@ -4336,7 +4337,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                     letterSpacing: -0.05,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
-                                    height: 0, // 🔴 固定行高
+                                    // height: 0, // ❌ 移除
                                     color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                   ),
                                 ),
@@ -4347,7 +4348,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                       letterSpacing: -0.05,
                                       fontSize: 10,
                                       fontWeight: FontWeight.w400,
-                                      height: 0, // 🔴 必須與標籤一致
+                                      // height: 0, // ❌ 移除
                                       color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                     ),
                                   ),
@@ -4356,17 +4357,17 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                             ),
                             SizedBox(height: 2),
                           ],
-
                           // Destination Line (To)
                           Row(
-                            crossAxisAlignment: CrossAxisAlignment.center, // 確保垂直居中對齊
+                            crossAxisAlignment: CrossAxisAlignment.baseline, // ✅ 關鍵：基線對齊
+                            textBaseline: TextBaseline.alphabetic,          // ✅ 關鍵：指定基線類型
                             children: [
                               Text(
                                 '${isEnglish ? 'To' : '往'}:  ',
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w500,
-                                  height: 0, // 🔴 固定行高
+                                  // height: 0, // ❌ 移除
                                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   letterSpacing: -0.2,
                                 ),
@@ -4378,16 +4379,13 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                     letterSpacing: -0.05,
                                     fontSize: 16,
                                     fontWeight: FontWeight.w500,
-                                    height: 0, // 🔴 必須與標籤一致
+                                    // height: 1, // ❌ 移除
                                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                               ),
                             ],
                           ),
-
-
-
                         ],
                       ),
                     ),

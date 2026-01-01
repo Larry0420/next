@@ -1162,13 +1162,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                 
                                 final destEn = routeEtas.first['dest_en'] ?? routeEtas.first['desten'] ?? '';
                                 final destTc = routeEtas.first['dest_tc'] ?? routeEtas.first['desttc'] ?? '';
-                                final displayDest = langProv.isEnglish ? destEn : (destTc.isNotEmpty ? destTc : destEn);
+                                final displayDest = langProv.isEnglish ? destEn.toString().toTitleCase() : (destTc.isNotEmpty ? destTc.toString().toTitleCase() : destEn.toString().toTitleCase());
                                 final bound = routeEtas.first['dir'] ?? routeEtas.first['bound'] ?? '';
                                 final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
                                 final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
                                 
                                 return Container(
-                                  margin: EdgeInsets.only(bottom: 8),
+                                  margin: EdgeInsets.only(bottom: 3, top: 6),
                                   decoration: BoxDecoration(
                                     color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
                                     borderRadius: BorderRadius.circular(12),
@@ -1185,7 +1185,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                       onTap: () {
                                         Navigator.of(context).pop();
                                         final seq = routeEtas.first['seq']?.toString();
-                                        final stopIdFromEta = routeEtas.first['stop']?.toString();
+                                        final stopIdFromEta = stop.stopId;  // ✓ 改用 stop.stopId
+                                        
                                         Navigator.of(context).push(MaterialPageRoute(
                                           builder: (_) => KmbRouteStatusPage(
                                             route: route,
@@ -1196,6 +1197,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                           ),
                                         ));
                                       },
+
                                       borderRadius: BorderRadius.circular(12),
                                       child: Padding(
                                         padding: EdgeInsets.all(12),

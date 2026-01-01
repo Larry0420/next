@@ -27,70 +27,51 @@ class OptionalMarquee extends StatelessWidget {
       builder: (context, constraints) {
         final double maxWidth = width ?? constraints.maxWidth;
 
-        // 定義統一的 StrutStyle，強制行高一致
-        // forceStrutHeight: true 是關鍵
-        final StrutStyle strutStyle = StrutStyle.fromTextStyle(
-          style,
-          forceStrutHeight: true, 
+        // ✅ 修正：移除 height: 0，改用標準行高 (null 或 1.x)
+        // 如果傳入 height: 0，我們覆蓋它，因為這會導致渲染問題
+        final TextStyle effectiveStyle = style.copyWith(
+          height: style.height == 0 ? 1.2 : style.height, // 強制一個合理的行高
+          leadingDistribution: TextLeadingDistribution.even, // 解決中文偏移
         );
 
-        if (maxWidth <= 0 || maxWidth.isInfinite) {
-          return Text(
-            text,
-            style: style,
-            strutStyle: strutStyle, // 套用 StrutStyle
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          );
-        }
-
         final textPainter = TextPainter(
-          text: TextSpan(text: text, style: style),
+          text: TextSpan(text: text, style: effectiveStyle),
           textDirection: TextDirection.ltr,
           maxLines: 1,
-          strutStyle: strutStyle, // 測量時也套用 StrutStyle
         )..layout(maxWidth: double.infinity);
 
         final bool overflows = textPainter.width > maxWidth;
-        
-        // 使用含有 strutStyle 的 textPainter 測量出的高度
         final double textHeight = textPainter.height;
 
-        if (overflows) {
-          return SizedBox(
-            width: maxWidth,
-            height: textHeight,
-            child: Marquee(
-              text: text,
-              style: style,
-              scrollAxis: scrollAxis,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              blankSpace: blankSpace,
-              velocity: velocity,
-              pauseAfterRound: pauseAfterRound,
-              startPadding: 0.0,
-              accelerationDuration: const Duration(seconds: 1),
-              accelerationCurve: Curves.linear,
-              decelerationDuration: const Duration(milliseconds: 500),
-              decelerationCurve: Curves.easeOut,
-            ),
-          );
-        } else {
-          return SizedBox(
-            width: maxWidth,
-            height: textHeight,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                text,
-                style: style,
-                strutStyle: strutStyle, // 套用 StrutStyle
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          );
-        }
+        // 我們使用 Stack 技巧來確保對齊
+        // 底層放一個隱藏的 Text 來撐開高度和基線
+        // 上層放 Marquee 或 Text
+        return Container(
+          width: maxWidth,
+          height: textHeight,
+          alignment: Alignment.centerLeft,
+          child: overflows
+              ? Marquee(
+                  text: text,
+                  style: effectiveStyle,
+                  scrollAxis: scrollAxis,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  blankSpace: blankSpace,
+                  velocity: velocity,
+                  pauseAfterRound: pauseAfterRound,
+                  startPadding: 0.0,
+                  accelerationDuration: const Duration(seconds: 1),
+                  accelerationCurve: Curves.linear,
+                  decelerationDuration: const Duration(milliseconds: 500),
+                  decelerationCurve: Curves.easeOut,
+                )
+              : Text(
+                  text,
+                  style: effectiveStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+        );
       },
     );
   }
