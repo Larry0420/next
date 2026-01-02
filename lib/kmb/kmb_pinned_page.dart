@@ -1,6 +1,7 @@
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:ui';
 import 'dart:async';
 import 'dart:math' as math;
@@ -19,22 +20,50 @@ class KmbPinnedPage extends StatefulWidget {
 }
 
 class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProviderStateMixin {
+  static const String _pinnedTabKey = 'kmb_pinned_tab_index';
+
   late TabController _tabController;
   List<Map<String, dynamic>> _pinnedRoutes = [];
   List<Map<String, dynamic>> _pinnedStops = [];
   List<Map<String, dynamic>> _historyRoutes = [];
   bool _loading = true;
-
+  bool _isInitializing = true; // 新增
+  
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _loadData();
+    _loadSavedTabIndex(); // 修改
+  }
+
+  // 新增方法
+  Future<void> _loadSavedTabIndex() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedIndex = (prefs.getInt(_pinnedTabKey) ?? 0).clamp(0, 2);
+    
+    if (mounted) {
+      setState(() {
+        _tabController = TabController(length: 3, vsync: this, initialIndex: savedIndex);
+        _tabController.addListener(_saveTabIndex);
+        _isInitializing = false;
+      });
+      _loadData();
+    }
+  }
+
+  // 新增方法
+  Future<void> _saveTabIndex() async {
+    if (!_tabController.indexIsChanging) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_pinnedTabKey, _tabController.index);
+    }
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    if (!_isInitializing) {
+      _tabController.removeListener(_saveTabIndex);
+      _tabController.dispose();
+    }
     super.dispose();
   }
 
@@ -811,7 +840,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 2, overflow: TextOverflow.ellipsis),
                             if (dest.isNotEmpty) ...[
                               SizedBox(height: 3),
                               Row(
@@ -834,21 +863,21 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                                 children: _etas.take(3).map((e) {
                                   final etaRaw = e['eta'] ?? e['eta_time'];
                                   final rmk = widget.lang.isEnglish ? (e['rmk_en'] ?? '') : (e['rmk_tc'] ?? '');
-                                  String etaText = '—';
+                                  String etaText = widget.lang.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士';
                                   bool isDeparted = false;
                                   bool isNearlyArrived = false;
                                   if (etaRaw != null) {
                                     try {
                                       final dt = DateTime.parse(etaRaw.toString()).toLocal();
                                       final diff = dt.difference(DateTime.now());
-                                      if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
+                                      final mins = diff.inMinutes;
+                                      if (mins <= 0 && diff.inSeconds > -60) {
                                         etaText = widget.lang.isEnglish ? 'Arriving' : '到達中';
                                         isNearlyArrived = true;
                                       } else if (diff.isNegative) {
-                                        etaText = '-';
+                                        etaText = widget.lang.isEnglish ? '- min' : '- 分鐘';
                                         isDeparted = true;
                                       } else {
-                                        final mins = diff.inMinutes;
                                         if (mins < 1) {
                                           etaText = widget.lang.isEnglish ? 'Due' : '即將抵達';
                                           isNearlyArrived = true;

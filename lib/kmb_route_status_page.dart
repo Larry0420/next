@@ -3519,6 +3519,16 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   final firstEta = _displayEtas.isNotEmpty ? _displayEtas.first : null;
   final etaRaw = firstEta != null ? (firstEta['eta'] ?? firstEta['eta_time']) : null;
 
+  // [新增] 計算無 ETA 時的備註
+  String? noEtaRemark;
+  if (firstEta != null && etaRaw == null) {
+      final rmkEn = firstEta['rmk_en']?.toString() ?? firstEta['rmken']?.toString() ?? '';
+      final rmkTc = firstEta['rmk_tc']?.toString() ?? firstEta['rmktc']?.toString() ?? '';
+      final r = widget.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
+      if (r.isNotEmpty) noEtaRemark = r;
+  }
+
+
   return AnimatedSwitcher(
     duration: const Duration(milliseconds: 300),
     switchInCurve: Curves.easeOutCubic,
@@ -3536,9 +3546,31 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                 Text(widget.isEnglish ? 'Loading...' : '更新中...', style: statusStyle.copyWith(color: colorScheme.primary, fontWeight: FontWeight.w600)),
               ],
             )
-          : (etaRaw == null
-              ? Text(key: const ValueKey('empty'), widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士', style: statusStyle)
-              : Row(key: const ValueKey('etas'), children: _buildEtaItems(theme, colorScheme))))
+           : (etaRaw == null
+                  // [修改] 改為 Column 以同時顯示提示文字與備註
+                  ? Column(
+                      key: const ValueKey('empty'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                            widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+                            style: statusStyle),
+                        // [新增] 如果有備註則顯示 (例如: 服務暫停)
+                        if (noEtaRemark != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2.0, bottom: 2.0),
+                            child: Text(
+                              noEtaRemark, 
+                              style: statusStyle.copyWith(
+                                color: colorScheme.error, 
+                                fontSize: 11
+                              )
+                            ),
+                          ),
+                      ],
+                    )
+                  : Row(key: const ValueKey('etas'), children: _buildEtaItems(theme, colorScheme))))
       : Text(
           key: const ValueKey('collapsed'),
           widget.isEnglish ? 'Hidden' : '班次隱藏',

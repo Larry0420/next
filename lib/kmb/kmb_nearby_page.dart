@@ -1113,7 +1113,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                               ),
                               SizedBox(width: 4),
                               Text(
-                                '${langProv.isEnglish ? "Distance" : "距離"}: ${_fmtDistance(distance, langProv: langProv)}',
+                                '${langProv.isEnglish ? "Distance" : "距離"} ${_fmtDistance(distance, langProv: langProv)}',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
@@ -1185,18 +1185,29 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                       onTap: () {
                                         Navigator.of(context).pop();
                                         final seq = routeEtas.first['seq']?.toString();
-                                        final stopIdFromEta = stop.stopId;  // ✓ 改用 stop.stopId
                                         
+                                        // ✓ 修正 1: 直接使用當前站點物件的 stopId
+                                        // 這樣能保證 ID 與路線資料庫中的 ID 一致，StatusPage 才能正確比對
+                                        final stopIdFromEta = stop.stopId;
+                                        
+                                        // ✓ 修正 2: 處理 Bound 方向格式，只取第一個字元 (O/I)
+                                        String? normalizedBound;
+                                        if (bound != null && bound.toString().isNotEmpty) {
+                                          final b = bound.toString().trim().toUpperCase();
+                                          if (b.isNotEmpty) normalizedBound = b[0]; // 取 'O' 或 'I'
+                                        }
+
                                         Navigator.of(context).push(MaterialPageRoute(
                                           builder: (_) => KmbRouteStatusPage(
                                             route: route,
-                                            bound: bound.toString().isNotEmpty ? bound.toString().toUpperCase() : null,
+                                            bound: normalizedBound, // 傳遞正規化後的方向
                                             serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
                                             autoExpandSeq: seq,
                                             autoExpandStopId: stopIdFromEta,
                                           ),
                                         ));
                                       },
+
 
                                       borderRadius: BorderRadius.circular(12),
                                       child: Padding(

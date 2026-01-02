@@ -3545,21 +3545,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
       ),
       const MtrSchedulePage(key: ValueKey('mtr')),
     ];
-
+    
+    // Insert KMB before Settings at index 3 if enabled
     // Insert KMB before Settings at index 3 if enabled
     if (devSettings.showKmbInNav) {
-      pages.insert(kmbIndex, DefaultTabController(
-        length: 3,
-        child: Scaffold(
-          appBar: TabBar(tabs: [
-            Tab(icon: Icon(Icons.dialpad), text: lang.routes),
-            Tab(icon: Icon(Icons.location_on), text: lang.nearby),
-            Tab(icon: Icon(Icons.push_pin), text: lang.pinned),
-          ]),
-          body: TabBarView(children: [KmbDialer(), KmbNearbyPage(), KmbPinnedPage()]),
-        ),
-      ));
+      pages.insert(kmbIndex, const KmbPage());
     }
+
 
     // Always add Settings at the end
     pages.add(const _SettingsPage(key: ValueKey('settings')));
@@ -10335,7 +10327,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
             onTapUp: (_) { _isDraggingIndex.value = false; _activeIndexLabel.value = null; },
             child: Container(
               width: 24,
-              margin: const EdgeInsets.symmetric(vertical: 8),
+              margin: const EdgeInsets.symmetric(vertical: 40),
               padding: const EdgeInsets.symmetric(vertical: 6),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
@@ -11992,6 +11984,87 @@ class SimpleStationSelector extends StatelessWidget {
     );
   }
 }
+
+// The new class to be added at the bottom of main.dart
+class KmbPage extends StatefulWidget {
+  const KmbPage({super.key});
+
+  @override
+  State<KmbPage> createState() => _KmbPageState();
+}
+
+class _KmbPageState extends State<KmbPage> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  static const String _tabIndexKey = 'kmb_tab_index_pref';
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedIndex();
+  }
+
+  Future<void> _loadSavedIndex() async {
+    final prefs = await SharedPreferences.getInstance();
+    final idx = (prefs.getInt(_tabIndexKey) ?? 0).clamp(0, 2);
+    
+    if (mounted) {
+      setState(() {
+        _tabController = TabController(length: 3, vsync: this, initialIndex: idx);
+        _tabController.addListener(_saveIndex);
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _saveIndex() async {
+    if (!_tabController.indexIsChanging) {
+       final prefs = await SharedPreferences.getInstance();
+       await prefs.setInt(_tabIndexKey, _tabController.index);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (!_isLoading) {
+      _tabController.removeListener(_saveIndex);
+      _tabController.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lang = context.watch<LanguageProvider>();
+    
+    if (_isLoading) {
+       // Return a skeleton or loading state
+       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return Scaffold(
+      appBar: TabBar(
+        controller: _tabController,
+        tabs: [
+          Tab(icon: const Icon(Icons.dialpad), text: lang.routes),
+          Tab(icon: const Icon(Icons.location_on), text: lang.nearby),
+          Tab(icon: const Icon(Icons.push_pin), text: lang.pinned),
+        ],
+        labelColor: Theme.of(context).colorScheme.primary,
+        indicatorColor: Theme.of(context).colorScheme.primary,
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: const [
+          KmbDialer(),
+          KmbNearbyPage(),
+          KmbPinnedPage(),
+        ],
+      ),
+    );
+  }
+}
+
 
 // Compatibility alias for tests expecting `MyApp`
 class MyApp extends StatelessWidget {
