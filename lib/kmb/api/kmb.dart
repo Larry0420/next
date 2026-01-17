@@ -2,13 +2,14 @@
 // Implementation based on kmb.md spec and kmb_dictionary.md
 
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter/foundation.dart' show compute;
 import 'dart:io';
+import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
+
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Kmb {
   final Map<String, String> dictionary;
@@ -294,7 +295,7 @@ class Kmb {
             lastError = 'Unexpected payload type at $u: ${payload.runtimeType}';
           }
         } else {
-          final snippet = resp.body.length > 200 ? resp.body.substring(0, 200) + '...' : resp.body;
+          final snippet = resp.body.length > 200 ? '${resp.body.substring(0, 200)}...' : resp.body;
           lastError = 'HTTP ${resp.statusCode} from $u: $snippet';
         }
       } catch (e) {
@@ -343,7 +344,7 @@ class Kmb {
       } else if (resp.statusCode == 422) {
         throw Exception('Invalid route parameters: route=$route, direction=$direction, service_type=$serviceType');
       } else {
-        final snippet = resp.body.length > 200 ? resp.body.substring(0, 200) + '...' : resp.body;
+        final snippet = resp.body.length > 200 ? '${resp.body.substring(0, 200)}...' : resp.body;
         throw Exception('HTTP ${resp.statusCode}: $snippet');
       }
     } catch (e) {
@@ -388,7 +389,7 @@ class Kmb {
         } else if (resp.statusCode == 422) {
           lastError = 'API validation error at $u: Invalid request parameters';
         } else {
-          final snippet = resp.body.length > 200 ? resp.body.substring(0, 200) + '...' : resp.body;
+          final snippet = resp.body.length > 200 ? '${resp.body.substring(0, 200)}...' : resp.body;
           lastError = 'HTTP ${resp.statusCode} from $u: $snippet';
         }
       } catch (e) {
@@ -1170,7 +1171,7 @@ class Kmb {
     final r = route.trim().toUpperCase();
 
     // Get route stops (from cache or API)
-    Map<String, List<Map<String, dynamic>>> routeMap = await buildRouteToStopsMap();
+    final Map<String, List<Map<String, dynamic>>> routeMap = await buildRouteToStopsMap();
     final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
     final routeStops = routeMap[r] ?? routeMap[base] ?? [];
 

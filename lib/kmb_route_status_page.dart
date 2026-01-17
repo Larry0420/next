@@ -1,11 +1,12 @@
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import '/kmb/api/kmb.dart';
+import '/kmb/api/citybus.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart' show compute;
-import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants;
+import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants, EnhancedScrollPhysics;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -17,7 +18,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:marquee/marquee.dart';
 import 'optionalMarquee.dart';
 import 'toTitleCase.dart';
 
@@ -30,13 +30,13 @@ class KmbRouteStatusPage extends StatefulWidget {
   /// Optional sequence number to auto-expand when page loads
   final String? autoExpandSeq;
   const KmbRouteStatusPage({
-    Key? key, 
+    super.key, 
     required this.route, 
     this.bound, 
     this.serviceType,
     this.autoExpandStopId,
     this.autoExpandSeq,
-  }) : super(key: key);
+  });
 
   @override
   State<KmbRouteStatusPage> createState() => _KmbRouteStatusPageState();
@@ -263,7 +263,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     String label = r;
     
     // Wait a bit for route details to load
-    await Future.delayed(Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 500));
     
     if (_routeDetails != null) {
       final routeData = _routeDetails!.containsKey('data') 
@@ -603,7 +603,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       if (_selectedDirection != null) {
                         final bound = e['bound']?.toString().trim().toUpperCase() ?? '';
                         if (bound.isNotEmpty && _selectedDirection!.isNotEmpty && 
-                            bound[0] != _selectedDirection![0]) return false;
+                            bound[0] != _selectedDirection![0]) {
+                          return false;
+                        }
                       }
                       if (_selectedServiceType != null) {
                         final st = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
@@ -626,7 +628,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               },
             ),
           IconButton(
-            icon: Icon(Icons.push_pin_outlined),
+            icon: const Icon(Icons.push_pin_outlined),
             tooltip: lang.pinRoute,
             onPressed: _pinRoute,
           ),
@@ -700,7 +702,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
     /// Build the list view using Slivers for better performance and flexibility
   Widget _buildListView(DeveloperSettingsProvider devSettings) {
-    final bottomPadding = devSettings.useFloatingRouteToggles ? 96.0 : 12.0;
+    final bottomPadding = devSettings.useFloatingRouteToggles ? 250.0 : 50.0;
 
     return CustomScrollView(
       controller: _scrollController,
@@ -748,10 +750,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             ),
           )
         else if (data == null)
-          SliverFillRemaining(
+          const SliverFillRemaining(
             hasScrollBody: false,
             child: Center(
-              key: const ValueKey('no_data'),
+              key: ValueKey('no_data'),
               child: Text('No data'),
             ),
           )
@@ -807,7 +809,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           margin: EdgeInsets.all(12),
           child: Padding(
             padding: EdgeInsets.all(24.0),
-            child: Center(child: CircularProgressIndicator()),
+            child: Center(child: CircularProgressIndicator(year2023: false,)),
           ),
         ),
       );
@@ -839,7 +841,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               margin: EdgeInsets.all(12),
               child: Padding(
                 padding: EdgeInsets.all(24.0),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator(year2023: false,)),
               ),
             ),
           );
@@ -884,7 +886,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         final lang = context.watch<LanguageProvider>();
         final isEnglish = lang.isEnglish;
 
-        String? _normChar(dynamic v) {
+        String? normChar(dynamic v) {
           if (v == null) return null;
           final s = v.toString().trim().toUpperCase();
           if (s.isEmpty) return null;
@@ -892,7 +894,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           return (c == 'I' || c == 'O') ? c : null;
         }
 
-        final selectedBoundChar = _normChar(_selectedDirection);
+        final selectedBoundChar = normChar(_selectedDirection);
         final selectedService = _selectedServiceType;
         final uniqueStopsMap = <String, Map<String, dynamic>>{};
 
@@ -906,7 +908,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           final seq = e['seq']?.toString() ?? '';
           if (seq.isEmpty) continue;
 
-          if (selectedBoundChar != null && _normChar(e['bound']) != selectedBoundChar) continue;
+          if (selectedBoundChar != null && normChar(e['bound']) != selectedBoundChar) continue;
           
           if (selectedService != null) {
             final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
@@ -1189,12 +1191,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
     // Don't show if setting is disabled
     if (!devSettings.useFloatingRouteToggles) {
-      return SizedBox.shrink();
+      return const SizedBox.shrink();
     }
     
     // Don't show if no variants available
     if (_directions.isEmpty && _serviceTypes.isEmpty) {
-      return SizedBox.shrink();
+      return const SizedBox.shrink();
     }
     
     // 🆕 根據內容動態計算最大高度
@@ -1210,19 +1212,19 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       maxChildSize: maxSize,  // 🔴 動態設置
       snap: true,
       snapSizes: [0.22, 0.25, maxSize],  // 🔴 同步更新
-      snapAnimationDuration: Duration(milliseconds: 250),
+      snapAnimationDuration: const Duration(milliseconds: 250),
       builder: (BuildContext context, ScrollController scrollController) {
         return AnimatedContainer(
-          duration: Duration(milliseconds: 250),
+          duration: const Duration(milliseconds: 250),
           curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: theme.colorScheme.surface.withOpacity(0.85),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             boxShadow: [
               BoxShadow(
                 color: theme.colorScheme.onSurface.withOpacity(0.2),
                 blurRadius: 18,
-                offset: Offset(0, -6),
+                offset: const Offset(0, 1),
               ),
             ],
             border: Border(
@@ -1233,7 +1235,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             ),
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
               child: ListView(
@@ -1243,7 +1245,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                   // Drag handle indicator
                   Center(
                     child: Container(
-                      margin: EdgeInsets.symmetric(vertical: 8),
+                      margin: const EdgeInsets.symmetric(vertical: 8),
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
@@ -1256,7 +1258,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                   SafeArea(
                     top: false,
                     child: Padding(
-                      padding: EdgeInsets.only(
+                      padding: const EdgeInsets.only(
                         left: UIConstants.spacingM, 
                         right: UIConstants.spacingM, 
                         bottom: UIConstants.spacingL, 
@@ -1281,7 +1283,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                             Row(
                               children: [
                                 Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
-                                SizedBox(width: 8),
+                                const SizedBox(width: 8),
                                 Text(
                                   isEnglish ? 'Direction' : '方向',
                                   style: theme.textTheme.labelMedium?.copyWith(
@@ -1291,10 +1293,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                 ),
                               ],
                             ),
-                            SizedBox(height: 1),
+                            const SizedBox(height: 1),
                             SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
-                              physics: ClampingScrollPhysics(),
+                              physics: const ClampingScrollPhysics(),
                               child: Row(
                                 children: _directions.map((d) {
                                   final isSelected = _selectedDirection == d;
@@ -1310,9 +1312,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                         : (isEnglish ? 'Inbound' : '回程');
                                   
                                   return Padding(
-                                    padding: EdgeInsets.only(right: UIConstants.spacingS),
+                                    padding: const EdgeInsets.only(right: UIConstants.spacingS),
                                     child: AnimatedContainer(
-                                      duration: Duration(milliseconds: 300),
+                                      duration: const Duration(milliseconds: 300),
                                       child: FilterChip(
                                         label: Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -1328,7 +1330,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                                     ? theme.colorScheme.secondary
                                                     : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
                                             ),
-                                            SizedBox(width: 6),
+                                            const SizedBox(width: 6),
                                             Text(dirLabel),
                                           ],
                                         ),
@@ -1368,11 +1370,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                           
                           // Service type toggles
                           if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
-                            if (_directions.isNotEmpty) SizedBox(height: 2),
+                            if (_directions.isNotEmpty) const SizedBox(height: 2),
                             Row(
                               children: [
                                 Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
-                                SizedBox(width: 8),
+                                const SizedBox(width: 8),
                                 Text(
                                   isEnglish ? 'Service Type' : '班次類型',
                                   style: theme.textTheme.labelMedium?.copyWith(
@@ -1382,10 +1384,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                 ),
                               ],
                             ),
-                            SizedBox(height: 1),
+                            const SizedBox(height: 1),
                             SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
-                              physics: ClampingScrollPhysics(),
+                              physics: EnhancedScrollPhysics.enhanced(),
                               child: Row(
                                 children: (_serviceTypes..sort()).map((st) {
                                   final isSelected = _selectedServiceType == st;
@@ -1396,12 +1398,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                   return Padding(
                                     padding: EdgeInsets.only(right: UIConstants.spacingS, bottom: maxSize),
                                     child: AnimatedContainer(
-                                      duration: Duration(milliseconds: 200),
+                                      duration: const Duration(milliseconds: 200),
                                       child: FilterChip(
                                         label: Text(typeLabel),
                                         selected: isSelected,
                                         selectedColor: theme.colorScheme.primary,
-                                        backgroundColor: theme.colorScheme.surfaceVariant,
+                                        backgroundColor: theme.colorScheme.surfaceContainerHighest,
                                         checkmarkColor: theme.colorScheme.onPrimary,
                                         labelStyle: TextStyle(
                                           color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
@@ -1473,7 +1475,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${lang.routePinned} ${widget.route}'),
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -1483,7 +1485,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final payload = data!['data'];
     final devSettings = context.watch<DeveloperSettingsProvider>();
 
-    List<Widget> sections = [];
+    final List<Widget> sections = [];
 
     // Hide technical response info - users don't need to see this
     // sections.add(Card(
@@ -1559,9 +1561,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final isEnglish = lang.isEnglish;
     
     return Card(
-      margin: EdgeInsets.symmetric(horizontal: UIConstants.spacingM, vertical: UIConstants.spacingS),
+      margin: const EdgeInsets.symmetric(horizontal: UIConstants.spacingM, vertical: UIConstants.spacingS),
       child: Padding(
-        padding: EdgeInsets.all(UIConstants.spacingM),
+        padding: const EdgeInsets.all(UIConstants.spacingM),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1569,14 +1571,14 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               Row(
                 children: [
                   Icon(Icons.alt_route, size: 18, color: Theme.of(context).iconTheme.color ?? Theme.of(context).colorScheme.onSurfaceVariant),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
                     isEnglish ? 'Direction' : '方向',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 children: _directions.map((d) {
@@ -1616,18 +1618,18 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               ),
             ],
             if (_serviceTypes.isNotEmpty) ...[
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Icon(Icons.route, size: 18, color: Theme.of(context).iconTheme.color ?? Theme.of(context).colorScheme.onSurfaceVariant),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
                     isEnglish ? 'Service Type' : '服務類型',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 children: _serviceTypes.map((s) {
@@ -1681,7 +1683,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final meta = combined['data'] ?? {};
   final List stops = meta['stops'] ?? [];
 
-  if (stops.isEmpty) return Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('No combined stops')));
+  if (stops.isEmpty) return const Card(child: Padding(padding: EdgeInsets.all(UIConstants.spacingM), child: Text('No combined stops')));
 
     final combinedRouteEta = meta['routeEta'] ?? [];
     return Card(
@@ -1701,13 +1703,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (etas.isEmpty) Text('No ETAs'),
+                  if (etas.isEmpty) const Text('No ETAs'),
                   for (final e in etas)
-                    Text('${e['etaseq'] ?? ''} · ${_formatEtaWithRelative(context, e['eta'] ?? e['eta_time'] ?? null)} · ${e['desten'] ?? e['desttc'] ?? ''}'),
+                    Text('${e['etaseq'] ?? ''} · ${_formatEtaWithRelative(context, e['eta'] ?? e['eta_time'])} · ${e['desten'] ?? e['desttc'] ?? ''}'),
                 ],
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );
@@ -1988,7 +1990,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             subtitle: Text('$nameen\nlat: $lat, long: $lng'),
             children: [
               Padding(
-                padding: EdgeInsets.symmetric(horizontal: UIConstants.spacingM),
+                padding: const EdgeInsets.symmetric(horizontal: UIConstants.spacingM),
                 child: StopEtaTile(stopId: stopId),
               )
             ],
@@ -2019,7 +2021,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         title: Text('Stop $stopId (${entries.length})'),
         children: entries.map((entry) {
           final etaseq = entry['etaseq']?.toString() ?? '';
-          final eta = _formatEtaWithRelative(context, entry['eta'] ?? entry['eta_time'] ?? null);
+          final eta = _formatEtaWithRelative(context, entry['eta'] ?? entry['eta_time']);
           final dest = entry['desten'] ?? entry['desttc'] ?? '';
           final remark = entry['rmken'] ?? entry['rmktc'] ?? '';
           final etatime = entry['eta_time'] != null ? 'time: ${entry['eta_time']}' : '';
@@ -2181,7 +2183,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
     
     return ListView.builder(  // 🔴 直接返回 ListView，不需要 Column + Expanded
-      key: ValueKey('kmb_${widget.route}_${_selectedDirection}_${_selectedServiceType}'),
+      key: ValueKey('kmb_${widget.route}_${_selectedDirection}_$_selectedServiceType'),
       controller: _scrollController,
       padding: EdgeInsets.only(
         bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 96.0 : 12.0,
@@ -2243,7 +2245,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         
   
     if (_variantStopsLoading) {
-      return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
+      return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: false,))));
     }
     
     if (_variantStopsError != null) {
@@ -2255,7 +2257,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     return FutureBuilder<List<dynamic>>(
       future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
+        if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: false,))));
         if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))));
 
         final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
@@ -2264,14 +2266,14 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         final r = widget.route.trim().toUpperCase();
         final base = RegExp(r'^(\\d+)').firstMatch(r)?.group(1) ?? r;
         final entries = routeMap[r] ?? routeMap[base] ?? [];
-  if (entries.isEmpty) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('No stop data for route')));
+  if (entries.isEmpty) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Text('No stop data for route')));
 
         // Language preference
         final lang = context.watch<LanguageProvider>();
         final isEnglish = lang.isEnglish;
 
         // Helper: normalize direction/bound values to a single char 'I' or 'O'
-        String? _normChar(dynamic v) {
+        String? normChar(dynamic v) {
           if (v == null) return null;
           final s = v.toString().trim().toUpperCase();
           if (s.isEmpty) return null;
@@ -2282,7 +2284,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         }
 
         // Determine selected bound char from state (if any). If null, keep both directions.
-        final selectedBoundChar = _normChar(_selectedDirection);
+        final selectedBoundChar = normChar(_selectedDirection);
         final selectedService = _selectedServiceType;
 
         // Filter by bound O/I AND service_type (keep all if not selected), then sort by seq
@@ -2305,7 +2307,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           if (seq.isEmpty) continue;
           
           // Filter by bound/direction if selected
-          if (selectedBoundChar != null && _normChar(e['bound']) != selectedBoundChar) continue;
+          if (selectedBoundChar != null && normChar(e['bound']) != selectedBoundChar) continue;
           // Filter by service_type if selected
           if (selectedService != null) {
             final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
@@ -2383,11 +2385,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           children: [
             // Use shrinkWrap instead of Expanded since we're inside a SingleChildScrollView
             AnimatedSwitcher(
-              duration: Duration(milliseconds: 200),
+              duration: const Duration(milliseconds: 200),
               child: ListView.builder(
                 key: PageStorageKey<String>('kmb_list_${r}_${selectedBoundChar}_${selectedService}_cached'),
               shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
+              physics: const NeverScrollableScrollPhysics(),
               padding: EdgeInsets.only(
                 bottom: context.watch<DeveloperSettingsProvider>().useFloatingRouteToggles ? 200.0 : 12.0,
               ),
@@ -2453,7 +2455,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
-        title: Text('Raw JSON'),
+        title: const Text('Raw JSON'),
         children: [
           Padding(
             padding: const EdgeInsets.all(12.0),
@@ -2473,7 +2475,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       ? (_routeDetails!['data'] as Map<String, dynamic>?)
       : _routeDetails!;
     
-    if (routeData == null) return SizedBox.shrink();
+    if (routeData == null) return const SizedBox.shrink();
 
     final orig = isEnglish 
       ? (routeData['orig_en'] ?? routeData['orig_tc'] ?? '')
@@ -2507,7 +2509,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         child: Row(
           children: [
             Icon(dirIcon, color: dirColor, size: 28),
-            SizedBox(width: 12),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 '$orig → $dest',
@@ -2522,7 +2524,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             ),
             if (serviceType != null && serviceType != '1')
               Container(
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: cs.secondary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(6),
@@ -2615,7 +2617,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         ),
               const SizedBox(height: 8),
               const Expanded(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator(year2023: false,)),
               ),
             ],
           );
@@ -2858,8 +2860,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           final lngDiff = maxLng - minLng;
           final maxDiff = latDiff > lngDiff ? latDiff : lngDiff;
           
-          if (maxDiff > 0.1) zoom = 11.0;
-          else if (maxDiff > 0.05) zoom = 12.0;
+          if (maxDiff > 0.1) {
+            zoom = 11.0;
+          } else if (maxDiff > 0.05) zoom = 12.0;
           else if (maxDiff > 0.02) zoom = 13.0;
           else zoom = 14.0;
         } else {
@@ -3053,7 +3056,7 @@ class ExpandableStopCard extends StatefulWidget {
   final void Function(double lat, double lng)? onJumpToMap;
 
   const ExpandableStopCard({
-    Key? key,
+    super.key,
     required this.seq,
     required this.displayName,
     this.nameEn,
@@ -3071,7 +3074,7 @@ class ExpandableStopCard extends StatefulWidget {
     this.isNearby = false,
     this.autoExpand = false,
     this.onJumpToMap,
-  }) : super(key: key);
+  });
 
   @override
   State<ExpandableStopCard> createState() => _ExpandableStopCardState();
@@ -3663,7 +3666,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                               width: double.infinity,
                               padding: const EdgeInsets.fromLTRB(16.0, 2.0, 0.0, 2.0), // left, top, right, bottom
                               decoration: BoxDecoration(
-                                color: nearbyTextSecondary?.withOpacity(0.1),
+                                color: nearbyTextSecondary.withOpacity(0.1),
                                 border: Border(
                                   bottom: BorderSide(color: nearbyBorderColor, width: 1.5),
                                 ),
@@ -3847,7 +3850,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
 class StopEtaTile extends StatefulWidget {
   final String stopId;
-  const StopEtaTile({Key? key, required this.stopId}) : super(key: key);
+  const StopEtaTile({super.key, required this.stopId});
 
   @override
   State<StopEtaTile> createState() => _StopEtaTileState();
@@ -3874,7 +3877,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
         if (mins < 1) {
           relative = 'Departed';
         } else if (mins < 60) {
-          relative = '${mins} min ago';
+          relative = '$mins min ago';
         } else {
           final h = diff.abs().inHours;
           final m = diff.abs().inMinutes % 60;
@@ -3885,7 +3888,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
         if (mins < 1) {
           relative = 'Due';
         } else if (mins < 60) {
-          relative = '${mins} min';
+          relative = '$mins min';
         } else {
           final h = diff.inHours;
           final m = diff.inMinutes % 60;
@@ -3930,14 +3933,14 @@ class _StopEtaTileState extends State<StopEtaTile> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return Padding(padding: const EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator()));
+    if (loading) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator(year2023: false,)));
     if (error != null) return Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: $error', style: TextStyle(color: Theme.of(context).colorScheme.error)));
-    if (etas == null || etas!.isEmpty) return Padding(padding: const EdgeInsets.all(8.0), child: Text('No ETA data'));
+    if (etas == null || etas!.isEmpty) return const Padding(padding: EdgeInsets.all(8.0), child: Text('No ETA data'));
 
     return Column(
       children: etas!.map((e) {
         final route = e['route'] ?? '';
-        final eta = _formatEtaLocal(e['eta'] ?? null);
+        final eta = _formatEtaLocal(e['eta']);
         final dest = e['desten'] ?? e['desttc'] ?? '';
         final remark = e['rmken'] ?? e['rmktc'] ?? '';
         final etatime = e['eta_time'] != null ? 'time: ${e['eta_time']}' : '';
@@ -3959,12 +3962,12 @@ class RouteDestinationWidget extends StatefulWidget {
   final Map<String, dynamic>? cachedRouteData;
 
   const RouteDestinationWidget({
-    Key? key,
+    super.key,
     required this.route,
     this.direction,
     this.serviceType,
     this.cachedRouteData,
-  }) : super(key: key);
+  });
 
   @override
   State<RouteDestinationWidget> createState() => _RouteDestinationWidgetState();
@@ -4014,7 +4017,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   void _startErrorRetry() {
     // Auto-retry failed fetch after 5 seconds
     _errorRetryTimer?.cancel();
-    _errorRetryTimer = Timer(Duration(seconds: 5), () {
+    _errorRetryTimer = Timer(const Duration(seconds: 5), () {
       if (mounted) {
         _fetchRouteData(silent: false);
       }
@@ -4172,7 +4175,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
               child: Container(
                 height: 60,
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
                     color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
@@ -4225,7 +4228,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
               child: Row(
                 children: [
                   Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 20),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4234,7 +4237,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                           'Error loading route',
                           style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12, fontWeight: FontWeight.w600),
                         ),
-                        SizedBox(height: 4),
+                        const SizedBox(height: 4),
                         Text(
                           'Retrying in 5 seconds...',
                           style: TextStyle(color: Theme.of(context).colorScheme.tertiary, fontSize: 11),
@@ -4242,11 +4245,11 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                       ],
                     ),
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: () => _fetchRouteData(silent: false),
-                    icon: Icon(Icons.refresh, size: 16),
-                    label: Text('Retry', style: TextStyle(fontSize: 11)),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('Retry', style: TextStyle(fontSize: 11)),
                   )
                 ],
               ),
@@ -4258,7 +4261,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
 
     // No data state
     if (_routeData == null) {
-      return SizedBox.shrink();
+      return const SizedBox.shrink();
     }
 
     // Extract route information
@@ -4307,7 +4310,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
             filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),//ImageFilter.blur(sigmaX: 10, sigmaY: 10),
             child: Container(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
                   color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
@@ -4319,7 +4322,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                 child: Row(
                       children: [
                         Padding(  // 🆕 添加 padding
-                          padding: EdgeInsets.fromLTRB(0, 10, 0, 10),  // 或使用 EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+                          padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),  // 或使用 EdgeInsets.symmetric(horizontal: 8, vertical: 4)
                           child: Row(
                             children: [
                                 Padding(
@@ -4351,7 +4354,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                             ]
                           ),
                         ),
-                    SizedBox(width: 6),
+                    const SizedBox(width: 6),
                     // Route origin and destination
                     Expanded(
                       child: Column(
@@ -4387,7 +4390,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                 ),
                               ],
                             ),
-                            SizedBox(height: 2),
+                            const SizedBox(height: 2),
                           ],
                           // Destination Line (To)
                           Row(

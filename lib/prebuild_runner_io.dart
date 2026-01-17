@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 
 /// Runs tools/prebuild_kmb.dart by locating the project root (looking for
 /// pubspec.yaml) and invoking `dart` with the script. Returns combined

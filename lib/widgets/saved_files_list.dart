@@ -4,7 +4,7 @@ import 'dart:convert';
 
 /// Page that lists saved request files, allows preview, restore and delete.
 class SavedFilesPage extends StatefulWidget {
-  const SavedFilesPage({Key? key}) : super(key: key);
+  const SavedFilesPage({super.key});
 
   @override
   State<SavedFilesPage> createState() => _SavedFilesPageState();
@@ -42,19 +42,19 @@ class _SavedFilesPageState extends State<SavedFilesPage> {
         title: Text(filename),
         content: SingleChildScrollView(child: SelectableText(pretty)),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text('Close')),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
           TextButton(onPressed: () {
             Navigator.of(context).pop();
             Navigator.of(context).pop(data); // return data as restore result
-          }, child: Text('Restore')),
+          }, child: const Text('Restore')),
         ],
       ));
     } else {
       // unsupported compressed file preview
       await showDialog(context: context, builder: (_) => AlertDialog(
-        title: Text('Preview not supported'),
-        content: Text('Preview for this file type is not supported in-app.'),
-        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: Text('Close'))],
+        title: const Text('Preview not supported'),
+        content: const Text('Preview for this file type is not supported in-app.'),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
       ));
     }
     // after preview, refresh list in case a restore action deleted/changed files elsewhere
@@ -63,11 +63,11 @@ class _SavedFilesPageState extends State<SavedFilesPage> {
 
   Future<void> _deleteFile(String filename) async {
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-      title: Text('Delete file?'),
+      title: const Text('Delete file?'),
       content: Text('Delete $filename? This cannot be undone.'),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text('Cancel')),
-        TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text('Delete', style: TextStyle(color: Colors.red))),
+        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
       ],
     ));
     if (ok == true) {
@@ -84,11 +84,11 @@ class _SavedFilesPageState extends State<SavedFilesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Saved requests')),
+      appBar: AppBar(title: const Text('Saved requests')),
       body: _loading
-        ? Center(child: CircularProgressIndicator())
+        ? const Center(child: CircularProgressIndicator(year2023: false,))
         : _files.isEmpty
-          ? Center(child: Text('No saved files'))
+          ? const Center(child: Text('No saved files'))
           : ListView.builder(
               itemCount: _files.length,
               itemBuilder: (context, idx) {
@@ -97,7 +97,7 @@ class _SavedFilesPageState extends State<SavedFilesPage> {
                   title: Text(name),
                   onTap: () => _previewFile(name),
                   trailing: IconButton(
-                    icon: Icon(Icons.delete_forever, color: Colors.redAccent),
+                    icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
                     onPressed: () => _deleteFile(name),
                   ),
                 );

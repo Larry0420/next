@@ -46,7 +46,7 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: () async {
               // show progress dialog
               showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) {
-                return const Center(child: CircularProgressIndicator());
+                return const Center(child: CircularProgressIndicator(year2023: false,));
               });
               final result = await Kmb.writePrebuiltAssetsToDocuments();
               // dismiss dialog
@@ -67,7 +67,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   });
                   if (useBundled == true) {
                     // show progress
-                    showDialog<void>(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+                    showDialog<void>(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator(year2023: false,)));
                     final copyRes = await Kmb.copyBundledPrebuiltToDocuments();
                     if (mounted && Navigator.canPop(context)) Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(copyRes.ok ? 'Bundled assets copied' : 'Failed to copy bundled assets: ${copyRes.error}')));

@@ -242,32 +242,32 @@ class AppColors {
   static Color getErrorColor(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark 
-        ? Color(0xFFEF5350)  // 深色模式：明亮紅 (對比度 5.5:1)
-        : Color(0xFFC62828); // 淺色模式：深紅 (對比度 6.2:1)
+        ? const Color(0xFFEF5350)  // 深色模式：明亮紅 (對比度 5.5:1)
+        : const Color(0xFFC62828); // 淺色模式：深紅 (對比度 6.2:1)
   }
   
   /// 警告顏色 - 高可見度橙色
   static Color getWarningColor(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark 
-        ? Color(0xFFFF9800)  // 深色模式：明橙 (對比度 4.8:1)
-        : Color(0xFFEF6C00); // 淺色模式：深橙 (對比度 5.2:1)
+        ? const Color(0xFFFF9800)  // 深色模式：明橙 (對比度 4.8:1)
+        : const Color(0xFFEF6C00); // 淺色模式：深橙 (對比度 5.2:1)
   }
   
   /// 成功/確認顏色 - 清晰綠色
   static Color getSuccessColor(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark 
-        ? Color(0xFF66BB6A)  // 深色模式：亮綠 (對比度 5.0:1)
-        : Color(0xFF2E7D32); // 淺色模式：深綠 (對比度 6.5:1)
+        ? const Color(0xFF66BB6A)  // 深色模式：亮綠 (對比度 5.0:1)
+        : const Color(0xFF2E7D32); // 淺色模式：深綠 (對比度 6.5:1)
   }
   
   /// 信息顏色 - 專業藍色
   static Color getInfoColor(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark 
-        ? Color(0xFF42A5F5)  // 深色模式：亮藍 (對比度 4.5:1)
-        : Color(0xFF1976D2); // 淺色模式：深藍 (對比度 7.0:1)
+        ? const Color(0xFF42A5F5)  // 深色模式：亮藍 (對比度 4.5:1)
+        : const Color(0xFF1976D2); // 淺色模式：深藍 (對比度 7.0:1)
   }
 }
 
@@ -802,11 +802,11 @@ class LrtApp extends StatelessWidget {
       brightness: brightness,
       pageTransitionsTheme: PageTransitionsTheme(
         builders: {
-          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.android: isDark ? ZoomPageTransitionsBuilder() : _EnhancedPageTransitionsBuilder(),
-          TargetPlatform.windows: _EnhancedPageTransitionsBuilder(),
-          TargetPlatform.linux: _EnhancedPageTransitionsBuilder(),
+          TargetPlatform.iOS: const CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: const CupertinoPageTransitionsBuilder(),
+          TargetPlatform.android: isDark ? const ZoomPageTransitionsBuilder() : const _EnhancedPageTransitionsBuilder(),
+          TargetPlatform.windows: const _EnhancedPageTransitionsBuilder(),
+          TargetPlatform.linux: const _EnhancedPageTransitionsBuilder(),
         },
       ),
       textTheme: baseTheme.textTheme.apply(fontSizeFactor: accessibility.textScale).copyWith(
@@ -909,7 +909,7 @@ class MotionConstants {
 
 /* ========================= Enhanced Scroll Physics ========================= */
 
-class EnhancedScrollPhysics {
+class EnhancedScrollPhysics extends ScrollPhysics {
   // Enhanced bouncing physics with better spring simulation
   static const BouncingScrollPhysics bouncing = BouncingScrollPhysics(
     decelerationRate: ScrollDecelerationRate.fast,
@@ -1636,7 +1636,7 @@ class HttpErrorProvider extends ChangeNotifier {
         final seconds = remaining.inSeconds % 60;
         return isEnglish 
           ? 'Rate limit exceeded - retry in ${minutes}m ${seconds}s'
-          : '已達速率限制 - ${minutes}分${seconds}秒後重試';
+          : '已達速率限制 - $minutes分$seconds秒後重試';
       }
       return isEnglish 
         ? 'Rate limit exceeded - please wait'
@@ -1649,7 +1649,7 @@ class HttpErrorProvider extends ChangeNotifier {
         final seconds = remaining.inSeconds;
         return isEnglish 
           ? 'Multiple errors - retry in ${seconds}s'
-          : '多次錯誤 - ${seconds}秒後重試';
+          : '多次錯誤 - $seconds秒後重試';
       }
       return isEnglish 
         ? 'Multiple API errors - requests paused'
@@ -2702,6 +2702,8 @@ class LrtApiService {
 
 /* ========================= HTTP Error Banner ========================= */
 class HttpErrorBanner extends StatelessWidget {
+  const HttpErrorBanner({super.key});
+
   @override
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
@@ -3595,17 +3597,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
           ),
           child: ClipRect(
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(color: Colors.transparent),
             ),
           ),
         ),
         leading: Padding(
-          padding: const EdgeInsets.only(left: 12.0, top:8.0, bottom: 8.0),
+          padding: const EdgeInsets.only(left: 12.0, top:8.0, bottom: 4.0),
           child: SvgPicture.asset(
             'assets/icon/tram_icon_android.svg',
-            width: 28,
-            height: 28,
+            width: 24,
+            height: 24,
             fit: BoxFit.contain,
           ),
         ),
@@ -3617,7 +3619,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
             key: ValueKey(lang.isEnglish),
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.w600,
-              letterSpacing: 0.15,
+              letterSpacing: -0.15,
             ),
           ),
         ),
@@ -4110,7 +4112,7 @@ class _CachedDataBanner extends StatelessWidget {
 class _SchedulePage extends StatelessWidget {
   final StationProvider stationProvider;
   final ScheduleProvider scheduleProvider;
-  const _SchedulePage({super.key, required this.stationProvider, required this.scheduleProvider});
+  const _SchedulePage({required this.stationProvider, required this.scheduleProvider});
 
   @override
   Widget build(BuildContext context) {
@@ -4259,7 +4261,7 @@ class _ScheduleBody extends StatelessWidget {
 
     Widget content;
     if (loading) {
-      content = const Center(child: CircularProgressIndicator());
+      content = const Center(child: CircularProgressIndicator(year2023: false,));
     } else if (error != null) {
       content = _ErrorView(error: error!, onRetry: onRefresh, isOffline: connectivity.isOffline);
     } else if (data == null || data!.platforms.isEmpty) {
@@ -4753,7 +4755,7 @@ class _TrainTileState extends State<_TrainTile> {
 class _TrainDetail extends StatefulWidget {
   final TrainInfo train;
   final int platformId;
-  const _TrainDetail({Key? key, required this.train, required this.platformId}) : super(key: key);
+  const _TrainDetail({super.key, required this.train, required this.platformId});
 
   @override
   State<_TrainDetail> createState() => _TrainDetailState();
@@ -4900,7 +4902,7 @@ class _TrainDetailState extends State<_TrainDetail> {
 /* ------------------------- Routes Page (json.txt-driven) ------------------------- */
 
 class _RoutesPage extends StatefulWidget {
-  const _RoutesPage({super.key});
+  const _RoutesPage();
 
   @override
   State<_RoutesPage> createState() => _RoutesPageState();
@@ -5187,7 +5189,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
       // FIX: Add mounted check at the start of timer callback
       if (!mounted) return;
       
-      final routeKey = '${route.routeNumber}';
+      final routeKey = route.routeNumber;
       
       // Check cache first
       if (_routeCache.containsKey(routeKey) && _lastLoadedRouteKey == routeKey) {
@@ -5365,7 +5367,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
       if (!mounted) return;
       
       if (sched.status == 1 && sched.platforms.isNotEmpty) {
-        final routeKey = '${route.routeNumber}';
+        final routeKey = route.routeNumber;
         
         setState(() {
           // Update only this station's data
@@ -5515,6 +5517,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
             valueColor: AlwaysStoppedAnimation<Color>(
               Theme.of(context).colorScheme.primary,
             ),
+            year2023: false,
           ),
         ),
         if (_unmatched.isNotEmpty)
@@ -6467,7 +6470,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
             : '已達速率限制';
         subtitle = lang.isEnglish
             ? 'Retrying in ${minutes}m ${seconds}s'
-            : '將於 ${minutes}分${seconds}秒 後重試';
+            : '將於 $minutes分$seconds秒 後重試';
       } else {
         message = lang.isEnglish
             ? 'Rate limit exceeded - please wait'
@@ -6482,7 +6485,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
             : '多次 API 錯誤';
         subtitle = lang.isEnglish
             ? 'Retrying in ${seconds}s'
-            : '將於 ${seconds}秒 後重試';
+            : '將於 $seconds秒 後重試';
       } else {
         message = lang.isEnglish
             ? 'Multiple errors - requests paused'
@@ -6621,13 +6624,13 @@ class _RouteSchedulesList extends StatefulWidget {
   final void Function(int stationId)? onRefreshStation; // ✅ Callback with station ID
 
   const _RouteSchedulesList({
-    Key? key,
+    super.key,
     required this.routeNo,
     this.routeName,
     required this.schedules,
     required this.stationProvider,
     this.onRefreshStation, // ✅ Optional refresh callback with station ID
-  }) : super(key: key);
+  });
 
   @override
   State<_RouteSchedulesList> createState() => _RouteSchedulesListState();
@@ -6804,7 +6807,7 @@ class _RouteSchedulesListState extends State<_RouteSchedulesList> {
     // Build compact route header
     final stationIdsAll = widget.schedules.keys.toList()..sort();
 
-    Widget header = Container(
+    final Widget header = Container(
       margin: const EdgeInsets.fromLTRB(10, 6, 10, 8),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -10522,7 +10525,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
     recentIds.insert(0, stationId.toString());
     // 只保留最近3個
     if (recentIds.length > 3) {
-      recentIds.removeRange(3, recentIds.length);
+      recentIds.removeRange(4, recentIds.length);
     }
     
     await prefs.setStringList('recent_stations', recentIds);
@@ -11026,7 +11029,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       height: scaledHeight,
       margin: EdgeInsets.symmetric(
         horizontal: isSmallScreen ? 4.0 : 8.0,
-        vertical: 4.0,
+        vertical: 0.0,
       ),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
@@ -11036,7 +11039,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
         controller: _districtScrollController,
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-        physics: const BouncingScrollPhysics(),
+        physics: EnhancedScrollPhysics.enhanced(),
         itemCount: _districtNames.length,
         itemBuilder: (context, index) {
           final district = _districtNames[index];
@@ -11051,7 +11054,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
           );
           
           // ✅ Optimize: Cache chip width calculations using district name as key
-          String cacheKey = '$district|$screenWidth|${isSmallScreen}';
+          final String cacheKey = '$district|$screenWidth|$isSmallScreen';
           double chipWidth = _chipWidthCache[cacheKey] ?? 0;
           
           // Only calculate if not cached (or cache miss)
@@ -11406,40 +11409,56 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
           final estimatedRows = (stations.length / crossAxisCount).ceil();
           final gridWidth = constraints.maxWidth - 16;
           
-          // ✅ OPTIMIZED: Replace GridView.builder with CustomScrollView + SliverGrid
           return Stack(
             children: [
-              CustomScrollView(
-                key: ValueKey('districtGridView_sliver_$_selectedDistrict'),
-                controller: _districtScrollController,
-                physics: EnhancedScrollPhysics.enhanced(),
-                slivers: [
-                  SliverPadding(
-                    padding: const EdgeInsets.all(8),
-                    sliver: SliverGrid(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final station = stations[index];
-                          final isSelected = station.id == widget.stationProvider.selectedStationId;
-                          
-                          return _buildAnimatedStationCard(
-                            station: station,
-                            isSelected: isSelected,
-                            accessibility: accessibility,
-                            index: index,
-                          );
-                        },
-                        childCount: stations.length,
-                      ),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount,
-                        childAspectRatio: aspectRatio,
-                        crossAxisSpacing: crossAxisSpacing,
-                        mainAxisSpacing: mainAxisSpacing,
+              // ✅ Wrap CustomScrollView with ShaderMask for internal fade
+              ShaderMask(
+                shaderCallback: (Rect bounds) {
+                  return LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black,
+                      Colors.black,
+                      Colors.transparent,
+                    ],
+                    stops: [0.0, 0.02, 0.95, 1.0], // Adjust fade depth
+                  ).createShader(bounds);
+                },
+                blendMode: BlendMode.dstIn,
+                child: CustomScrollView(
+                  key: ValueKey('districtGridView_sliver_$_selectedDistrict'),
+                  controller: _districtScrollController,
+                  physics: EnhancedScrollPhysics.enhanced(),
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.all(8),
+                      sliver: SliverGrid(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final station = stations[index];
+                            final isSelected = station.id == widget.stationProvider.selectedStationId;
+                            
+                            return _buildAnimatedStationCard(
+                              station: station,
+                              isSelected: isSelected,
+                              accessibility: accessibility,
+                              index: index,
+                            );
+                          },
+                          childCount: stations.length,
+                        ),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          childAspectRatio: aspectRatio,
+                          crossAxisSpacing: crossAxisSpacing,
+                          mainAxisSpacing: mainAxisSpacing,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               
               // Grid size debug label
@@ -11454,7 +11473,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         '${crossAxisCount}x$estimatedRows | W:${gridWidth.toInt()}',
@@ -11468,56 +11487,13 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                   },
                 ),
               ),
-              
-              // Top gradient fade
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 16,
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Theme.of(context).colorScheme.surface,
-                          Theme.of(context).colorScheme.surface.withOpacity(0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              
-              // Bottom gradient fade
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: 16,
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          Theme.of(context).colorScheme.surface,
-                          Theme.of(context).colorScheme.surface.withOpacity(0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             ],
           );
         },
       ),
     );
   }
+
 
 
   // Enhanced animated station card with stagger effect
@@ -11593,20 +11569,20 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                     color: isSelected 
                         ? Theme.of(context).colorScheme.primary 
                         : Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
-                    width: isSelected ? 1.5 : 1.0,
+                    width: isSelected ? 2.0 : 1.0,
                   ),
                   boxShadow: [
                     if (isSelected)
                       BoxShadow(
                         color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
                         blurRadius: 6,
-                        offset: const Offset(0, 3),
+                        offset: const Offset(4, 4),
                       ),
                     if (_pressedStationId == station.id)
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.06),
                         blurRadius: 8,
-                        offset: const Offset(0, 3),
+                        offset: const Offset(4, 4),
                       ),
                   ],
                 ),
@@ -11680,7 +11656,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                           child: Text(
                             station.groupName(widget.isEnglish),
                             style: TextStyle(
-                              fontSize: 9 * accessibility.textScale,
+                              fontSize: 12 * accessibility.textScale,
                               fontWeight: FontWeight.w400,
                               color: AppColors.getPrimaryTextColor(context).withValues(alpha: 0.7),
                             ),
@@ -12039,16 +12015,16 @@ class _KmbPageState extends State<KmbPage> with SingleTickerProviderStateMixin {
     
     if (_isLoading) {
        // Return a skeleton or loading state
-       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+       return const Scaffold(body: Center(child: CircularProgressIndicator(year2023: false,)));
     }
 
     return Scaffold(
       appBar: TabBar(
         controller: _tabController,
         tabs: [
-          Tab(icon: const Icon(Icons.dialpad), text: lang.routes),
-          Tab(icon: const Icon(Icons.location_on), text: lang.nearby),
-          Tab(icon: const Icon(Icons.push_pin), text: lang.pinned),
+          Tab(icon: const Icon(Icons.route), text: lang.routes), //Navbar for KMB Search
+          Tab(icon: const Icon(Icons.location_on), text: lang.nearby), //Navbar for KMB Nearby
+          Tab(icon: const Icon(Icons.push_pin), text: lang.pinned), //Navbar for KMB Pinned
         ],
         labelColor: Theme.of(context).colorScheme.primary,
         indicatorColor: Theme.of(context).colorScheme.primary,

@@ -73,7 +73,7 @@ class _KmbDialerState extends State<KmbDialer> {
             SizedBox(height: 8),
 
             // status indicators
-            if (loading) Center(child: CircularProgressIndicator()),
+            if (loading) Center(child: CircularProgressIndicator(year2023: false,)),
             if (error != null) Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: Text('Error: $error', style: TextStyle(color: Colors.red)),

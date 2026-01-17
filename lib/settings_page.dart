@@ -5,7 +5,7 @@ import 'kmb/api/kmb.dart';
 import 'prebuild_runner_stub.dart' if (dart.library.io) 'prebuild_runner_io.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({Key? key}) : super(key: key);
+  const SettingsPage({super.key});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -33,23 +33,23 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Settings')),
+      appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
           SwitchListTile(
-            title: Text('Always use per-route API for route stops'),
-            subtitle: Text('Fetch fresh route-stop data from the route API every time when enabled.'),
+            title: const Text('Always use per-route API for route stops'),
+            subtitle: const Text('Fetch fresh route-stop data from the route API every time when enabled.'),
             value: _useRouteApi,
             onChanged: _set,
           ),
           ListTile(
-            title: Text('Regenerate prebuilt data'),
-            subtitle: Text('Fetch route & stop data and store in app documents (prebuilt).'),
-            trailing: Icon(Icons.refresh),
+            title: const Text('Regenerate prebuilt data'),
+            subtitle: const Text('Fetch route & stop data and store in app documents (prebuilt).'),
+            trailing: const Icon(Icons.refresh),
             onTap: () async {
               // show progress dialog
               showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) {
-                return const Center(child: CircularProgressIndicator());
+                return const Center(child: CircularProgressIndicator(year2023: false,));
               });
               final result = await Kmb.writePrebuiltAssetsToDocuments();
               // dismiss dialog
@@ -70,7 +70,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   });
                   if (useBundled == true) {
                     // show progress
-                    showDialog<void>(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+                    showDialog<void>(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator(year2023: false,)));
                     final copyRes = await Kmb.copyBundledPrebuiltToDocuments();
                     if (mounted && Navigator.canPop(context)) Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(copyRes.ok ? 'Bundled assets copied' : 'Failed to copy bundled assets: ${copyRes.error}')));
@@ -82,14 +82,14 @@ class _SettingsPageState extends State<SettingsPage> {
             },
           ),
           ListTile(
-            title: Text('Run prebuild script (dev)'),
-            subtitle: Text('Invoke tools/prebuild_kmb.dart (desktop/dev only).'),
-            trailing: Icon(Icons.build),
+            title: const Text('Run prebuild script (dev)'),
+            subtitle: const Text('Invoke tools/prebuild_kmb.dart (desktop/dev only).'),
+            trailing: const Icon(Icons.build),
             onTap: () async {
               // If not supported, the stub will return a message.
               // Show a progress indicator while the script runs.
               showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) {
-                return const Center(child: CircularProgressIndicator());
+                return const Center(child: CircularProgressIndicator(year2023: false,));
               });
               final out = await runPrebuildScript();
               if (mounted && Navigator.canPop(context)) Navigator.pop(context);

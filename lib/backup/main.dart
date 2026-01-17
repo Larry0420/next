@@ -4181,7 +4181,7 @@ class _ScheduleBody extends StatelessWidget {
 
     Widget content;
     if (loading) {
-      content = const Center(child: CircularProgressIndicator());
+      content = const Center(child: CircularProgressIndicator(year2023: false,));
     } else if (error != null) {
       content = _ErrorView(error: error!, onRetry: onRefresh, isOffline: connectivity.isOffline);
     } else if (data == null || data!.platforms.isEmpty) {
@@ -10807,7 +10807,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
         controller: _districtScrollController,
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-        physics: const BouncingScrollPhysics(),
+        physics: EnhancedScrollPhysics.enhanced(),
         itemCount: _districtNames.length,
         itemBuilder: (context, index) {
           final district = _districtNames[index];

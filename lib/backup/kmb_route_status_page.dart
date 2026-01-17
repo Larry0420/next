@@ -279,14 +279,14 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       body: Padding(
         padding: const EdgeInsets.all(12.0),
         child: loading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: CircularProgressIndicator(year2023: false,))
             : (error != null
                 ? Center(child: Text('Error: $error', style: const TextStyle(color: Colors.red)))
                 : (data == null
                     ? const Center(child: Text('No data'))
                     : Column(
                         children: [
-                          if (_combinedLoading) const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator())),
+                          if (_combinedLoading) const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator(year2023: false,))),
                           if (_combinedError != null) Padding(padding: const EdgeInsets.all(8.0), child: Text('Combined error: $_combinedError', style: const TextStyle(color: Colors.red))),
                           Expanded(child: _buildStructuredView()),
                         ],
@@ -401,7 +401,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   Widget _buildRouteEtaCard() {
-    if (_routeEtaLoading) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
+    if (_routeEtaLoading) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: false,))));
     if (_routeEtaError != null) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error: $_routeEtaError', style: TextStyle(color: Colors.red))));
     if (_routeEtaEntries == null || _routeEtaEntries!.isEmpty) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('No route ETA data')));
 
@@ -689,7 +689,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return Padding(padding: const EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator()));
+    if (loading) return Padding(padding: const EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator(year2023: false,)));
     if (error != null) return Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: $error', style: TextStyle(color: Colors.red)));
     if (etas == null || etas!.isEmpty) return Padding(padding: const EdgeInsets.all(8.0), child: Text('No ETA data'));
 

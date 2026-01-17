@@ -1,16 +1,21 @@
-import 'package:flutter/material.dart';
-import 'dart:ui';
 import 'dart:async';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:lrt_next_train/toTitleCase.dart';
 import 'package:provider/provider.dart';
-import 'api/kmb.dart';
+
 import '../kmb_route_status_page.dart';
 import '../main.dart' show LanguageProvider;
+
+import 'api/citybus.dart';
+import 'api/kmb.dart';
+
 
 class KmbDialer extends StatefulWidget {
   final void Function(String route)? onRouteSelected;
   // When true the dialer is positioned to favor right-hand one-handed use.
   final bool rightHanded;
-  const KmbDialer({Key? key, this.onRouteSelected, this.rightHanded = true}) : super(key: key);
+  const KmbDialer({super.key, this.onRouteSelected, this.rightHanded = true});
 
   @override
   State<KmbDialer> createState() => _KmbDialerState();
@@ -142,7 +147,7 @@ class _KmbDialerState extends State<KmbDialer> {
     final entries = _routeMap![r] ?? _routeMap![base] ?? [];
     if (entries.isEmpty) return null;
 
-    String? _normChar(dynamic v) {
+    String? normChar(dynamic v) {
       if (v == null) return null;
       final s = v.toString().trim().toUpperCase();
       if (s.isEmpty) return null;
@@ -153,7 +158,7 @@ class _KmbDialerState extends State<KmbDialer> {
 
     final Set<String> dirs = {};
     for (final e in entries) {
-      final b = _normChar(e['bound']);
+      final b = normChar(e['bound']);
       if (b != null) dirs.add(b);
       if (dirs.length == 2) break;
     }
@@ -221,25 +226,25 @@ class _KmbDialerState extends State<KmbDialer> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Text(lang.isEnglish ? 'Enter Route:' : '輸入路線:', style: TextStyle(fontSize: 18)),
+              child: Text(lang.isEnglish ? 'Enter Route:' : '輸入路線:', style: const TextStyle(fontSize: 18)),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-              child: Text(input, style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+              child: Text(input, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
 
             // status indicators
-            if (loading) Center(child: CircularProgressIndicator()),
+            if (loading) const Center(child: CircularProgressIndicator(year2023: false,)),
             if (error != null) Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: Column(
                 children: [
-                  Text('${lang.isEnglish ? "Error" : "錯誤"}: $error', style: TextStyle(color: Colors.red)),
-                  SizedBox(height: 8),
+                  Text('${lang.isEnglish ? "Error" : "錯誤"}: $error', style: const TextStyle(color: Colors.red)),
+                  const SizedBox(height: 8),
                   ElevatedButton(
                     onPressed: _fetchRoutes,
                     child: Text(lang.isEnglish ? 'Retry' : '重試'),
@@ -250,10 +255,10 @@ class _KmbDialerState extends State<KmbDialer> {
 
             // AnimatedSwitcher for the routes list: hidden when input is empty
             AnimatedSwitcher(
-              duration: Duration(milliseconds: 300),
+              duration: const Duration(milliseconds: 300),
               child: (!loading && error == null && input.isNotEmpty)
                   ? LayoutBuilder(
-                      key: ValueKey('routes_list'),
+                      key: const ValueKey('routes_list'),
                       builder: (context, constraints) {
                         // Cap the list height to avoid overflow on tall/narrow screens (like 18:9)
                         final maxHeight = MediaQuery.of(context).size.height * 0.38;
@@ -388,7 +393,7 @@ class _KmbDialerState extends State<KmbDialer> {
                                       
                                       variantTiles.add(ListTile(
                                         title: _buildHighlightedText(route, input),
-                                        subtitle: Text(subtitleText, style: TextStyle(fontSize: 13)),
+                                        subtitle: Text(subtitleText, style: const TextStyle(fontSize: 13)),
                                         onTap: () {
                                           final r = route.toUpperCase();
                                           Navigator.of(context).push(MaterialPageRoute(
@@ -403,7 +408,7 @@ class _KmbDialerState extends State<KmbDialer> {
                                     Card(
                                       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      color: theme.colorScheme.surfaceVariant,
+                                      color: theme.colorScheme.surfaceContainerHighest,
                                       child: Column(children: variantTiles),
                                     ),
                                   );
@@ -445,7 +450,7 @@ class _KmbDialerState extends State<KmbDialer> {
                                     Card(
                                       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      color: theme.colorScheme.surfaceVariant,
+                                      color: theme.colorScheme.surfaceContainerHighest,
                                         child: ListTile(
                                           title: _buildHighlightedText(route, input),
                                           subtitle: subtitleWidget,
@@ -482,7 +487,7 @@ class _KmbDialerState extends State<KmbDialer> {
                                     Card(
                                       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      color: theme.colorScheme.surfaceVariant,
+                                      color: theme.colorScheme.surfaceContainerHighest,
                                       child: Column(children: boundTiles),
                                     ),
                                   );
@@ -492,7 +497,7 @@ class _KmbDialerState extends State<KmbDialer> {
                                   Card(
                                     margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                    color: theme.colorScheme.surfaceVariant,
+                                    color: theme.colorScheme.surfaceContainerHighest,
                                     child: ExpansionTile(
                                       title: Text('$base (${variants.length})', style: theme.textTheme.titleMedium),
                                       // auto-expand the group that matches the numeric base typed, or expand if it's the only group
@@ -506,8 +511,8 @@ class _KmbDialerState extends State<KmbDialer> {
                                         // Use destination from search results if available
                                         String? subtitleText;
                                         if (routeData.containsKey('orig_en') && routeData.containsKey('dest_en')) {
-                                          final orig = isEnglish ? (routeData['orig_en'] ?? '') : (routeData['orig_tc'] ?? '');
-                                          final dest = isEnglish ? (routeData['dest_en'] ?? '') : (routeData['dest_tc'] ?? '');
+                                          final orig = isEnglish ? (routeData['orig_en'].toString().toTitleCase() ?? '') : (routeData['orig_tc'] ?? '');
+                                          final dest = isEnglish ? (routeData['dest_en'].toString().toTitleCase() ?? '') : (routeData['dest_tc'] ?? '');
                                           
                                           // Check if circular route
                                           final isCircular = orig == dest && orig.isNotEmpty;
@@ -525,8 +530,8 @@ class _KmbDialerState extends State<KmbDialer> {
                                                 : dirLabel;
                                             } else {
                                               subtitleText = serviceType != null && serviceType != '1'
-                                                ? '$orig → $dest ${lang.type}($serviceType)'
-                                                : '$orig → $dest ${lang.isEnglish ? ' [Normal Service]' : ' [常規班次]'}';
+                                                ? '$orig \n→ $dest [${lang.type}($serviceType)]'
+                                                : '$orig \n→ $dest ${lang.isEnglish ? ' [Normal Service]' : ' [常規班次]'}';
                                             }
                                           }
                                         }
@@ -548,7 +553,7 @@ class _KmbDialerState extends State<KmbDialer> {
                                           subtitleText = dest ?? dirLabel;
                                         }
 
-                                        final subtitleWidget = subtitleText != null ? Text(subtitleText, style: TextStyle(fontSize: 13)) : null;
+                                        final subtitleWidget = subtitleText != null ? Text(subtitleText, style: const TextStyle(fontSize: 13)) : null;
 
                                         // Check if this specific variant has a known bound
                                         if (bound != null && bound.isNotEmpty) {
@@ -615,7 +620,7 @@ class _KmbDialerState extends State<KmbDialer> {
                             }
 
                             if (tiles.isEmpty) {
-                              return Center(child: Text('No routes found'));
+                              return const Center(child: Text('No routes found'));
                             }
 
                             return ListView(children: tiles);
@@ -623,10 +628,10 @@ class _KmbDialerState extends State<KmbDialer> {
                         );
                       },
                     )
-                  : SizedBox.shrink(),
+                  : const SizedBox.shrink(),
             ),
 
-            SizedBox(height: 24), // smaller spacer to reduce overall vertical footprint
+            const SizedBox(height: 24), // smaller spacer to reduce overall vertical footprint
           ],
         ),
 
@@ -739,16 +744,17 @@ class _KmbDialerState extends State<KmbDialer> {
                 children: row.map((key) {
                   final bool isEmpty = key.isEmpty;
                   return Padding(
-                    padding: EdgeInsets.all(gap / 2),
+                    padding: const EdgeInsets.all(gap / 2),
                     child: SizedBox(
                       width: btnSize,
                       height: btnSize,
                       child: isEmpty
-                          ? SizedBox.shrink()
+                          ? const SizedBox.shrink()
                           : ElevatedButton(
                               onPressed: () {
-                                if (key == backKey) _onBackspace();
-                                else if (key == okKey) {
+                                if (key == backKey) {
+                                  _onBackspace();
+                                } else if (key == okKey) {
                                   if (routes.contains(input)) {
                                     final r = input.trim().toUpperCase();
                                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => KmbRouteStatusPage(route: r)));
@@ -761,9 +767,9 @@ class _KmbDialerState extends State<KmbDialer> {
                               style: ElevatedButton.styleFrom(
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 padding: EdgeInsets.zero,
-                                minimumSize: Size(btnSize, btnSize),
+                                minimumSize: const Size(btnSize, btnSize),
                               ),
-                              child: Text(key, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                              child: Text(key, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                             ),
                     ),
                   );
@@ -772,7 +778,7 @@ class _KmbDialerState extends State<KmbDialer> {
             }).toList(),
           ),
 
-          SizedBox(width: 8),
+          const SizedBox(width: 8),
 
           // Letter grid: 2 columns x 4 rows (max 8 letters)
           Column(
@@ -784,7 +790,7 @@ class _KmbDialerState extends State<KmbDialer> {
                   children: [
                     for (int c = 0; c < 2; c++)
                       Padding(
-                        padding: EdgeInsets.all(gap / 2),
+                        padding: const EdgeInsets.all(gap / 2),
                         child: SizedBox(
                           width: btnSize,
                           height: btnSize,
@@ -801,10 +807,10 @@ class _KmbDialerState extends State<KmbDialer> {
                                   foregroundColor: theme.colorScheme.onPrimaryContainer,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   padding: EdgeInsets.zero,
-                                  minimumSize: Size(btnSize, btnSize),
+                                  minimumSize: const Size(btnSize, btnSize),
                                   elevation: 0,
                                 ),
-                                child: Text(letter, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                                child: Text(letter, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                               );
                             }
 
@@ -812,13 +818,13 @@ class _KmbDialerState extends State<KmbDialer> {
                             if (!digitGrid.any((row) => row.contains(backKey))) {
                               return ElevatedButton(
                                 onPressed: _onBackspace,
-                                child: Icon(Icons.backspace_outlined, color: theme.colorScheme.onPrimaryContainer),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: theme.colorScheme.primaryContainer,
                                   padding: EdgeInsets.zero,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   elevation: 0,
                                 ),
+                                child: Icon(Icons.backspace_outlined, color: theme.colorScheme.onPrimaryContainer),
                               );
                             }
                             if (!digitGrid.any((row) => row.contains(okKey))) {
@@ -830,17 +836,17 @@ class _KmbDialerState extends State<KmbDialer> {
                                     widget.onRouteSelected?.call(r);
                                   }
                                 },
-                                child: Text('OK', style: TextStyle(color: theme.colorScheme.onPrimaryContainer)),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: theme.colorScheme.primaryContainer,
                                   padding: EdgeInsets.zero,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   elevation: 0,
                                 ),
+                                child: Text('OK', style: TextStyle(color: theme.colorScheme.onPrimaryContainer)),
                               );
                             }
 
-                            return SizedBox.shrink();
+                            return const SizedBox.shrink();
                           }),
                         ),
                       ),
@@ -878,14 +884,14 @@ class _KmbDialerState extends State<KmbDialer> {
 // and a subtle entrance animation to make the dialer feel reachable for one-hand use.
 class _OneHandDialerContainer extends StatefulWidget {
   final Widget child;
-  const _OneHandDialerContainer({Key? key, required this.child}) : super(key: key);
+  const _OneHandDialerContainer({super.key, required this.child});
 
   @override
   State<_OneHandDialerContainer> createState() => _OneHandDialerContainerState();
 }
 
 class _OneHandDialerContainerState extends State<_OneHandDialerContainer> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(vsync: this, duration: Duration(milliseconds: 300));
+  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
 
   @override
   void initState() {
@@ -912,7 +918,7 @@ class _OneHandDialerContainerState extends State<_OneHandDialerContainer> with S
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.12),
               borderRadius: BorderRadius.circular(20),
-              boxShadow: [
+              boxShadow: const [
                 BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 6)),
               ],
               border: Border.all(color: Colors.white10),

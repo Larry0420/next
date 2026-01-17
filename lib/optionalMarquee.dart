@@ -11,7 +11,7 @@ class OptionalMarquee extends StatelessWidget {
   final double? width;
 
   const OptionalMarquee({
-    Key? key,
+    super.key,
     required this.text,
     required this.style,
     this.scrollAxis = Axis.horizontal,
@@ -19,7 +19,7 @@ class OptionalMarquee extends StatelessWidget {
     this.velocity = 120.0,
     this.pauseAfterRound = const Duration(seconds: 1),
     this.width,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

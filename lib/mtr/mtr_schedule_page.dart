@@ -351,7 +351,7 @@ class MtrApiService {
       // Save response as JSON
       final json = _scheduleToJson(response);
       await prefs.setString('$_persistentCachePrefix$cacheKey', jsonEncode(json));
-      await prefs.setInt('${_persistentCachePrefix}${cacheKey}_timestamp', DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt('$_persistentCachePrefix${cacheKey}_timestamp', DateTime.now().millisecondsSinceEpoch);
       
       debugPrint('MTR API: Cached to persistent storage: $cacheKey');
     } catch (e) {
@@ -367,11 +367,11 @@ class MtrApiService {
       final jsonStr = prefs.getString('$_persistentCachePrefix$cacheKey');
       if (jsonStr == null) return null;
       
-      final timestamp = prefs.getInt('${_persistentCachePrefix}${cacheKey}_timestamp');
+      final timestamp = prefs.getInt('$_persistentCachePrefix${cacheKey}_timestamp');
       if (timestamp != null) {
         final age = DateTime.now().millisecondsSinceEpoch - timestamp;
         // Don't use cache older than 30 minutes
-        if (age > Duration(minutes: 30).inMilliseconds) {
+        if (age > const Duration(minutes: 30).inMilliseconds) {
           debugPrint('MTR API: Persistent cache too old (${Duration(milliseconds: age).inMinutes}min)');
           return null;
         }
@@ -1512,7 +1512,7 @@ class MtrScheduleProvider extends ChangeNotifier {
     if (!_circuitBreakerOpen) {
       _circuitBreakerOpen = true;
       _circuitBreakerOpenedAt = DateTime.now();
-      debugPrint('MTR Schedule: Circuit breaker OPENED (${_consecutiveErrors} consecutive errors)');
+      debugPrint('MTR Schedule: Circuit breaker OPENED ($_consecutiveErrors consecutive errors)');
       stopAutoRefresh(); // Stop refreshing
       notifyListeners();
     }
@@ -2181,7 +2181,13 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     final colorScheme = Theme.of(context).colorScheme;
 
     if (!catalog.isInitialized) {
-      return const Center(child: CircularProgressIndicator());
+      return const Align(
+              alignment: Alignment.bottomCenter, 
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 1.0), // Adds 16 pixels of space at the top
+                child: LinearProgressIndicator(year2023: false,),
+              ),
+            );
     }
     if (catalog.lines.isEmpty) {
       return const Center(child: Text('No MTR lines available'));
@@ -2657,7 +2663,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                         catalog.selectDirection(dir);
                       },
                     );
-                  }).toList(),
+                  }),
                 ],
               ),
             ),
@@ -2792,7 +2798,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         children: [
           InkWell(
             onTap: showToggle ? onToggle : null,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(UIConstants.cardRadius)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(UIConstants.cardRadius)),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: UIConstants.cardPadding, vertical: 10),
               child: Row(
@@ -3201,7 +3207,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                         width: 1.2,
                       ),
                     ),
-                    child: Center(
+                    child: const Center(
                       child: Icon(
                         Icons.train,
                         size: 12,
@@ -3562,7 +3568,7 @@ class _MtrScheduleBody extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Direction header shimmer
-            _ShimmerBox(
+            const _ShimmerBox(
               width: 180,
               height: 32,
               borderRadius: 10,
@@ -3572,20 +3578,20 @@ class _MtrScheduleBody extends StatelessWidget {
             ...List.generate(3, (trainIndex) {
               return Container(
                 margin: EdgeInsets.only(bottom: trainIndex == 2 ? 0 : 6),
-                child: Row(
+                child: const Row(
                   children: [
                     _ShimmerBox(width: 8, height: 8, borderRadius: 4),
-                    const SizedBox(width: 10),
+                    SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _ShimmerBox(width: double.infinity, height: 13, borderRadius: 4),
-                          const SizedBox(height: 4),
+                          SizedBox(height: 4),
                           Row(
                             children: [
                               _ShimmerBox(width: 80, height: 18, borderRadius: 5),
-                              const SizedBox(width: 4),
+                              SizedBox(width: 4),
                               _ShimmerBox(width: 60, height: 18, borderRadius: 5),
                             ],
                           ),

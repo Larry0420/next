@@ -18,11 +18,11 @@ Future<void> main(List<String> args) async {
     'https://data.etabus.gov.hk/v1/transport/kmb/route/',
     'https://data.etabus.gov.hk/v1/transport/kmb/route',
   ];
-  Map<String, Map<String, dynamic>> routeInfo = {};
+  final Map<String, Map<String, dynamic>> routeInfo = {};
   bool routeInfoOk = false;
   for (final u in routeUrls) {
     try {
-      final response = await http.get(Uri.parse(u)).timeout(Duration(seconds: 30));
+      final response = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 30));
       print('GET $u -> ${response.statusCode}');
       if (response.statusCode != 200) continue;
       final jsonData = json.decode(response.body);
@@ -51,13 +51,13 @@ Future<void> main(List<String> args) async {
     'https://data.etabus.gov.hk/v1/transport/kmb/route-stop',
     'https://data.etabus.gov.hk/v1/transport/kmb/route/route-stop',
   ];
-  Map<String, List<Map<String, dynamic>>> routeMap = {};
+  final Map<String, List<Map<String, dynamic>>> routeMap = {};
   bool routeOk = false;
   for (final u in routeStopsUrls) {
     try {
       final req = http.Request('GET', Uri.parse(u));
       // ensure the request can't hang indefinitely
-      final streamed = await req.send().timeout(Duration(seconds: 30));
+      final streamed = await req.send().timeout(const Duration(seconds: 30));
       print('GET $u -> ${streamed.statusCode}');
       if (streamed.statusCode != 200) continue;
       final contentLength = streamed.headers['content-length'];
@@ -88,12 +88,12 @@ Future<void> main(List<String> args) async {
     'https://data.etabus.gov.hk/v1/transport/kmb/stop',
     'https://data.etabus.gov.hk/v1/transport/kmb/stop/',
   ];
-  Map<String, Map<String, dynamic>> stopsMap = {};
+  final Map<String, Map<String, dynamic>> stopsMap = {};
   bool stopsOk = false;
   for (final u in stopsUrls) {
     try {
       final req = http.Request('GET', Uri.parse(u));
-      final streamed = await req.send().timeout(Duration(seconds: 30));
+      final streamed = await req.send().timeout(const Duration(seconds: 30));
       print('GET $u -> ${streamed.statusCode}');
       if (streamed.statusCode != 200) continue;
       final contentLength = streamed.headers['content-length'];
@@ -127,16 +127,16 @@ Future<void> main(List<String> args) async {
   print('Wrote ${stopsOut.path} (${stopsMap.length} stops)');
 
   // Build optimized route stops with bound-specific destinations
-  Map<String, Map<String, Map<String, dynamic>>> optimizedRouteMap = {};
+  final Map<String, Map<String, Map<String, dynamic>>> optimizedRouteMap = {};
   for (final route in routeMap.keys) {
     final entries = routeMap[route]!;
     // Group by bound
-    Map<String, List<Map<String, dynamic>>> boundStops = {};
+    final Map<String, List<Map<String, dynamic>>> boundStops = {};
     for (final e in entries) {
       final bound = (e['bound'] ?? '').toString();
       boundStops.putIfAbsent(bound, () => []).add(e);
     }
-    Map<String, Map<String, dynamic>> routeData = {};
+    final Map<String, Map<String, dynamic>> routeData = {};
     for (final bound in boundStops.keys) {
       final stops = boundStops[bound]!;
       // Find the stop with max seq
@@ -242,7 +242,7 @@ Stream<dynamic> _streamArrayElements(Stream<List<int>> byteStream, String key) a
   final buffer = StringBuffer();
   var foundKey = false;
   var inArray = false;
-  bool verbose = true; // set true for more logging
+  final bool verbose = true; // set true for more logging
 
   await for (final chunk in decoder) {
     buffer.write(chunk);
@@ -250,7 +250,7 @@ Stream<dynamic> _streamArrayElements(Stream<List<int>> byteStream, String key) a
 
     if (!foundKey) {
       // look for pattern "key"\s*:\s*[
-      final reg = RegExp('"' + RegExp.escape(key) + '"\\s*:\\s*\\[', dotAll: true);
+      final reg = RegExp('"${RegExp.escape(key)}"\\s*:\\s*\\[', dotAll: true);
       final m = reg.firstMatch(sAll);
       if (m == null) {
         // keep a sliding window to avoid unbounded buffer
@@ -278,7 +278,9 @@ Stream<dynamic> _streamArrayElements(Stream<List<int>> byteStream, String key) a
       if (s.isEmpty) break;
       var pos = 0;
       // skip whitespace and commas
-      while (pos < s.length && (s.codeUnitAt(pos) == 32 || s.codeUnitAt(pos) == 10 || s.codeUnitAt(pos) == 13 || s.codeUnitAt(pos) == 9 || s[pos] == ',')) pos++;
+      while (pos < s.length && (s.codeUnitAt(pos) == 32 || s.codeUnitAt(pos) == 10 || s.codeUnitAt(pos) == 13 || s.codeUnitAt(pos) == 9 || s[pos] == ',')) {
+        pos++;
+      }
       if (pos >= s.length) {
         // nothing left yet
         break;

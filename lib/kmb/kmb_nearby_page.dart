@@ -12,7 +12,7 @@ import '../toTitleCase.dart';
 
 
 class KmbNearbyPage extends StatefulWidget {
-  const KmbNearbyPage({Key? key}) : super(key: key);
+  const KmbNearbyPage({super.key});
 
   @override
   State<KmbNearbyPage> createState() => _KmbNearbyPageState();
@@ -308,7 +308,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       
       // Set up auto-refresh every 30 seconds
       _refreshTimer?.cancel();
-      _refreshTimer = Timer.periodic(Duration(seconds: 30), (_) {
+      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         _fetchEtasForNearbyStops();
       });
     } catch (e) {
@@ -442,19 +442,25 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     
     return Scaffold(
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Align(
+              alignment: Alignment.bottomCenter, 
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 2.0), // Adds 16 pixels of space at the top
+                child: LinearProgressIndicator(year2023: false,),
+              ),
+            )
           : (_error != null
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                      SizedBox(height: 16),
+                      const SizedBox(height: 16),
                       Text(
-                        '${langProv.isEnglish ? "Error" : "錯誤"}',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        langProv.isEnglish ? "Error" : "錯誤",
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 32.0),
                         child: Text(
@@ -490,17 +496,17 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             size: 16, 
                             color: Theme.of(context).colorScheme.primary
                             ), // Reduced from 18
-                          SizedBox(width: 6), // Reduced from 8
+                          const SizedBox(width: 6), // Reduced from 8
                           
                           // 3. Smaller Label Text
                           Text(
                             langProv.isEnglish ? 'Range(m)' : '範圍(米)',
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontWeight: FontWeight.w500,
                               fontSize: 11, // Explicitly set smaller font size
                             ),
                           ),
-                          SizedBox(width: 8), // Reduced from 12
+                          const SizedBox(width: 8), // Reduced from 12
                           
                           Expanded(
                             child: SingleChildScrollView(
@@ -518,13 +524,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                     child: Row(
                                       children: [
                                         _buildRangeChip('100', 100, langProv, context.read<AccessibilityProvider>()),
-                                        SizedBox(width: 4), // Reduced spacing between chips
+                                        const SizedBox(width: 4), // Reduced spacing between chips
                                         _buildRangeChip('150', 150, langProv, context.read<AccessibilityProvider>()),
-                                        SizedBox(width: 4),
+                                        const SizedBox(width: 4),
                                         _buildRangeChip('200', 200, langProv, context.read<AccessibilityProvider>()),
-                                        SizedBox(width: 4),
+                                        const SizedBox(width: 4),
                                         _buildRangeChip('400', 400, langProv, context.read<AccessibilityProvider>()),
-                                        SizedBox(width: 4),
+                                        const SizedBox(width: 4),
                                         _buildCustomRangeChip(langProv, context.read<AccessibilityProvider>()),
                                       ],
                                     ),
@@ -560,7 +566,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             color: Theme.of(context).colorScheme.primary,
                           ),
                           // 3. Reduced Spacing (was 8)
-                          SizedBox(width: 8), 
+                          const SizedBox(width: 8), 
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -578,14 +584,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                         fontSize: 11, // Force specific size if needed
                                       ),
                                     ),
-                                    SizedBox(width: 8),
+                                    const SizedBox(width: 8),
                                     Text(
                                       '${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}',
                                       // 5. Explicitly smaller font (was labelSmall)
                                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                         color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
                                         fontSize: 10, // Even smaller for coordinates
-                                        fontFeatures: [FontFeature.tabularFigures()],
+                                        fontFeatures: [const FontFeature.tabularFigures()],
                                       ),
                                     ),
                                   ],
@@ -641,7 +647,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
     
     return Card(
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -680,7 +686,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       ),
                     ),
                   ),
-                  SizedBox(width: 10),
+                  const SizedBox(width: 10),
                   
                   // Stop name and info
                   Expanded(
@@ -698,11 +704,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        SizedBox(height: 3),
+                        const SizedBox(height: 3),
                         Row(
                           children: [
                             Icon(Icons.location_on, size: 11, color: Theme.of(context).colorScheme.primary),
-                            SizedBox(width: 3),
+                            const SizedBox(width: 3),
                             Text(
                               _fmtDistance(s.distanceMeters, langProv: langProv),
                               style: TextStyle(
@@ -711,7 +717,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             //Removed StopID for better visibility
                             /* Text(
                               s.stopId,
@@ -733,7 +739,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               
               // Routes
               if (etasByRoute.isNotEmpty) ...[
-                SizedBox(height: 12),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -754,8 +760,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                   ),
                 )
               else
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
+                const Padding(
+                  padding: EdgeInsets.only(top: 8.0),
                   child: SizedBox(
                     height: 14,
                     width: 14,
@@ -824,7 +830,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
     
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
       decoration: BoxDecoration(
         color: dirColor.withOpacity(0.08),
         borderRadius: BorderRadius.circular(6),
@@ -845,9 +851,9 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               color: dirColor,
             ),
           ),
-          SizedBox(width: 3),
+          const SizedBox(width: 3),
           Icon(dirIcon, size: 11, color: dirColor),
-          SizedBox(width: 5),
+          const SizedBox(width: 5),
           // ETA
           Text(
             etaText,
@@ -873,13 +879,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     return Material(
       color: isSelected 
           ? Theme.of(context).colorScheme.primaryContainer 
-          : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+          : Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -890,7 +896,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     ? Theme.of(context).colorScheme.onPrimaryContainer
                     : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              SizedBox(width: 4),
+              const SizedBox(width: 4),
               Text(
                 label,
                 style: TextStyle(
@@ -1007,13 +1013,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               builder: (context, scrollController) => Container(
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                 ),
                 child: Column(
                   children: [
                     // Drag handle
                     Container(
-                      margin: EdgeInsets.only(top: 12, bottom: 8),
+                      margin: const EdgeInsets.only(top: 12, bottom: 8),
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
@@ -1024,7 +1030,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     
                     // Header
                     Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Row(
                         children: [
                           Expanded(
@@ -1040,7 +1046,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             ),
                           ),
                           IconButton(
-                            icon: Icon(Icons.close),
+                            icon: const Icon(Icons.close),
                             onPressed: () {
                               sortOptionNotifier.dispose(); // 清理
                               Navigator.of(context).pop();
@@ -1055,7 +1061,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     
                     // Sort options
                     Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       child: Row(
                         children: [
                           Icon(
@@ -1063,7 +1069,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             size: 16,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
@@ -1076,7 +1082,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                     isSelected: sortOption == 0,
                                     onTap: () => sortOptionNotifier.value = 0, // ✅ 更新狀態
                                   ),
-                                  SizedBox(width: 8),
+                                  const SizedBox(width: 8),
                                   _buildSortChip(
                                     context: context,
                                     label: langProv.isEnglish ? 'Route No.' : '路線編號',
@@ -1094,11 +1100,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     
                     // Distance info
                     Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: Container(
-                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
                             borderRadius: BorderRadius.circular(12),
@@ -1111,7 +1117,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                 size: 14,
                                 color: Theme.of(context).colorScheme.primary,
                               ),
-                              SizedBox(width: 4),
+                              const SizedBox(width: 4),
                               Text(
                                 '${langProv.isEnglish ? "Distance" : "距離"} ${_fmtDistance(distance, langProv: langProv)}',
                                 style: TextStyle(
@@ -1126,7 +1132,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       ),
                     ),
                     
-                    Divider(height: 8),
+                    const Divider(height: 8),
                     
                     // Content - ListView with sorted entries
                     Expanded(
@@ -1136,7 +1142,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(Icons.access_time, size: 48, color: Colors.grey[400]),
-                                  SizedBox(height: 12),
+                                  const SizedBox(height: 12),
                                   Text(
                                     langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次',
                                     style: TextStyle(color: Colors.grey[600], fontSize: 15),
@@ -1146,7 +1152,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             )
                           : ListView.builder(
                               controller: scrollController,
-                              padding: EdgeInsets.fromLTRB(12, 0, 12, 16),
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
                               itemCount: sortedEntries.length,
                               itemBuilder: (context, index) {
                                 final entry = sortedEntries[index];
@@ -1168,9 +1174,9 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                 final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
                                 
                                 return Container(
-                                  margin: EdgeInsets.only(bottom: 3, top: 6),
+                                  margin: const EdgeInsets.only(bottom: 3, top: 6),
                                   decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                       color: hasValidEta 
@@ -1211,14 +1217,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
                                       borderRadius: BorderRadius.circular(12),
                                       child: Padding(
-                                        padding: EdgeInsets.all(12),
+                                        padding: const EdgeInsets.all(12),
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
                                             Row(
                                               children: [
                                                 Container(
-                                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                                   decoration: BoxDecoration(
                                                     color: Theme.of(context).colorScheme.primaryContainer,
                                                     borderRadius: BorderRadius.circular(6),
@@ -1232,19 +1238,19 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                                     ),
                                                   ),
                                                 ),
-                                                SizedBox(width: 8),
+                                                const SizedBox(width: 8),
                                                 Expanded(
                                                   child: Text(
                                                     langProv.isEnglish ? 'To $displayDest' : '往 $displayDest',
-                                                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                                                     maxLines: 1,
                                                     overflow: TextOverflow.ellipsis,
                                                   ),
                                                 ),
-                                                Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                                                const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
                                               ],
                                             ),
-                                            SizedBox(height: 8),
+                                            const SizedBox(height: 8),
                                             ...routeEtas.take(3).map((eta) {
                                               final etaStr = eta['eta']?.toString() ?? '';
                                               final rmkEn = eta['rmk_en'] ?? eta['rmken'] ?? '';
@@ -1279,7 +1285,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                               }
                                               
                                               return Padding(
-                                                padding: EdgeInsets.only(top: 4),
+                                                padding: const EdgeInsets.only(top: 4),
                                                 child: Row(
                                                   children: [
                                                     Text(
@@ -1290,7 +1296,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                                         color: timeColor,
                                                       ),
                                                     ),
-                                                    SizedBox(width: 8),
+                                                    const SizedBox(width: 8),
                                                     Container(
                                                       width: 4,
                                                       height: 4,
@@ -1299,7 +1305,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                                         shape: BoxShape.circle,
                                                       ),
                                                     ),
-                                                    SizedBox(width: 8),
+                                                    const SizedBox(width: 8),
                                                     Text(
                                                       timeDisplay,
                                                       style: TextStyle(
@@ -1309,7 +1315,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                                       ),
                                                     ),
                                                     if (rmk.toString().isNotEmpty) ...[
-                                                      SizedBox(width: 8),
+                                                      const SizedBox(width: 8),
                                                       Expanded(
                                                         child: Text(
                                                           rmk,
@@ -1325,7 +1331,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                                   ],
                                                 ),
                                               );
-                                            }).toList(),
+                                            }),
                                           ],
                                         ),
                                       ),

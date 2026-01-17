@@ -14,7 +14,7 @@ extension StringCasingExtension on String {
       'HKFYG', 'BBI', 'KMB', 'MTR', 'HK', 'VTC', 'IVE', 'HKDI',
       'HKUST', 'HKU', 'CUHK', 'PolyU', 'CityU', 'HKMU', 'THEi',
       'HKCEC', 'AWE', 'YMCA', 'YWCA', 'S.K.H.', 'TWGHs', 'P.L.K.',
-      'HKJC', 'JPC', 'FEHD', 'LCSD', 'H.K.', 'GPO', 'TE', 'G/F', 'UG/F'
+      'HKJC', 'JPC', 'FEHD', 'LCSD', 'H.K.', 'GPO', 'TE', 'G/F', 'UG/F', 'II', 'I'
     };
 
     return replaceAll(RegExp(' +'), ' ')

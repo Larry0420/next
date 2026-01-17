@@ -2051,7 +2051,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     final colorScheme = Theme.of(context).colorScheme;
 
     if (!catalog.isInitialized) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator(year2023: false,));
     }
     if (catalog.lines.isEmpty) {
       return const Center(child: Text('No MTR lines available'));

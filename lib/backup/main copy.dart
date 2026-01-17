@@ -2873,7 +2873,7 @@ class _ScheduleBody extends StatelessWidget {
 
     Widget content;
     if (loading) {
-      content = const Center(child: CircularProgressIndicator());
+      content = const Center(child: CircularProgressIndicator(year2023: false,));
     } else if (error != null) {
       content = _ErrorView(error: error!, onRetry: onRefresh, isOffline: connectivity.isOffline);
     } else if (data == null || data!.platforms.isEmpty) {

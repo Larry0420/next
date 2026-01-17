@@ -13,7 +13,7 @@ import '../main.dart' show LanguageProvider;
 import '../toTitleCase.dart';
 
 class KmbPinnedPage extends StatefulWidget {
-  const KmbPinnedPage({Key? key}) : super(key: key);
+  const KmbPinnedPage({super.key});
 
   @override
   State<KmbPinnedPage> createState() => _KmbPinnedPageState();
@@ -152,13 +152,23 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
+    // 1. Add this check! 
+    // If we are still initializing the controller, show a loading spinner.
+    // This prevents the app from trying to use _tabController before it exists.
+    if (_isInitializing) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(year2023: false,)),
+      );
+    }
+    
+    
     final lang = context.watch<LanguageProvider>();
     return Scaffold(
       body: Stack(
         children: [
           Positioned.fill(
             child: _loading
-                ? Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator(year2023: false,))
                 : TabBarView(
                     controller: _tabController,
                     children: [
@@ -183,7 +193,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                     filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                         borderRadius: BorderRadius.circular(50),
                         border: Border.all(
                           color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
@@ -198,14 +208,14 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                           color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6),
                         ),
                         indicatorSize: TabBarIndicatorSize.tab,
-                        indicatorPadding: EdgeInsets.all(4),
+                        indicatorPadding: const EdgeInsets.all(4),
                         labelColor: Theme.of(context).colorScheme.onPrimaryContainer,
                         unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                         dividerColor: Colors.transparent,
                         tabs: [
-                          Tab(icon: Icon(Icons.push_pin, size: 20), text: lang.pinnedRoutes, height: 52),
-                          Tab(icon: Icon(Icons.location_on, size: 20), text: lang.isEnglish ? 'Stops' : '站點', height: 52),
-                          Tab(icon: Icon(Icons.history, size: 20), text: lang.history, height: 52),
+                          Tab(icon: const Icon(Icons.push_pin, size: 20), text: lang.pinnedRoutes, height: 52),
+                          Tab(icon: const Icon(Icons.location_on, size: 20), text: lang.isEnglish ? 'Stops' : '站點', height: 52),
+                          Tab(icon: const Icon(Icons.history, size: 20), text: lang.history, height: 52),
                         ],
                       ),
                     ),
@@ -226,9 +236,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.push_pin_outlined, size: 64, color: Colors.grey[400]),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Text(lang.noPinnedRoutes, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600], fontSize: 15, fontWeight: FontWeight.w500)),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(lang.pinRoutesToSeeThemHere, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[500], fontSize: 13)),
           ],
         ),
@@ -265,9 +275,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.history, size: 64, color: Colors.grey[400]),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Text(lang.noHistory, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600], fontSize: 15, fontWeight: FontWeight.w500)),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(lang.viewedRoutesWillAppearHere, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[500], fontSize: 13)),
           ],
         ),
@@ -283,7 +293,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton.icon(
-                  icon: Icon(Icons.delete_outline, size: 18),
+                  icon: const Icon(Icons.delete_outline, size: 18),
                   label: Text(lang.clearHistory),
                   style: TextButton.styleFrom(foregroundColor: Colors.red[700]),
                   onPressed: () async {
@@ -390,7 +400,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.15), width: 1.0),
         ),
@@ -414,7 +424,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                     decoration: BoxDecoration(color: dirColor.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
                     child: Icon(dirIcon, color: dirColor, size: 20),
                   ),
-                  SizedBox(width: 12),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -422,7 +432,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                         Row(
                           children: [
                             Container(
-                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
                                 borderRadius: BorderRadius.circular(6),
@@ -434,16 +444,16 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                               ),
                             ),
                             if (serviceType != '1') ...[
-                              SizedBox(width: 6),
+                              const SizedBox(width: 6),
                               Container(
-                                padding: EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                                 decoration: BoxDecoration(color: Colors.blue.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
                                 child: AutoSizeText('${lang.type}($serviceType)', style: TextStyle(fontSize: 10, color: Colors.blue[800], fontWeight: FontWeight.w600)),
                               ),
                             ],
                           ],
                         ),
-                        SizedBox(height: 4),
+                        const SizedBox(height: 4),
                         AutoSizeText(
                           destinationText.toTitleCase(),
                           style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.3),
@@ -452,7 +462,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                         ),
                         
                         if (timeText != null) ...[
-                          SizedBox(height: 2),
+                          const SizedBox(height: 2),
                           Text(timeText, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6))),
                         ],
                       ],
@@ -508,9 +518,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.location_on_outlined, size: 64, color: Colors.grey[400]),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Text(lang.isEnglish ? 'No Pinned Stops' : '沒有釘選站點', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600], fontSize: 15, fontWeight: FontWeight.w500)),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(lang.isEnglish ? 'Pin stops to see them here' : '釘選站點以在此處查看', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[500], fontSize: 13)),
           ],
         ),
@@ -546,7 +556,7 @@ class PinnedStopCard extends StatefulWidget {
   final VoidCallback onUnpin;
   final bool compact;
 
-  const PinnedStopCard({Key? key, required this.stop, required this.lang, required this.onUnpin, this.compact = false}) : super(key: key);
+  const PinnedStopCard({super.key, required this.stop, required this.lang, required this.onUnpin, this.compact = false});
 
   @override
   State<PinnedStopCard> createState() => _PinnedStopCardState();
@@ -557,7 +567,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
   List<Map<String, dynamic>> _etas = [];
   bool _loading = true;
   bool _hasLoadedOnce = false;
-  Duration _refreshInterval = Duration(seconds: 15);
+  Duration _refreshInterval = const Duration(seconds: 15);
   int _consecutiveErrors = 0;
 
   @override
@@ -630,7 +640,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           _loading = false;
           _hasLoadedOnce = true;
           _consecutiveErrors = 0;
-          _refreshInterval = Duration(seconds: 15);
+          _refreshInterval = const Duration(seconds: 15);
         });
         _startAutoRefresh();
       }
@@ -701,7 +711,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
               firstEtaText = '-';
             } else {
               final mins = diff.inMinutes;
-              firstEtaText = widget.lang.isEnglish ? '${mins}m' : '${mins}分';
+              firstEtaText = widget.lang.isEnglish ? '${mins}m' : '$mins分';
             }
           } catch (_) {}
         }
@@ -711,7 +721,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
         padding: const EdgeInsets.only(bottom: 6.0),
         child: Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.15), width: 1.0),
           ),
@@ -742,27 +752,27 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                       alignment: Alignment.center,
                       child: Text(route, style: TextStyle(fontWeight: FontWeight.bold, color: directionColor, fontSize: 13)),
                     ),
-                    SizedBox(width: 10),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          AutoSizeText(stopName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
                           if (dest.isNotEmpty) ...[
-                            SizedBox(height: 2),
+                            const SizedBox(height: 2),
                             Text(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9)), maxLines: 1, overflow: TextOverflow.ellipsis),
                           ],
                         ],
                       ),
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     if (_loading)
-                      SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     else if (firstEtaText != null)
                       Text(firstEtaText, style: TextStyle(fontWeight: FontWeight.bold, color: _getEtaColor(_etas.first['eta'] ?? _etas.first['eta_time'])))
                     else
-                      SizedBox.shrink(),
-                    SizedBox(width: 8),
+                      const SizedBox.shrink(),
+                    const SizedBox(width: 8),
                     IconButton(
                       key: const ValueKey('pinned'),
                       onPressed: widget.onUnpin,
@@ -795,7 +805,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
           child: Container(
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.15), width: 1.0),
             ),
@@ -820,7 +830,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                   child: Row(
                     children: [
                       Container(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         decoration: BoxDecoration(
                           color: directionColor.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(8),
@@ -830,30 +840,30 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(route, style: TextStyle(fontWeight: FontWeight.bold, color: directionColor, fontSize: 14)),
-                            SizedBox(height: 2),
+                            const SizedBox(height: 2),
                             Icon(directionIcon, color: directionColor, size: 16),
                           ],
                         ),
                       ),
-                      SizedBox(width: 12),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 2, overflow: TextOverflow.ellipsis),
                             if (dest.isNotEmpty) ...[
-                              SizedBox(height: 3),
+                              const SizedBox(height: 3),
                               Row(
                                 children: [
                                   Icon(directionIcon, size: 11, color: directionColor.withOpacity(0.8)),
-                                  SizedBox(width: 4),
+                                  const SizedBox(width: 4),
                                   Expanded(child: AutoSizeText(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9), fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis)),
                                 ],
                               ),
                             ],
-                            SizedBox(height: 6),
+                            const SizedBox(height: 6),
                             if (_loading)
-                              SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                              const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
                             else if (_etas.isEmpty)
                               Text(widget.lang.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士', style: TextStyle(color: Colors.grey[600], fontSize: 11))
                             else
@@ -898,11 +908,11 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                                 }).toList(),
                               ),
                             if (latitude != null && longitude != null) ...[
-                              SizedBox(height: 4),
+                              const SizedBox(height: 4),
                               Row(
                                 children: [
                                   Icon(Icons.location_on, size: 11, color: Theme.of(context).colorScheme.primary.withOpacity(0.7)),
-                                  SizedBox(width: 4),
+                                  const SizedBox(width: 4),
                                   Text('$latitude, $longitude', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant, fontFamily: 'monospace')),
                                 ],
                               ),

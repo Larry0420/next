@@ -86,7 +86,7 @@ class _SavedFilesPageState extends State<SavedFilesPage> {
     return Scaffold(
       appBar: AppBar(title: Text('Saved requests')),
       body: _loading
-        ? Center(child: CircularProgressIndicator())
+        ? Center(child: CircularProgressIndicator(year2023: false,))
         : _files.isEmpty
           ? Center(child: Text('No saved files'))
           : ListView.builder(
