@@ -1,7 +1,14 @@
 # Netlify configuration for Flutter web deployment
 [build]
-  command = "bash -c 'if [ -d flutter ]; then cd flutter; git pull; cd ..; else git clone https://github.com/flutter/flutter.git; fi; flutter/bin/flutter clean; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --web-renderer canvaskit --no-tree-shake-icons --source-maps'"
+  command = "bash -c 'if [ -d flutter ]; then cd flutter; git pull; cd ..; else git clone https://github.com/flutter/flutter.git; fi; flutter/bin/flutter clean; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --wasm --no-tree-shake-icons --source-maps'"
   publish = "build/web"
+
+# WASM MIME type 支援（重要！）
+[[headers]]
+  for = "/*.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"
+    Cache-Control = "public, max-age=31536000, immutable"
 
 # Cache-busting headers for JavaScript and assets
 [[headers]]
