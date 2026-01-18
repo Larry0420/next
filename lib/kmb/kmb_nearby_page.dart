@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'api/kmb.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -939,7 +940,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Colors.white.withValues(alpha: 0.0),
+      barrierColor: Colors.black.withValues(alpha: 0.1),
       builder: (context) {
         return ValueListenableBuilder<int>(
           valueListenable: sortOptionNotifier,
@@ -1007,345 +1009,353 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
             final sortedEntries = getSortedEntries();
             
             return DraggableScrollableSheet(
-              initialChildSize: 0.7,
+              initialChildSize: 0.8,
               minChildSize: 0.5,
               maxChildSize: 0.95,
-              builder: (context, scrollController) => Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              builder: (context, scrollController) => LiquidGlassLayer(
+                // Define global glass settings for this layer
+                settings: LiquidGlassSettings(
+                  thickness: 19, // Glass refraction depth
+                  blur: 10, // Background blur strength
+                  glassColor: Theme.of(context).colorScheme.surface.withOpacity(0.3), // Semi-transparent tint
                 ),
-                child: Column(
-                  children: [
-                    // Drag handle
-                    Container(
-                      margin: const EdgeInsets.only(top: 12, bottom: 8),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
-                        borderRadius: BorderRadius.circular(2),
+                child: LiquidGlass(
+                  // Define the shape with top-rounded corners
+                  shape: LiquidRoundedSuperellipse(
+                    borderRadius: 20, // Matches your original BorderRadius.circular(20)
+                  ),
+                  child: Column(
+                    children: [
+                      // Drag handle
+                      Container(
+                        margin: const EdgeInsets.only(top: 12, bottom: 8),
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
-                    ),
-                    
-                    // Header
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              langProv.isEnglish 
-                                  ? 'KMB - ${displayName.toTitleCase()}' 
-                                  : '九巴 - ${displayName.toTitleCase()}',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              sortOptionNotifier.dispose(); // 清理
-                              Navigator.of(context).pop();
-                            },
-                            style: IconButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    // Sort options
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.sort,
-                            size: 16,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: [
-                                  _buildSortChip(
-                                    context: context,
-                                    label: langProv.isEnglish ? 'Time' : '時間',
-                                    icon: Icons.access_time,
-                                    isSelected: sortOption == 0,
-                                    onTap: () => sortOptionNotifier.value = 0, // ✅ 更新狀態
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _buildSortChip(
-                                    context: context,
-                                    label: langProv.isEnglish ? 'Route No.' : '路線編號',
-                                    icon: Icons.numbers,
-                                    isSelected: sortOption == 1,
-                                    onTap: () => sortOptionNotifier.value = 1, // ✅ 更新狀態
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    // Distance info
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.location_on,
-                                size: 14,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                '${langProv.isEnglish ? "Distance" : "距離"} ${_fmtDistance(distance, langProv: langProv)}',
+                      
+                      // Header
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                langProv.isEnglish 
+                                    ? 'KMB - ${displayName.toTitleCase()}' 
+                                    : '九巴 - ${displayName.toTitleCase()}',
                                 style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                  color: Theme.of(context).colorScheme.primary,
                                 ),
                               ),
-                            ],
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                sortOptionNotifier.dispose();
+                                Navigator.of(context).pop();
+                              },
+                              style: IconButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      // Sort options
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.sort,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    _buildSortChip(
+                                      context: context,
+                                      label: langProv.isEnglish ? 'Time' : '時間',
+                                      icon: Icons.access_time,
+                                      isSelected: sortOption == 0,
+                                      onTap: () => sortOptionNotifier.value = 0,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _buildSortChip(
+                                      context: context,
+                                      label: langProv.isEnglish ? 'Route No.' : '路線編號',
+                                      icon: Icons.numbers,
+                                      isSelected: sortOption == 1,
+                                      onTap: () => sortOptionNotifier.value = 1,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      // Distance info
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.location_on,
+                                  size: 14,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '${langProv.isEnglish ? "Distance" : "距離"} ${_fmtDistance(distance, langProv: langProv)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    
-                    const Divider(height: 8),
-                    
-                    // Content - ListView with sorted entries
-                    Expanded(
-                      child: sortedEntries.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.access_time, size: 48, color: Colors.grey[400]),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次',
-                                    style: TextStyle(color: Colors.grey[600], fontSize: 15),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              controller: scrollController,
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-                              itemCount: sortedEntries.length,
-                              itemBuilder: (context, index) {
-                                final entry = sortedEntries[index];
-                                final route = entry.key;
-                                final routeEtas = entry.value;
-                                
-                                // ... 其餘的 ListView.builder 代碼保持不變
-                                routeEtas.sort((a, b) {
-                                  final etaA = a['eta']?.toString() ?? '';
-                                  final etaB = b['eta']?.toString() ?? '';
-                                  return etaA.compareTo(etaB);
-                                });
-                                
-                                final destEn = routeEtas.first['dest_en'] ?? routeEtas.first['desten'] ?? '';
-                                final destTc = routeEtas.first['dest_tc'] ?? routeEtas.first['desttc'] ?? '';
-                                final displayDest = langProv.isEnglish ? destEn.toString().toTitleCase() : (destTc.isNotEmpty ? destTc.toString().toTitleCase() : destEn.toString().toTitleCase());
-                                final bound = routeEtas.first['dir'] ?? routeEtas.first['bound'] ?? '';
-                                final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
-                                final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
-                                
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 3, top: 6),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: hasValidEta 
-                                          ? Theme.of(context).colorScheme.primary.withOpacity(0.3)
-                                          : Theme.of(context).colorScheme.outline.withOpacity(0.15),
-                                      width: hasValidEta ? 1.5 : 1,
+                      
+                      const Divider(height: 8),
+                      
+                      // Content - ListView with sorted entries
+                      Expanded(
+                        child: sortedEntries.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.access_time, size: 48, color: Colors.grey[400]),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次',
+                                      style: TextStyle(color: Colors.grey[600], fontSize: 15),
                                     ),
-                                  ),
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      onTap: () {
-                                        Navigator.of(context).pop();
-                                        final seq = routeEtas.first['seq']?.toString();
-                                        
-                                        // ✓ 修正 1: 直接使用當前站點物件的 stopId
-                                        // 這樣能保證 ID 與路線資料庫中的 ID 一致，StatusPage 才能正確比對
-                                        final stopIdFromEta = stop.stopId;
-                                        
-                                        // ✓ 修正 2: 處理 Bound 方向格式，只取第一個字元 (O/I)
-                                        String? normalizedBound;
-                                        if (bound != null && bound.toString().isNotEmpty) {
-                                          final b = bound.toString().trim().toUpperCase();
-                                          if (b.isNotEmpty) normalizedBound = b[0]; // 取 'O' 或 'I'
-                                        }
-
-                                        Navigator.of(context).push(MaterialPageRoute(
-                                          builder: (_) => KmbRouteStatusPage(
-                                            route: route,
-                                            bound: normalizedBound, // 傳遞正規化後的方向
-                                            serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
-                                            autoExpandSeq: seq,
-                                            autoExpandStopId: stopIdFromEta,
-                                          ),
-                                        ));
-                                      },
-
-
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(12),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                  decoration: BoxDecoration(
-                                                    color: Theme.of(context).colorScheme.primaryContainer,
-                                                    borderRadius: BorderRadius.circular(6),
-                                                  ),
-                                                  child: Text(
-                                                    route,
-                                                    style: TextStyle(
-                                                      fontWeight: FontWeight.bold,
-                                                      fontSize: 14,
-                                                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(
-                                                    langProv.isEnglish ? 'To $displayDest' : '往 $displayDest',
-                                                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                                const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 8),
-                                            ...routeEtas.take(3).map((eta) {
-                                              final etaStr = eta['eta']?.toString() ?? '';
-                                              final rmkEn = eta['rmk_en'] ?? eta['rmken'] ?? '';
-                                              final rmkTc = eta['rmk_tc'] ?? eta['rmktc'] ?? '';
-                                              final rmk = langProv.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
-                                              
-                                              String timeDisplay = '—', abs = '';
-              
-                                              Color timeColor = Colors.grey;
-                                              if (etaStr.isNotEmpty) {
-                                                try {
-                                                  final dt = DateTime.parse(etaStr).toLocal();
-                                                  final now = DateTime.now();
-                                                  final diff = dt.difference(now);
-                                                  if (diff.inMinutes <= 0) {
-                                                    timeDisplay = langProv.isEnglish ? 'Due' : '即將到站';
-                                                    timeColor = Colors.red;
-                                                    abs = DateFormat.Hm().format(dt);
-                                                  } else if (diff.inMinutes <= 5) {
-                                                    timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
-                                                    timeColor = Colors.orange;
-                                                    abs = DateFormat.Hm().format(dt);
-                                                  } else if (diff.inMinutes < 60) {
-                                                    timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
-                                                    timeColor = Colors.green;
-                                                    abs = DateFormat.Hm().format(dt);
-                                                  } else {
-                                                    timeDisplay = DateFormat.Hm().format(dt);
-                                                    timeColor = Colors.blue;
-                                                  }
-                                                } catch (_) {}
-                                              }
-                                              
-                                              return Padding(
-                                                padding: const EdgeInsets.only(top: 4),
-                                                child: Row(
-                                                  children: [
-                                                    Text(
-                                                      abs,
-                                                      style: TextStyle(
-                                                        fontSize: 13,
-                                                        fontWeight: FontWeight.w600,
-                                                        color: timeColor,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Container(
-                                                      width: 4,
-                                                      height: 4,
-                                                      decoration: BoxDecoration(
-                                                        color: timeColor,
-                                                        shape: BoxShape.circle,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Text(
-                                                      timeDisplay,
-                                                      style: TextStyle(
-                                                        fontSize: 13,
-                                                        fontWeight: FontWeight.w600,
-                                                        color: timeColor,
-                                                      ),
-                                                    ),
-                                                    if (rmk.toString().isNotEmpty) ...[
-                                                      const SizedBox(width: 8),
-                                                      Expanded(
-                                                        child: Text(
-                                                          rmk,
-                                                          style: TextStyle(
-                                                            fontSize: 13,
-                                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                                          ),
-                                                          maxLines: 2,
-                                                          overflow: TextOverflow.ellipsis,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
-                                              );
-                                            }),
-                                          ],
+                                  ],
+                                ),
+                              )
+                            : ListView.builder(
+                                controller: scrollController,
+                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                                itemCount: sortedEntries.length,
+                                itemBuilder: (context, index) {
+                                    final entry = sortedEntries[index];
+                                    final route = entry.key;
+                                    final routeEtas = entry.value;
+                                    
+                                    // ... 其餘的 ListView.builder 代碼保持不變
+                                    routeEtas.sort((a, b) {
+                                      final etaA = a['eta']?.toString() ?? '';
+                                      final etaB = b['eta']?.toString() ?? '';
+                                      return etaA.compareTo(etaB);
+                                    });
+                                    
+                                    final destEn = routeEtas.first['dest_en'] ?? routeEtas.first['desten'] ?? '';
+                                    final destTc = routeEtas.first['dest_tc'] ?? routeEtas.first['desttc'] ?? '';
+                                    final displayDest = langProv.isEnglish ? destEn.toString().toTitleCase() : (destTc.isNotEmpty ? destTc.toString().toTitleCase() : destEn.toString().toTitleCase());
+                                    final bound = routeEtas.first['dir'] ?? routeEtas.first['bound'] ?? '';
+                                    final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
+                                    final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
+                                    
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 3, top: 6),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: hasValidEta 
+                                              ? Theme.of(context).colorScheme.primary.withOpacity(0.3)
+                                              : Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                                          width: hasValidEta ? 1.5 : 1,
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: () {
+                                            Navigator.of(context).pop();
+                                            final seq = routeEtas.first['seq']?.toString();
+                                            
+                                            // ✓ 修正 1: 直接使用當前站點物件的 stopId
+                                            // 這樣能保證 ID 與路線資料庫中的 ID 一致，StatusPage 才能正確比對
+                                            final stopIdFromEta = stop.stopId;
+                                            
+                                            // ✓ 修正 2: 處理 Bound 方向格式，只取第一個字元 (O/I)
+                                            String? normalizedBound;
+                                            if (bound != null && bound.toString().isNotEmpty) {
+                                              final b = bound.toString().trim().toUpperCase();
+                                              if (b.isNotEmpty) normalizedBound = b[0]; // 取 'O' 或 'I'
+                                            }
+
+                                            Navigator.of(context).push(MaterialPageRoute(
+                                              builder: (_) => KmbRouteStatusPage(
+                                                route: route,
+                                                bound: normalizedBound, // 傳遞正規化後的方向
+                                                serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
+                                                autoExpandSeq: seq,
+                                                autoExpandStopId: stopIdFromEta,
+                                              ),
+                                            ));
+                                          },
+
+
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(12),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                      decoration: BoxDecoration(
+                                                        color: Theme.of(context).colorScheme.primaryContainer,
+                                                        borderRadius: BorderRadius.circular(6),
+                                                      ),
+                                                      child: Text(
+                                                        route,
+                                                        style: TextStyle(
+                                                          fontWeight: FontWeight.bold,
+                                                          fontSize: 14,
+                                                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Text(
+                                                        langProv.isEnglish ? 'To $displayDest' : '往 $displayDest',
+                                                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ),
+                                                    const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 8),
+                                                ...routeEtas.take(3).map((eta) {
+                                                  final etaStr = eta['eta']?.toString() ?? '';
+                                                  final rmkEn = eta['rmk_en'] ?? eta['rmken'] ?? '';
+                                                  final rmkTc = eta['rmk_tc'] ?? eta['rmktc'] ?? '';
+                                                  final rmk = langProv.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
+                                                  
+                                                  String timeDisplay = '—', abs = '';
+                  
+                                                  Color timeColor = Colors.grey;
+                                                  if (etaStr.isNotEmpty) {
+                                                    try {
+                                                      final dt = DateTime.parse(etaStr).toLocal();
+                                                      final now = DateTime.now();
+                                                      final diff = dt.difference(now);
+                                                      if (diff.inMinutes <= 0) {
+                                                        timeDisplay = langProv.isEnglish ? 'Due' : '即將到站';
+                                                        timeColor = Colors.red;
+                                                        abs = DateFormat.Hm().format(dt);
+                                                      } else if (diff.inMinutes <= 5) {
+                                                        timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
+                                                        timeColor = Colors.orange;
+                                                        abs = DateFormat.Hm().format(dt);
+                                                      } else if (diff.inMinutes < 60) {
+                                                        timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
+                                                        timeColor = Colors.green;
+                                                        abs = DateFormat.Hm().format(dt);
+                                                      } else {
+                                                        timeDisplay = DateFormat.Hm().format(dt);
+                                                        timeColor = Colors.blue;
+                                                      }
+                                                    } catch (_) {}
+                                                  }
+                                                  
+                                                  return Padding(
+                                                    padding: const EdgeInsets.only(top: 4),
+                                                    child: Row(
+                                                      children: [
+                                                        Text(
+                                                          abs,
+                                                          style: TextStyle(
+                                                            fontSize: 13,
+                                                            fontWeight: FontWeight.w600,
+                                                            color: timeColor,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Container(
+                                                          width: 4,
+                                                          height: 4,
+                                                          decoration: BoxDecoration(
+                                                            color: timeColor,
+                                                            shape: BoxShape.circle,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Text(
+                                                          timeDisplay,
+                                                          style: TextStyle(
+                                                            fontSize: 13,
+                                                            fontWeight: FontWeight.w600,
+                                                            color: timeColor,
+                                                          ),
+                                                        ),
+                                                        if (rmk.toString().isNotEmpty) ...[
+                                                          const SizedBox(width: 8),
+                                                          Expanded(
+                                                            child: Text(
+                                                              rmk,
+                                                              style: TextStyle(
+                                                                fontSize: 13,
+                                                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                              ),
+                                                              maxLines: 2,
+                                                              overflow: TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ],
+                                                    ),
+                                                  );
+                                                }),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                              ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             );
-          },
+          }
         );
       },
     );

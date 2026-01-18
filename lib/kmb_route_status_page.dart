@@ -6,7 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart' show compute;
-import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants, EnhancedScrollPhysics;
+import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants, EnhancedScrollPhysics, AccessibilityProvider;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -554,86 +554,127 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     
     return Scaffold(
       appBar: AppBar(
-        title: Text('${lang.route} ${widget.route}'),
-        actions: [
-          // Map view toggle - now shows split view
+        // 1. Custom Back Button (Localized)
+        // This ensures the tooltip matches your app's language, not just the system language
+        leading: 
+        //Consumer<AccessibilityProvider>(
+          //builder: (context, accessibility, _) => 
           IconButton(
-            icon: Icon(_showMapView ? Icons.splitscreen : Icons.map),
-            tooltip: _showMapView 
-              ? (isEnglish ? 'Show list only' : '僅顯示列表')
-              : (isEnglish ? 'Show map' : '顯示地圖'),
-            onPressed: () {
-              final newValue = !_showMapView;
-              setState(() {
-                _showMapView = newValue;
-              });
-              // Save preference for next time
-              _saveMapViewPreference(newValue);
-            },
+            icon: Icon(Icons.arrow_back, size: 24 /* *accessibility.iconScale*/),
+            tooltip: isEnglish ? 'Back' : '返回',
+            onPressed: () => Navigator.of(context).pop(),
+            splashRadius: 24,
           ),
-          // Location-based scroll button - available in both modes
-          if (_scrollController.hasClients)
-            IconButton(
-              icon: _locationLoading 
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).appBarTheme.iconTheme?.color ?? Theme.of(context).iconTheme.color ?? Theme.of(context).colorScheme.onSurface),
-                  )
-                : Icon(
-                    _userPosition != null ? Icons.my_location : Icons.location_searching,
-                  ),
-              tooltip: isEnglish ? 'Scroll to nearest stop' : '捲動至最近站點',
-              onPressed: _locationLoading ? null : () async {
-                // Get current stops from the list
-                List<Map<String, dynamic>> stops = [];
-                if (_variantStops != null && _variantStops!.isNotEmpty) {
-                  stops = _variantStops!;
-                } else {
-                  // Try to get from cached data
-                  try {
-                    final routeMap = await Kmb.buildRouteToStopsMap();
-                    final r = widget.route.trim().toUpperCase();
-                    final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
-                    final entries = routeMap[r] ?? routeMap[base] ?? [];
-                    
-                    // Filter by selected direction/service
-                    stops = entries.where((e) {
-                      if (!e.containsKey('seq')) return false;
-                      if (_selectedDirection != null) {
-                        final bound = e['bound']?.toString().trim().toUpperCase() ?? '';
-                        if (bound.isNotEmpty && _selectedDirection!.isNotEmpty && 
-                            bound[0] != _selectedDirection![0]) {
-                          return false;
-                        }
-                      }
-                      if (_selectedServiceType != null) {
-                        final st = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
-                        if (st != _selectedServiceType) return false;
-                      }
-                      return true;
-                    }).toList();
-                    
-                    stops.sort((a, b) {
-                      final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
-                      final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
-                      return ai.compareTo(bi);
-                    });
-                  } catch (_) {}
-                }
-                
-                if (stops.isNotEmpty) {
-                  await _getUserLocationAndScrollToNearest(stops);
-                }
+        //),
+
+        title: Text('${lang.route} ${widget.route}'),
+
+        actions: [
+          // 2. Map/List Toggle
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) => IconButton(
+              icon: Icon(
+                _showMapView ? Icons.splitscreen : Icons.map,
+                size: 24 * accessibility.iconScale,
+              ),
+              tooltip: _showMapView
+                  ? (isEnglish ? 'Show list only' : '僅顯示列表')
+                  : (isEnglish ? 'Show map' : '顯示地圖'),
+              onPressed: () {
+                final newValue = !_showMapView;
+                setState(() {
+                  _showMapView = newValue;
+                });
+                _saveMapViewPreference(newValue);
               },
+              splashRadius: 24,
             ),
-          IconButton(
-            icon: const Icon(Icons.push_pin_outlined),
-            tooltip: lang.pinRoute,
-            onPressed: _pinRoute,
+          ),
+
+          // 3. Location Button
+          if (_scrollController.hasClients)
+            Consumer<AccessibilityProvider>(
+              builder: (context, accessibility, _) => IconButton(
+                icon: _locationLoading 
+                  ? SizedBox(
+                      width: 20 * accessibility.iconScale,
+                      height: 20 * accessibility.iconScale,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2, 
+                        color: Theme.of(context).appBarTheme.iconTheme?.color ?? Theme.of(context).iconTheme.color
+                      ),
+                    )
+                  : Icon(
+                      _userPosition != null ? Icons.my_location : Icons.location_searching,
+                      size: 24 * accessibility.iconScale,
+                    ),
+                tooltip: isEnglish ? 'Scroll to nearest stop' : '捲動至最近站點',
+                onPressed: _locationLoading ? null : () async {
+                  // Get current stops from the list
+                  List<Map<String, dynamic>> stops = [];
+                  if (_variantStops != null && _variantStops!.isNotEmpty) {
+                    stops = _variantStops!;
+                  } else {
+                    // Try to get from cached data
+                    try {
+                      final routeMap = await Kmb.buildRouteToStopsMap();
+                      final r = widget.route.trim().toUpperCase();
+                      final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
+                      final entries = routeMap[r] ?? routeMap[base] ?? [];
+                    
+                      // Filter by selected direction/service
+                      stops = entries.where((e) {
+                        if (!e.containsKey('seq')) return false;
+                        if (_selectedDirection != null) {
+                          final bound = e['bound']?.toString().trim().toUpperCase() ?? '';
+                          if (bound.isNotEmpty && _selectedDirection!.isNotEmpty &&
+                              bound[0] != _selectedDirection![0]) {
+                            return false;
+                          }
+                        }
+                        if (_selectedServiceType != null) {
+                          final st = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
+                          if (st != _selectedServiceType) return false;
+                        }
+                        return true;
+                      }).toList();
+                    
+                      stops.sort((a, b) {
+                        final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
+                        final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
+                        return ai.compareTo(bi);
+                      });
+                    } catch (_) {}
+                  }
+                
+                  if (stops.isNotEmpty) {
+                    await _getUserLocationAndScrollToNearest(stops);
+                  }
+                },
+              ),
+            ),
+
+          // 4. Pin Button
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) => IconButton(
+              icon: const Icon(Icons.push_pin_outlined),
+              tooltip: lang.pinRoute,
+              onPressed: _pinRoute,
+            ),
+          ),  
+
+          // 5. Language Toggle (Your Snippet)
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) => IconButton(
+              icon: Icon(Icons.translate, size: 24 * accessibility.iconScale),
+              tooltip: lang.language,
+              onPressed: lang.toggle,
+              splashRadius: 24,
+            ),
           ),
         ],
       ),
+
       body: Stack(
         children: [
           Consumer<DeveloperSettingsProvider>(

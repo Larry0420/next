@@ -21,7 +21,7 @@ import 'package:implicitly_animated_reorderable_list_2/transitions.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
 //Tailor Made .dart imported
 import 'mtr/mtr_schedule_page.dart';
@@ -2192,6 +2192,14 @@ class LanguageProvider extends ChangeNotifier {
   String get routePinned => _isEnglish ? 'Route pinned' : '已固定路線';
   String get type => _isEnglish ? 'Special Service' : '特別班次';
   String get kmb => _isEnglish ? 'KMB' : '巴士'; // KMB is a brand name, same in both languages
+  
+  // New additions for consistency
+  String get showListOnly => isEnglish ? 'Show list only' : '僅顯示列表';
+  String get showMap => isEnglish ? 'Show map' : '顯示地圖';
+  String get nearestStop => isEnglish ? 'Scroll to nearest stop' : '捲動至最近站點';
+  
+  String get back => isEnglish ? 'Back' : '返回';
+
 }
 
 /* ========================= API Models ========================= */
@@ -4787,7 +4795,16 @@ class _TrainDetailState extends State<_TrainDetail> {
     final lang = context.watch<LanguageProvider>();
     final bottomInset = 80 + MediaQuery.of(context).padding.bottom;
     return Scaffold(
-      appBar: AppBar(title: Text('${lang.route} ${widget.train.routeNo}')),
+      appBar: AppBar(
+        leading: IconButton(
+          // BackButtonIcon automatically picks the right icon (arrow for Android, chevron for iOS)
+          icon: const BackButtonIcon(), 
+          // Use your lang object for the tooltip
+          tooltip: lang.back, // Or use lang.back if you added it
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text('${lang.route} ${widget.train.routeNo}')
+      ),
       body: ListView(
         controller: _scrollController,
         physics: EnhancedScrollPhysics.enhanced(),

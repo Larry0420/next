@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:ui';
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
 import 'api/kmb.dart';
 import '../kmb_route_status_page.dart';
@@ -166,9 +167,10 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     return Scaffold(
       body: Stack(
         children: [
+          // 1. 底層內容 (背景)
           Positioned.fill(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(year2023: false,))
+                ? const Center(child: CircularProgressIndicator(year2023: false))
                 : TabBarView(
                     controller: _tabController,
                     children: [
@@ -178,6 +180,8 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                     ],
                   ),
           ),
+
+          // 2. 上層 Liquid Glass 效果
           Positioned(
             left: 0,
             right: 0,
@@ -186,41 +190,64 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
               top: true,
               bottom: false,
               child: Padding(
-                padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).padding.bottom + 12),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(50),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(50),
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
-                          width: 1.0,
-                        ),
+                padding: EdgeInsets.fromLTRB(
+                  12, 
+                  8, 
+                  12, 
+                  MediaQuery.of(context).padding.bottom + 12
+                ),
+                
+                // --- 替換開始 ---
+                // 使用 LiquidGlassLayer 包裹 LiquidGlass
+                child: LiquidGlassLayer(
+                  settings: LiquidGlassSettings(
+                    thickness: 20, // 玻璃厚度/折射強度 (取代 blur 效果)
+                    blur: 10,      // 背景模糊程度
+                    glassColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    // 你可以調整這些參數來匹配原本的邊框/光影
+                    lightIntensity: 0.1,
+                  ),
+                  child: LiquidGlass(
+                    // 使用 LiquidRoundedSuperellipse 取代 BorderRadius.circular(50)
+                    // 這會產生更滑順的 "Squircle" 形狀，更像 iOS 風格
+                    shape: LiquidRoundedSuperellipse(borderRadius: 50),
+                    
+                    // 如果需要原本的邊框線，LiquidGlass 本身有 outlineIntensity
+                    // 但如果需要完全自定義邊框，可能需要疊加一個 Container
+                    // 2. 加入 Material 層來控制水波紋 (Splash) 的邊界
+                    child: Material(
+                      color: Colors.transparent, // 保持透明，讓下方玻璃效果透出來
+                      
+                      // 關鍵：這裡必須設定與 LiquidGlass 相同的形狀
+                      shape: LiquidRoundedSuperellipse(borderRadius: 50),
+                      
+                      // 關鍵：開啟裁切，這會把水波紋限制在形狀內
+                      clipBehavior: Clip.antiAlias, 
+
+                    child: TabBar(
+                      controller: _tabController,
+                       // 使用 ShapeDecoration 來支援非標準圓角 (Squircle)
+                      indicator: ShapeDecoration(
+                        // 關鍵：這裡必須使用與外層 LiquidGlass 完全相同的形狀和參數
+                        shape: LiquidRoundedSuperellipse(borderRadius: 50), 
+                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6),
                       ),
-                      child: TabBar(
-                        controller: _tabController,
-                        splashBorderRadius: BorderRadius.circular(50),
-                        indicator: BoxDecoration(
-                          borderRadius: BorderRadius.circular(50),
-                          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6),
-                        ),
-                        indicatorSize: TabBarIndicatorSize.tab,
-                        indicatorPadding: const EdgeInsets.all(4),
-                        labelColor: Theme.of(context).colorScheme.onPrimaryContainer,
-                        unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                        dividerColor: Colors.transparent,
-                        tabs: [
-                          Tab(icon: const Icon(Icons.push_pin, size: 20), text: lang.pinnedRoutes, height: 52),
-                          Tab(icon: const Icon(Icons.location_on, size: 20), text: lang.isEnglish ? 'Stops' : '站點', height: 52),
-                          Tab(icon: const Icon(Icons.history, size: 20), text: lang.history, height: 52),
-                        ],
-                      ),
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      indicatorPadding: const EdgeInsets.all(4),
+                      labelColor: Theme.of(context).colorScheme.onPrimaryContainer,
+                      unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                      dividerColor: Colors.transparent,
+                      tabs: [
+                        Tab(icon: const Icon(Icons.push_pin, size: 20), text: lang.pinnedRoutes, height: 52),
+                        Tab(icon: const Icon(Icons.location_on, size: 20), text: lang.isEnglish ? 'Stops' : '站點', height: 52),
+                        Tab(icon: const Icon(Icons.history, size: 20), text: lang.history, height: 52),
+                      ],
+                    ),
                     ),
                   ),
                 ),
+                // --- 替換結束 ---
+                
               ),
             ),
           ),

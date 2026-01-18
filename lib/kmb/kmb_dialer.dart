@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:lrt_next_train/optionalMarquee.dart';
 import 'package:lrt_next_train/toTitleCase.dart';
 import 'package:provider/provider.dart';
-
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import '../kmb_route_status_page.dart';
 import '../main.dart' show LanguageProvider;
 
@@ -253,22 +254,28 @@ class _KmbDialerState extends State<KmbDialer> {
               ),
             ),
 
+            /// AnimatedSwitcher for the routes list: hidden when input is empty
             // AnimatedSwitcher for the routes list: hidden when input is empty
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 300),
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SizeTransition(sizeFactor: animation, child: child),
+              ),
               child: (!loading && error == null && input.isNotEmpty)
                   ? LayoutBuilder(
                       key: const ValueKey('routes_list'),
                       builder: (context, constraints) {
+                        final theme = Theme.of(context);
                         // Cap the list height to avoid overflow on tall/narrow screens (like 18:9)
                         final maxHeight = MediaQuery.of(context).size.height * 0.38;
+                        
                         return ConstrainedBox(
                           constraints: BoxConstraints(maxHeight: maxHeight),
                           child: Builder(builder: (_) {
-                            // Group display routes by their base (e.g., '11'/'11A' -> '11', 'N170'/'N170P' -> 'N170')
-                            // Support both digit-only routes and letter-prefixed routes (B, N, A, E, etc.)
+                            // --- Group Logic ---
                             final Map<String, List<Map<String, dynamic>>> groups = {};
-                            final baseRe = RegExp(r'^([A-Z]?\d+)'); // Matches optional letter + digits
+                            final baseRe = RegExp(r'^([A-Z]?\d+)');
                             for (final routeData in displayRoutes) {
                               final route = routeData['route'] as String;
                               final m = baseRe.firstMatch(route);
@@ -276,13 +283,11 @@ class _KmbDialerState extends State<KmbDialer> {
                               groups.putIfAbsent(base, () => []).add(routeData);
                             }
 
-                            // Sort group keys: letter-prefixed routes first (alphabetically), then numeric routes
+                            // --- Sorting Logic ---
                             final sortedBases = groups.keys.toList()
                               ..sort((a, b) {
-                                // Extract letter prefix and numeric part
                                 final aMatch = RegExp(r'^([A-Z]?)(\d+)').firstMatch(a);
                                 final bMatch = RegExp(r'^([A-Z]?)(\d+)').firstMatch(b);
-                                
                                 if (aMatch == null || bMatch == null) return a.compareTo(b);
                                 
                                 final aPrefix = aMatch.group(1) ?? '';
@@ -290,346 +295,116 @@ class _KmbDialerState extends State<KmbDialer> {
                                 final aNum = int.tryParse(aMatch.group(2) ?? '0') ?? 0;
                                 final bNum = int.tryParse(bMatch.group(2) ?? '0') ?? 0;
                                 
-                                // Both have letter prefix: compare prefix first, then number
                                 if (aPrefix.isNotEmpty && bPrefix.isNotEmpty) {
                                   final prefixCmp = aPrefix.compareTo(bPrefix);
                                   if (prefixCmp != 0) return prefixCmp;
                                   return aNum.compareTo(bNum);
                                 }
-                                
-                                // One has prefix, one doesn't: prefix comes first
                                 if (aPrefix.isNotEmpty) return -1;
                                 if (bPrefix.isNotEmpty) return 1;
-                                
-                                // Both are numeric: compare numbers
                                 return aNum.compareTo(bNum);
                               });
 
                             final isEnglish = lang.isEnglish;
                             final List<Widget> tiles = [];
+
                             for (final base in sortedBases) {
                               final variants = groups[base]!..sort((x, y) {
-                                // prefer the plain numeric base (e.g. '11') before letter variants (e.g. '11A')
                                 final routeX = x['route'] as String;
                                 final routeY = y['route'] as String;
                                 if (routeX == base && routeY != base) return -1;
                                 if (routeY == base && routeX != base) return 1;
-                                // otherwise fallback to lexical order
                                 return routeX.compareTo(routeY);
                               });
 
+                              // --- Case 1: Single Variant ---
                               if (variants.length == 1) {
                                 final routeData = variants.first;
                                 final route = routeData['route'] as String;
-
-                                // Check if we have multiple direction/service variants for this route in search results
+                                
+                                // 獲取所有相關變體 (處理搜尋結果中同一路線的多個方向)
                                 final routeVariants = displayRoutes.where((r) => r['route'] == route).toList();
-                                
-                                // Group variants by unique origin-destination pairs to detect circular routes and service types
-                                final Map<String, List<Map<String, dynamic>>> routesByDestination = {};
-                                for (final variant in routeVariants) {
-                                  final orig = isEnglish ? (variant['orig_en'] ?? '') : (variant['orig_tc'] ?? '');
-                                  final dest = isEnglish ? (variant['dest_en'] ?? '') : (variant['dest_tc'] ?? '');
-                                  final key = '$orig→$dest';
-                                  routesByDestination.putIfAbsent(key, () => []).add(variant);
-                                }
-                                
-                                if (routesByDestination.length > 1 || (routesByDestination.length == 1 && routesByDestination.values.first.length > 1)) {
-                                  // Multiple destination pairs or multiple service types - show each variant
-                                  final List<Widget> variantTiles = [];
-                                  
-                                  for (final destEntry in routesByDestination.entries) {
-                                    final destVariants = destEntry.value;
-                                    
-                                    for (final variant in destVariants) {
-                                      final bound = variant['bound'] as String?;
-                                      final direction = variant['direction'] as String?;
-                                      final serviceType = variant['service_type'] as String?;
-                                      
-                                      // Get origin and destination with language preference
-                                      final orig = isEnglish 
-                                        ? (variant['orig_en']?.toString().trim() ?? variant['orig_tc']?.toString().trim() ?? '')
-                                        : (variant['orig_tc']?.toString().trim() ?? variant['orig_en']?.toString().trim() ?? '');
-                                      final dest = isEnglish
-                                        ? (variant['dest_en']?.toString().trim() ?? variant['dest_tc']?.toString().trim() ?? '')
-                                        : (variant['dest_tc']?.toString().trim() ?? variant['dest_en']?.toString().trim() ?? '');
-                                      
-                                      String? subtitleText;
-                                      
-                                      // Check if we have origin and destination data
-                                      if (orig.isNotEmpty && dest.isNotEmpty) {
-                                        // Check if it's a circular route
-                                        final isCircular = (variant['orig_en'] == variant['dest_en'] && variant['orig_en'] != null) ||
-                                                          (variant['orig_tc'] == variant['dest_tc'] && variant['orig_tc'] != null);
-                                        
-                                        if (isCircular) {
-                                          // Circular route - show direction instead of origin→dest
-                                          final dirLabel = bound == 'O' 
-                                            ? (isEnglish ? 'Outbound (Circular)' : '往程（循環線）')
-                                            : (isEnglish ? 'Inbound (Circular)' : '返程（循環線）');
-                                          subtitleText = serviceType != null && serviceType != '1' 
-                                            ? '$dirLabel - Type $serviceType' 
-                                            : dirLabel;
-                                        } else {
-                                          // Normal route - show origin → destination
-                                          subtitleText = serviceType != null && serviceType != '1'
-                                            ? '$orig → $dest (Type $serviceType)'
-                                            : '$orig → $dest';
-                                        }
-                                      } else {
-                                        // Fallback: show direction label if no origin/destination data
-                                        final dirLabel = bound == 'O' 
-                                          ? (isEnglish ? 'Outbound' : '往程')
-                                          : bound == 'I'
-                                            ? (isEnglish ? 'Inbound' : '返程')
-                                            : (direction == 'outbound' 
-                                                ? (isEnglish ? 'Outbound' : '往程')
-                                                : (isEnglish ? 'Inbound' : '返程'));
-                                        
-                                        subtitleText = serviceType != null && serviceType != '1'
-                                          ? '$dirLabel (Type $serviceType)'
-                                          : dirLabel;
-                                      }
-                                      
-                                      variantTiles.add(ListTile(
-                                        title: _buildHighlightedText(route, input),
-                                        subtitle: Text(subtitleText, style: const TextStyle(fontSize: 13)),
-                                        onTap: () {
-                                          final r = route.toUpperCase();
-                                          Navigator.of(context).push(MaterialPageRoute(
-                                            builder: (_) => KmbRouteStatusPage(route: r, bound: bound, serviceType: serviceType)));
-                                          widget.onRouteSelected?.call(r);
-                                        },
-                                      ));
-                                    }
-                                  }
-                                  
-                                  tiles.add(
-                                    Card(
-                                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      color: theme.colorScheme.surfaceContainerHighest,
-                                      child: Column(children: variantTiles),
-                                    ),
-                                  );
-                                  continue;
-                                }
 
-                                // Single variant - show as before
-                                String? subtitleText;
-                                if (routeData.containsKey('orig_en') && routeData.containsKey('dest_en')) {
-                                  final orig = isEnglish ? (routeData['orig_en'] ?? '') : (routeData['orig_tc'] ?? '');
-                                  final dest = isEnglish ? (routeData['dest_en'] ?? '') : (routeData['dest_tc'] ?? '');
-                                  if (orig.isNotEmpty && dest.isNotEmpty) {
-                                    subtitleText = '$orig → $dest';
-                                  }
-                                }
-
-                                if (subtitleText == null) {
-                                  final dirLabel = _directionLabelForRoute(route);
-                                  final dest = _destinationForRoute(route, isEnglish);
-                                  subtitleText = dest ?? dirLabel;
-                                }
-
-                                final subtitleWidget = subtitleText != null ? Text(subtitleText) : null;
-
-                                // Detect if this single variant route actually has multiple bounds (I/O).
-                                final bounds = <String>{};
-                                if (_routeMap != null) {
-                                  final rKey = route.toUpperCase();
-                                  final baseKey = RegExp(r'^(\d+)').firstMatch(rKey)?.group(1) ?? rKey;
-                                  final entries = _routeMap![rKey] ?? _routeMap![baseKey] ?? [];
-                                  for (final e in entries) {
-                                    final b = (e['bound'] == null) ? null : e['bound'].toString().toUpperCase();
-                                    if (b != null && b.isNotEmpty) bounds.add(b[0]);
-                                  }
-                                }
-
-                                if (bounds.length <= 1) {
-                                  tiles.add(
-                                    Card(
-                                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      color: theme.colorScheme.surfaceContainerHighest,
-                                        child: ListTile(
-                                          title: _buildHighlightedText(route, input),
-                                          subtitle: subtitleWidget,
-                                          onTap: () {
-                                            final r = route.toUpperCase();
-                                            Navigator.of(context).push(MaterialPageRoute(builder: (_) => KmbRouteStatusPage(route: r)));
-                                            widget.onRouteSelected?.call(r);
-                                          },
-                                        ),
-                                    ),
-                                  );
-                                } else {
-                                  // Multiple bounds: show a card containing per-bound choices
-                                  final List<Widget> boundTiles = [];
-                                  final ordered = bounds.toList()..sort();
-                                  for (final b in ordered) {
-                                    final destForBound = _destinationForRouteBound(route, b, isEnglish);
-                                    final label = (b == 'I')
-                                      ? (isEnglish ? 'Inbound' : '返程')
-                                      : (b == 'O')
-                                        ? (isEnglish ? 'Outbound' : '往程')
-                                        : b;
-                                    boundTiles.add(ListTile(
-                                      title: _buildHighlightedText(route, input),
-                                      subtitle: destForBound != null ? Text(destForBound) : Text(label),
-                                      onTap: () {
-                                        final r = route.toUpperCase();
-                                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => KmbRouteStatusPage(route: r, bound: b)));
-                                        widget.onRouteSelected?.call(r);
-                                      },
-                                    ));
-                                  }
-                                  tiles.add(
-                                    Card(
-                                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      color: theme.colorScheme.surfaceContainerHighest,
-                                      child: Column(children: boundTiles),
-                                    ),
-                                  );
-                                }
-                              } else {
                                 tiles.add(
-                                  Card(
-                                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                    color: theme.colorScheme.surfaceContainerHighest,
-                                    child: ExpansionTile(
-                                      title: Text('$base (${variants.length})', style: theme.textTheme.titleMedium),
-                                      // auto-expand the group that matches the numeric base typed, or expand if it's the only group
-                                      initiallyExpanded: baseFromInput == base || sortedBases.length == 1,
-                                      children: variants.map((routeData) {
-                                        final route = routeData['route'] as String;
-                                        final bound = routeData['bound'] as String?;
-                                        final direction = routeData['direction'] as String?;
-                                        final serviceType = routeData['service_type'] as String?;
-
-                                        // Use destination from search results if available
-                                        String? subtitleText;
-                                        if (routeData.containsKey('orig_en') && routeData.containsKey('dest_en')) {
-                                          final orig = isEnglish ? (routeData['orig_en'].toString().toTitleCase() ?? '') : (routeData['orig_tc'] ?? '');
-                                          final dest = isEnglish ? (routeData['dest_en'].toString().toTitleCase() ?? '') : (routeData['dest_tc'] ?? '');
-                                          
-                                          // Check if circular route
-                                          final isCircular = orig == dest && orig.isNotEmpty;
-                                          
-                                          if (orig.isNotEmpty && dest.isNotEmpty) {
-                                            if (isCircular) {
-                                              // Circular route - show direction
-                                              final dirLabel = bound == 'O' 
-                                                ? (isEnglish ? 'Outbound (Circular)' : '往程（循環線）')
-                                                : bound == 'I'
-                                                  ? (isEnglish ? 'Inbound (Circular)' : '返程（循環線）')
-                                                  : (isEnglish ? 'Circular' : '循環線');
-                                              subtitleText = serviceType != null && serviceType != '1' 
-                                                ? '$dirLabel - Type $serviceType' 
-                                                : dirLabel;
-                                            } else {
-                                              subtitleText = serviceType != null && serviceType != '1'
-                                                ? '$orig \n→ $dest [${lang.type}($serviceType)]'
-                                                : '$orig \n→ $dest ${lang.isEnglish ? ' [Normal Service]' : ' [常規班次]'}';
-                                            }
-                                          }
-                                        }
-
-                                        // Fallback to direction label
-                                        if (subtitleText == null && direction != null) {
-                                          subtitleText = direction == 'outbound' 
-                                            ? (isEnglish ? 'Outbound' : '往程')
-                                            : (isEnglish ? 'Inbound' : '返程');
-                                          if (serviceType != null && serviceType != '1') {
-                                            subtitleText = '$subtitleText (Type $serviceType)';
-                                          }
-                                        }
-
-                                        // Final fallback to route-stop map
-                                        if (subtitleText == null) {
-                                          final dirLabel = _directionLabelForRoute(route);
-                                          final dest = _destinationForRoute(route, isEnglish);
-                                          subtitleText = dest ?? dirLabel;
-                                        }
-
-                                        final subtitleWidget = subtitleText != null ? Text(subtitleText, style: const TextStyle(fontSize: 13)) : null;
-
-                                        // Check if this specific variant has a known bound
-                                        if (bound != null && bound.isNotEmpty) {
-                                          // We have bound information from the route list API
-                                          return ListTile(
-                                            title: _buildHighlightedText(route, input),
-                                            subtitle: subtitleWidget,
-                                            onTap: () {
-                                              Navigator.of(context).push(MaterialPageRoute(
-                                                builder: (_) => KmbRouteStatusPage(route: route, bound: bound, serviceType: serviceType)));
-                                              widget.onRouteSelected?.call(route);
-                                            },
-                                          );
-                                        }
-
-                                        // Otherwise check route-stop map for bounds
-                                        final bounds = <String>{};
-                                        if (_routeMap != null) {
-                                          final rKey = route.toUpperCase();
-                                          final baseKey = RegExp(r'^(\d+)').firstMatch(rKey)?.group(1) ?? rKey;
-                                          final entries = _routeMap![rKey] ?? _routeMap![baseKey] ?? [];
-                                          for (final e in entries) {
-                                            final b = (e['bound'] == null) ? null : e['bound'].toString().toUpperCase();
-                                            if (b != null && b.isNotEmpty) bounds.add(b[0]);
-                                          }
-                                        }
-
-                                        if (bounds.length <= 1) {
-                                          return ListTile(
-                                            title: _buildHighlightedText(route, input),
-                                            subtitle: subtitleWidget,
-                                            onTap: () {
-                                              Navigator.of(context).push(MaterialPageRoute(builder: (_) => KmbRouteStatusPage(route: route)));
-                                              widget.onRouteSelected?.call(route);
-                                            },
-                                          );
-                                        }
-
-                                        // Multiple bounds -> render multiple ListTiles, one per bound
-                                        final List<Widget> boundTiles = [];
-                                        final ordered = bounds.toList()..sort();
-                                        for (final b in ordered) {
-                                          final destForBound = _destinationForRouteBound(route, b, isEnglish);
-                                          final label = (b == 'I')
-                                            ? (isEnglish ? 'Inbound' : '返程')
-                                            : (b == 'O')
-                                              ? (isEnglish ? 'Outbound' : '往程')
-                                              : b;
-                                                    boundTiles.add(ListTile(
-                                                      title: _buildHighlightedText(route, input),
-                                                      subtitle: destForBound != null ? Text(destForBound) : Text(label),
-                                                      onTap: () {
-                                                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => KmbRouteStatusPage(route: route, bound: b)));
-                                                        widget.onRouteSelected?.call(route);
-                                                      },
-                                                    ));
-                                                  }
-                                                  return Column(children: boundTiles);
-                                      }).toList(),
+                                  Card.filled(
+                                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                    clipBehavior: Clip.hardEdge,
+                                    child: _buildRouteContent(
+                                      context, 
+                                      route: route, 
+                                      variants: routeVariants, 
+                                      isEnglish: isEnglish,
+                                      input: input
                                     ),
                                   ),
                                 );
+                                continue;
                               }
+
+                              // --- Case 2: Grouped Variants (ExpansionTile) ---
+                              tiles.add(
+                                Card.filled(
+                                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                  clipBehavior: Clip.hardEdge,
+                                  child: ExpansionTile(
+                                    shape: const Border(), // M3: 移除邊框
+                                    collapsedShape: const Border(),
+                                    backgroundColor: theme.colorScheme.surfaceContainer, // 展開後的背景色
+                                    tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    
+                                    title: Text(
+                                      '$base (${variants.length})', 
+                                      style: theme.textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: theme.colorScheme.onSurface,
+                                      )
+                                    ),
+                                    
+                                    // 自動展開邏輯
+                                    initiallyExpanded: baseFromInput == base || sortedBases.length == 1,
+                                    
+                                    children: variants.map((routeData) {
+                                      final route = routeData['route'] as String;
+                                      // 這裡直接復用 _buildRouteContent 來處理子項目的複雜顯示邏輯
+                                      // 注意：我們只傳入單個 variant，因為在展開列表中每個項目都是獨立的
+                                      return _buildRouteContent(
+                                        context,
+                                        route: route,
+                                        variants: [routeData],
+                                        isEnglish: isEnglish,
+                                        input: input,
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              );
                             }
 
                             if (tiles.isEmpty) {
-                              return const Center(child: Text('No routes found'));
+                              return Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: Text(
+                                    'No routes found',
+                                    style: theme.textTheme.bodyLarge?.copyWith(
+                                      color: theme.colorScheme.outline
+                                    )
+                                  ),
+                                )
+                              );
                             }
 
-                            return ListView(children: tiles);
+                            return ListView(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              children: tiles
+                            );
                           }),
                         );
                       },
                     )
                   : const SizedBox.shrink(),
             ),
+
 
             const SizedBox(height: 24), // smaller spacer to reduce overall vertical footprint
           ],
@@ -648,6 +423,282 @@ class _KmbDialerState extends State<KmbDialer> {
       ],
     );
   }
+  // --- Helper Methods ---
+
+  /// 構建路由卡片內部的具體內容 (處理單一變體與多目的地邏輯)
+  Widget _buildRouteContent(
+    BuildContext context, {
+    required String route,
+    required List<Map<String, dynamic>> variants,
+    required bool isEnglish,
+    required String input,
+  }) {
+    final theme = Theme.of(context);
+    final List<Widget> tiles = [];
+
+    // 1. 按目的地分組 (處理循環線與不同服務類型)
+    final Map<String, List<Map<String, dynamic>>> routesByDestination = {};
+    for (final variant in variants) {
+      // 這裡做了安全處理，確保 null 值轉為空字串
+      final orig = isEnglish 
+          ? (variant['orig_en']?.toString().trim() ?? variant['orig_tc']?.toString().trim() ?? '')
+          : (variant['orig_tc']?.toString().trim() ?? variant['orig_en']?.toString().trim() ?? '');
+      final dest = isEnglish
+          ? (variant['dest_en']?.toString().trim() ?? variant['dest_tc']?.toString().trim() ?? '')
+          : (variant['dest_tc']?.toString().trim() ?? variant['dest_en']?.toString().trim() ?? '');
+      
+      final key = '$orig→$dest';
+      routesByDestination.putIfAbsent(key, () => []).add(variant);
+    }
+
+    // 2. 判斷顯示模式
+    // 如果有多個不同的目的地組合，或同一目的地有多個服務類型，則全部列出
+    if (routesByDestination.length > 1 || (routesByDestination.length == 1 && routesByDestination.values.first.length > 1)) {
+      
+      for (final destEntry in routesByDestination.entries) {
+        final destVariants = destEntry.value;
+
+        for (final variant in destVariants) {
+          final bound = variant['bound'] as String?;
+          final serviceType = variant['service_type'] as String?;
+          final direction = variant['direction'] as String?;
+
+          // 重新提取一次 orig/dest 供顯示使用 (邏輯同上)
+          final orig = isEnglish 
+              ? (variant['orig_en']?.toString().trim() ?? variant['orig_tc']?.toString().trim() ?? '')
+              : (variant['orig_tc']?.toString().trim() ?? variant['orig_en']?.toString().trim() ?? '');
+          final dest = isEnglish
+              ? (variant['dest_en']?.toString().trim() ?? variant['dest_tc']?.toString().trim() ?? '')
+              : (variant['dest_tc']?.toString().trim() ?? variant['dest_en']?.toString().trim() ?? '');
+
+          // 生成副標題
+          String subtitleText;
+          if (orig.isNotEmpty && dest.isNotEmpty) {
+            final isCircular = (variant['orig_en'] == variant['dest_en'] && variant['orig_en'] != null) ||
+                                (variant['orig_tc'] == variant['dest_tc'] && variant['orig_tc'] != null);
+            
+            if (isCircular) {
+              final dirLabel = bound == 'O' 
+                ? (isEnglish ? 'Outbound (Circular)' : '往程（循環線）')
+                : bound == 'I'
+                  ? (isEnglish ? 'Inbound (Circular)' : '返程（循環線）')
+                  : (isEnglish ? 'Circular' : '循環線');
+              subtitleText = serviceType != null && serviceType != '1' 
+                ? '$dirLabel - Type $serviceType' : dirLabel;
+            } else {
+              subtitleText = serviceType != null && serviceType != '1'
+                ? '$orig → $dest (Type $serviceType)'
+                : '$orig → $dest';
+            }
+          } else {
+            // Fallback: 如果沒有目的地資料，嘗試用方向或 bound
+            final dirLabel = bound == 'O' 
+              ? (isEnglish ? 'Outbound' : '往程')
+              : bound == 'I' ? (isEnglish ? 'Inbound' : '返程') : (direction ?? '');
+            subtitleText = serviceType != null && serviceType != '1'
+              ? '$dirLabel (Type $serviceType)' : dirLabel;
+          }
+
+          tiles.add(_buildM3ListTile(
+            context,
+            title: _buildHighlightedText(route, input, theme),
+            subtitle: Text(subtitleText),
+            onTap: () {
+              final r = route.toUpperCase();
+              // 導航到狀態頁面
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => KmbRouteStatusPage(route: r, bound: bound, serviceType: serviceType)
+              ));
+              widget.onRouteSelected?.call(r);
+            },
+          ));
+        }
+      }
+    } else {
+      // 3. Fallback: 只有單一變體，顯示基本資訊
+      final variant = variants.first;
+      final bound = variant['bound'] as String?;
+      // 服務類型處理
+      final serviceType = variant['service_type'] as String?;
+      final hasServiceType = serviceType != null && serviceType != '1';
+      
+      // 提取變數
+      final origRaw = isEnglish 
+          ? (variant['orig_en']?.toString().trim() ?? variant['orig_tc']?.toString().trim() ?? '')
+          : (variant['orig_tc']?.toString().trim() ?? variant['orig_en']?.toString().trim() ?? '');
+      final destRaw = isEnglish
+          ? (variant['dest_en']?.toString().trim() ?? variant['dest_tc']?.toString().trim() ?? '')
+          : (variant['dest_tc']?.toString().trim() ?? variant['dest_en']?.toString().trim() ?? '');
+
+      // 套用 TitleCase (僅英文模式)
+      final orig = isEnglish ? origRaw.toTitleCase() : origRaw;
+      final dest = isEnglish ? destRaw.toTitleCase() : destRaw;
+      
+      // 構建子項目
+      return _buildM3ListTile(
+        context,
+        title: _buildHighlightedText(route, input, Theme.of(context)),
+        // 使用自定義的 Rich Subtitle Widget
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 第一行：起訖點佈局
+              if (orig.isNotEmpty && dest.isNotEmpty)
+                Row(
+                  children: [
+                    Flexible(
+                      child: OptionalMarquee(
+                        text: orig, 
+                        style: TextStyle(letterSpacing: -0.05, fontSize: 12, fontWeight: FontWeight.w400,
+                                      // height: 0, // ❌ 移除
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                                    ),)),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(Icons.arrow_forward, size: 12, color: Colors.grey),
+                    ),
+                    Flexible(
+                      child: OptionalMarquee(
+                        text: dest, 
+                        style: TextStyle(letterSpacing: -0.05, fontSize: 12, fontWeight: FontWeight.w400,
+                                      // height: 0, // ❌ 移除
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                                    ),)),
+                  ],
+                )
+              else
+                Text(isEnglish ? "View Route" : "查看路線"),
+
+              // 第二行：服務類型標籤 (如果有)
+              if (hasServiceType)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      isEnglish ? 'Special Departures($serviceType)' : '特別班次($serviceType)', // 或根據語言顯示 '類別 $serviceType'
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onTertiaryContainer,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        onTap: () {
+          final r = route.toUpperCase();
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => KmbRouteStatusPage(route: r, bound: bound, serviceType: serviceType)
+          ));
+          widget.onRouteSelected?.call(r);
+        },
+        );
+      }
+      /*
+      // 這裡簡化顯示：如果有資料就顯示起訖點，否則顯示方向
+      String subtitleText = (orig.isNotEmpty && dest.isNotEmpty)
+          ? "$orig → $dest" 
+          : (isEnglish ? "View Route" : "查看路線");
+
+      tiles.add(_buildM3ListTile(
+        context,
+        title: _buildHighlightedText(route, input, theme),
+        subtitle: Text(subtitleText),
+        onTap: () {
+          final r = route.toUpperCase();
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => KmbRouteStatusPage(route: r, bound: bound, serviceType: serviceType)
+          ));
+          widget.onRouteSelected?.call(r);
+        },
+      ));
+    } */
+    
+    // 如果有多個 Tile，添加 M3 風格的分隔線
+    if (tiles.length > 1) {
+      final separatedTiles = <Widget>[];
+      for (int i = 0; i < tiles.length; i++) {
+        separatedTiles.add(tiles[i]);
+        if (i < tiles.length - 1) {
+          separatedTiles.add(Divider(
+            height: 1, 
+            thickness: 0.5, 
+            indent: 16, 
+            endIndent: 16, 
+            color: theme.colorScheme.outlineVariant.withOpacity(0.5)
+          ));
+        }
+      }
+      return Column(children: separatedTiles);
+    }
+
+    return Column(children: tiles);
+  }
+
+  /// 標準 Material 3 風格的 ListTile
+  Widget _buildM3ListTile(BuildContext context, {
+    required Widget title, 
+    Widget? subtitle, 
+    required VoidCallback onTap
+  }) {
+    final theme = Theme.of(context);
+    return ListTile(
+      visualDensity: VisualDensity.compact, // 緊湊視圖
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+      title: title,
+      subtitle: subtitle != null ? DefaultTextStyle(
+        style: theme.textTheme.bodySmall!.copyWith(
+          color: theme.colorScheme.onSurfaceVariant
+        ),
+        child: subtitle
+      ) : null,
+      trailing: Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.outline),
+      onTap: onTap,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), // 點擊水波紋圓角
+    );
+  }
+
+  /// 支援搜尋關鍵字高亮的文字組件
+  Widget _buildHighlightedText(String text, String query, ThemeData theme) {
+    if (query.isEmpty) return Text(text);
+
+    final lowerText = text.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    
+    if (!lowerText.contains(lowerQuery)) {
+      return Text(text);
+    }
+
+    final startIndex = lowerText.indexOf(lowerQuery);
+    final endIndex = startIndex + lowerQuery.length;
+
+    return Text.rich(
+      TextSpan(
+        style: TextStyle(color: theme.colorScheme.onSurface), // 預設文字顏色
+        children: [
+          TextSpan(text: text.substring(0, startIndex)),
+          TextSpan(
+            text: text.substring(startIndex, endIndex),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.primary, // 高亮顏色使用 Primary
+            ),
+          ),
+          TextSpan(text: text.substring(endIndex)),
+        ],
+      ),
+    );
+  }
+
 
   Widget _buildDialer() {
     final theme = Theme.of(context);
@@ -860,7 +911,7 @@ class _KmbDialerState extends State<KmbDialer> {
   }
 
   // Highlight occurrences of [query] within [text], case-insensitive.
-  Widget _buildHighlightedText(String text, String query) {
+  Widget buildHighlightedText(String text, String query) {
     final theme = Theme.of(context);
   final defaultColor = theme.textTheme.bodyMedium?.color ?? Colors.white;
     final highlightColor = theme.colorScheme.secondary; // use theme secondary instead of yellow
@@ -907,22 +958,24 @@ class _OneHandDialerContainerState extends State<_OneHandDialerContainer> with S
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // 1. Layer 必須包裹在 Stack 或類似結構中，通常用於管理背景折射
+    return LiquidGlassLayer(
+      settings: LiquidGlassSettings(
+        blur: 3,  // 對應 ImageFilter.blur
+        glassColor: colorScheme.surface.withOpacity(0.7), // 對應 decoration color
+        thickness: 20, // 模擬玻璃厚度，增強折射感
+        lightIntensity: 0.5, // 調整光照以配合 Material 3 風格
+      ),
+      // 2. 使用 ScaleTransition 包裹 LiquidGlass
+      child: ScaleTransition(
+        scale: CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
+        child: LiquidGlass(
+          // 3. 使用 iOS/M3 風格的 Superellipse 形狀
+          shape: LiquidRoundedSuperellipse(borderRadius: 20),
+          child: Padding(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: const [
-                BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 6)),
-              ],
-              border: Border.all(color: Colors.white10),
-            ),
             child: widget.child,
           ),
         ),
