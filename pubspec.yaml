@@ -19,7 +19,7 @@ dependencies:
   implicitly_animated_reorderable_list_2: ^0.6.0
   connectivity_plus: ^7.0.0
   shared_preferences: ^2.5.3
-  liquid_glass_renderer: ^0.1.1-dev.10
+  liquid_glass_renderer: ^0.2.0-dev.4
   path_provider: ^2.0.14
   permission_handler: ^12.0.1
   geolocator: ^13.0.4
