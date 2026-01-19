@@ -18,6 +18,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'optionalMarquee.dart';
 import 'toTitleCase.dart';
 
@@ -1244,71 +1245,68 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final availableServiceTypes = _getServiceTypesForDirection(_selectedDirection);
     final hasMultipleDirections = _directions.length > 1;
     final hasMultipleServiceTypes = availableServiceTypes.length > 1;
-    final maxSize = (_serviceTypes.isEmpty) ? 0.3 : 0.38;
+    final maxSize = (_serviceTypes.isEmpty) ? 0.25 : 0.38;
 
     return DraggableScrollableSheet(
       controller: _draggableController,
       initialChildSize: 0.25,
-      minChildSize: 0.22,
-      maxChildSize: maxSize,  // 🔴 動態設置
+      minChildSize: 0.15,
+      maxChildSize: maxSize,
       snap: true,
-      snapSizes: [0.22, 0.25, maxSize],  // 🔴 同步更新
+      snapSizes: [0.15, 0.25, maxSize],
       snapAnimationDuration: const Duration(milliseconds: 250),
-      builder: (BuildContext context, ScrollController scrollController) {
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface.withOpacity(0.85),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-            boxShadow: [
-              BoxShadow(
-                color: theme.colorScheme.onSurface.withOpacity(0.2),
-                blurRadius: 18,
-                offset: const Offset(0, 1),
-              ),
-            ],
-            border: Border(
-              top: BorderSide(
-                color: theme.colorScheme.outline.withOpacity(0.3),
-                width: 1,
+      builder: (context, scrollController) => ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        child: FakeGlass(  // ✅ 使用 FakeGlass 而非 LiquidGlass
+          shape: LiquidRoundedSuperellipse(borderRadius: 20),
+          settings: LiquidGlassSettings(
+            blur: 10.0, 
+            thickness: 19,                                             // ✅ 提高模糊
+            glassColor: theme.colorScheme.surface.withOpacity(0.15), // ✅ 降至 0.15
+            lightIntensity: 1.2,
+            saturation: 1.1,
+            refractiveIndex: 1.3,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              // ✅ 移除 color 屬性，避免雙重不透明
+              border: Border(
+                top: BorderSide(
+                  color: theme.colorScheme.outline.withOpacity(0.2),
+                  width: 0.5,
+                ),
               ),
             ),
-          ),
-          child: ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
-              child: ListView(
-                controller: scrollController,
-                padding: EdgeInsets.zero,
-                children: [
-                  // Drag handle indicator
-                  Center(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 8),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.onSurfaceVariant.withOpacity(0.4),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+            child: ListView(
+              controller: scrollController,
+              padding: EdgeInsets.zero,
+              children: [
+                // Drag handle indicator
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.onSurfaceVariant.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  
-                  SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.only(
-                        left: UIConstants.spacingM, 
-                        right: UIConstants.spacingM, 
-                        bottom: UIConstants.spacingL, 
-                        top: UIConstants.spacingXS
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
+                ),
+                
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      left: UIConstants.spacingM,
+                      right: UIConstants.spacingM,
+                      bottom: UIConstants.spacingL,
+                      top: UIConstants.spacingXS
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
                           // Route destination summary
                           RouteDestinationWidget(
                             route: widget.route,
@@ -1472,11 +1470,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                     ),
                   ),
                 ],
-              ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 

@@ -1018,8 +1018,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                   thickness: 19, // Glass refraction depth
                   blur: 10, // Background blur strength
                   glassColor: Theme.of(context).colorScheme.surface.withOpacity(0.3), // Semi-transparent tint
+                  lightIntensity: 1.2,
+                  saturation: 1.1,
+                  refractiveIndex: 1.3,
                 ),
-                child: LiquidGlass(
+                child: FakeGlass(
                   // Define the shape with top-rounded corners
                   shape: LiquidRoundedSuperellipse(
                     borderRadius: 20, // Matches your original BorderRadius.circular(20)
