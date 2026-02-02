@@ -42,7 +42,7 @@ class Kmb {
   }
 
   /// Fetches KMB routes from API with caching support
-  static Future<List<String>> fetchRoutes({Duration ttl = const Duration(hours: 24)}) async {
+  static Future<List<String>> fetchRoutes({String companyId = 'kmb', Duration ttl = const Duration(hours: 24)}) async {
     // Check in-memory cache first
     if (_routesCache != null && _routesCacheAt != null) {
       if (DateTime.now().difference(_routesCacheAt!) < ttl) {
@@ -507,6 +507,7 @@ class Kmb {
             'dest_sc': route['dest_sc'] ?? '',
             'bound': bound,  // Original API value (I/O)
             'co': route['co'] ?? 'KMB',
+            'operator': 'kmb',
             'data_timestamp': route['data_timestamp'] ?? '',
             // Add searchable text combining all names
             'search_text': [
@@ -543,7 +544,7 @@ class Kmb {
   }
 
   /// Search routes using enhanced index with origin/destination matching
-  static Future<List<Map<String, dynamic>>> searchRoutes(String query, {int? maxResults}) async {
+  static Future<List<Map<String, dynamic>>> searchRoutes(String query, {String companyId = 'kmb', int? maxResults}) async {
     if (query.trim().isEmpty) return [];
 
     final index = await buildRouteIndex();

@@ -437,7 +437,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => KmbRouteStatusPage(route: routeNum, bound: direction, serviceType: serviceType)),
+                MaterialPageRoute(builder: (context) => KmbRouteStatusPage(route: routeNum, bound: direction, serviceType: serviceType, companyId: null,)),
               ).then((_) => _loadData());
             },
             borderRadius: BorderRadius.circular(14),
@@ -762,6 +762,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                     route: route, 
                     bound: widget.stop['direction'], 
                     serviceType: widget.stop['serviceType'],
+                    companyId: widget.stop['company'],
                     autoExpandSeq: widget.stop['seq']?.toString(),
                     autoExpandStopId: widget.stop['stopId']?.toString(),
                   )),
@@ -846,6 +847,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                       route: route, 
                       bound: widget.stop['direction'], 
                       serviceType: widget.stop['serviceType'],
+                      companyId: widget.stop['company'],
                       autoExpandSeq: widget.stop['seq']?.toString(),
                       autoExpandStopId: widget.stop['stopId']?.toString(),
                     )),

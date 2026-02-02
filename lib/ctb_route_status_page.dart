@@ -1,27 +1,35 @@
-import 'package:auto_size_text/auto_size_text.dart';
-import 'package:flutter/material.dart';
-import '/kmb/api/kmb.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
-import 'package:flutter/foundation.dart' show compute;
-import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants, EnhancedScrollPhysics, AccessibilityProvider;
+// Standard Dart libraries
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
-import 'dart:async';
-import 'package:path_provider/path_provider.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+
+// Flutter core and foundation
+import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+
+// Flutter/Third-party packages
+import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+// Local project files / API
+import '/kmb/api/citybus.dart';
+import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants, EnhancedScrollPhysics, AccessibilityProvider;
 import 'optionalMarquee.dart';
 import 'toTitleCase.dart';
 
-class KmbRouteStatusPage extends StatefulWidget {
+
+class CtbRouteStatusPage extends StatefulWidget {
   final String route;
   final String? bound;
   final String? serviceType;
@@ -30,7 +38,7 @@ class KmbRouteStatusPage extends StatefulWidget {
   final String? autoExpandStopId;
   /// Optional sequence number to auto-expand when page loads
   final String? autoExpandSeq;
-  const KmbRouteStatusPage({
+  const CtbRouteStatusPage({
     super.key, 
     required this.route, 
     this.bound, 
@@ -41,12 +49,12 @@ class KmbRouteStatusPage extends StatefulWidget {
   });
 
   @override
-  State<KmbRouteStatusPage> createState() => _KmbRouteStatusPageState();
+  State<CtbRouteStatusPage> createState() => _CtbRouteStatusPageState();
 }
 String? _autoExpandSeq;
-class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
+class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
   // Preference key for map view state
-  static const String _mapViewPreferenceKey = 'kmb_route_status_map_view_enabled';
+  static const String _mapViewPreferenceKey = 'ctb_route_status_map_view_enabled';
   final DraggableScrollableController _draggableController = DraggableScrollableController();
 
 
@@ -263,39 +271,38 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     // Add this route to history automatically
     final r = widget.route.trim().toUpperCase();
     String label = r;
-    
+
     // Wait a bit for route details to load
     await Future.delayed(const Duration(milliseconds: 500));
-    
+
     if (_routeDetails != null) {
-      final routeData = _routeDetails!.containsKey('data') 
-        ? (_routeDetails!['data'] as Map<String, dynamic>?)
-        : _routeDetails!;
-      
+      final routeData = _routeDetails!.containsKey('data')
+          ? _routeDetails!['data'] as Map<String, dynamic>?
+          : _routeDetails!;
+
       if (routeData != null && mounted) {
         final lang = context.read<LanguageProvider>();
         final isEnglish = lang.isEnglish;
-        
-        final orig = isEnglish 
-          ? (routeData['orig_en'] ?? routeData['orig_tc'] ?? '')
-          : (routeData['orig_tc'] ?? routeData['orig_en'] ?? '');
+        final orig = isEnglish
+            ? routeData['orig_en'] ?? routeData['orig_tc'] ?? ''
+            : routeData['orig_tc'] ?? routeData['orig_en'] ?? '';
         final dest = isEnglish
-          ? (routeData['dest_en'] ?? routeData['dest_tc'] ?? '')
-          : (routeData['dest_tc'] ?? routeData['dest_en'] ?? '');
-        
+            ? routeData['dest_en'] ?? routeData['dest_tc'] ?? ''
+            : routeData['dest_tc'] ?? routeData['dest_en'] ?? '';
+
         if (orig.isNotEmpty && dest.isNotEmpty) {
           label = '$r: $orig → $dest';
         }
       }
     }
-    
-    await Kmb.addToHistory(
+
+    // CTB: No service type parameter
+    await Citybus.addToHistory(
       r,
-      _selectedDirection ?? widget.bound ?? 'O',
-      _selectedServiceType ?? widget.serviceType ?? '1',
       label,
     );
   }
+
 
   String _formatEta(BuildContext context, dynamic raw) {
     if (raw == null) return '—';
@@ -387,7 +394,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     
     // Start loading route info immediately (independent of stop list)
     final r = widget.route.trim().toUpperCase();
-    _loadVariantsFromCache(r, widget.bound, widget.serviceType);
+    _loadVariantsFromCache(r, widget.bound,);
     
     try {
       // Try to load prebuilt assets first (fast startup)
@@ -397,18 +404,21 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         setState(() { loading = false; });
         return;
       }
-  final useRouteApi = await Kmb.getUseRouteApiSetting();
+  final useRouteApi = await Citybus.getUseRouteApiSetting();
       final base = RegExp(r'^(\\d+)').firstMatch(r)?.group(1) ?? r;
 
       if (useRouteApi) {
         // User prefers freshest per-route API
-        final result = await Kmb.fetchRouteStatus(r);
-        setState(() { data = result; });
+        final result = await Citybus.fetchRouteStatus(r);
+        setState(() { 
+          data = result;
+          loading = false;
+        });
         return;
       }
 
       // Default: use prebuilt map first, fall back to per-route API
-      final map = await Kmb.buildRouteToStopsMap();
+      final map = await Citybus.buildRouteToStopsMap();
       if (map.containsKey(r) || map.containsKey(base)) {
         final entries = map[r] ?? map[base]!;
         setState(() {
@@ -418,10 +428,14 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             'generatedtimestamp': DateTime.now().toIso8601String(),
             'data': entries,
           };
+          loading = false;
         });
       } else {
-        final result = await Kmb.fetchRouteStatus(r);
-        setState(() { data = result; });
+        final result = await Citybus.fetchRouteStatus(r);
+        setState(() { 
+          data = result;
+          loading = false;
+        });
       }
     } catch (e) {
       setState(() {
@@ -439,27 +453,83 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   Future<bool> _attemptLoadPrebuilt(String route) async {
     try {
       String? raw;
-      // Try app documents prebuilt first (written by Regenerate prebuilt data)
+      // Try bundled asset first (packaged with app, most reliable)
       try {
-        final doc = await getApplicationDocumentsDirectory();
-        final f = File('${doc.path}/prebuilt/kmb_route_stops.json');
-        if (f.existsSync()) raw = await f.readAsString();
-      } catch (_) {}
+        raw = await rootBundle.loadString('assets/prebuilt/ctb_route_stops.json');
+      } catch (_) {
+        raw = null;
+      }
 
-      // Fallback to bundled asset
+      // Fallback to app documents prebuilt (written by Regenerate prebuilt data)
       if (raw == null) {
         try {
-          raw = await rootBundle.loadString('assets/prebuilt/kmb_route_stops.json');
-        } catch (_) {
-          raw = null;
-        }
+          final doc = await getApplicationDocumentsDirectory();
+          final f = File('${doc.path}/prebuilt/ctb_route_stops.json');
+          if (f.existsSync()) raw = await f.readAsString();
+        } catch (_) {}
       }
       if (raw == null || raw.isEmpty) return false;
       final decoded = json.decode(raw) as Map<String, dynamic>;
       // Keys are route strings; try exact or base match
       final r = route.toUpperCase();
       if (decoded.containsKey(r)) {
-        final entries = List<Map<String, dynamic>>.from((decoded[r] as List).map((e) => Map<String, dynamic>.from(e)));
+        final routeValue = decoded[r];
+        List<Map<String, dynamic>> entries;
+        
+        // Case A: legacy list-of-entries format
+        if (routeValue is List) {
+          entries = List<Map<String, dynamic>>.from(routeValue.map((e) => Map<String, dynamic>.from(e as Map)));
+        }
+        // Case B: optimized per-bound structure { "I": { orig_en, orig_tc, dest_en, dest_tc, stops: [...] }, "O": {...} }
+        else if (routeValue is Map) {
+          final routeObj = routeValue as Map<String, dynamic>;
+          entries = <Map<String, dynamic>>[];
+          
+          routeObj.forEach((boundKey, boundVal) {
+            try {
+              final boundObj = boundVal as Map<String, dynamic>;
+              
+              // ✅ 修正：同時提取起點和終點
+              final origEn = (boundObj['orig_en'] ?? boundObj['origen'] ?? '')?.toString() ?? '';
+              final origTc = (boundObj['orig_tc'] ?? boundObj['origtc'] ?? '')?.toString() ?? '';
+              final destEn = (boundObj['dest_en'] ?? boundObj['desten'] ?? '')?.toString() ?? '';
+              final destTc = (boundObj['dest_tc'] ?? boundObj['desttc'] ?? '')?.toString() ?? '';
+              
+              final stopsList = boundObj['stops'];
+              
+              if (stopsList is List) {
+                for (final rawEntry in stopsList) {
+                  try {
+                    final entry = Map<String, dynamic>.from(rawEntry as Map);
+                    
+                    // Inject bound
+                    entry['bound'] = boundKey; // 'I' or 'O'
+                    
+                    if (entry.containsKey('dir')) {
+                      final dirValue = entry['dir']?.toString().trim().toUpperCase() ?? '';
+                      if (dirValue == 'I' || dirValue == 'O') {
+                        entry['bound'] = dirValue;
+                      }
+                    }
+                    
+                    entry['direction'] = boundKey == 'I' ? 'inbound' : 'outbound';
+                    
+                    // ✅ 注入起點和終點
+                    if (origEn.isNotEmpty) entry['origen'] = origEn;
+                    if (origTc.isNotEmpty) entry['origtc'] = origTc;
+                    if (destEn.isNotEmpty) entry['desten'] = destEn;
+                    if (destTc.isNotEmpty) entry['desttc'] = destTc;
+                    
+                    entries.add(entry);
+                  } catch (_) {}
+                }
+              }
+            } catch (_) {}
+          });
+        } else {
+          return false; // Unknown format
+        }
+        
         // Immediately show the raw entries to avoid blocking UI while we enrich
         setState(() {
           data = {
@@ -473,7 +543,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
         // Enrich stop entries with metadata off the main isolate to avoid jank
         try {
-          final stopMap = await Kmb.buildStopMap();
+          final stopMap = await Citybus.buildStopMap();
           final enriched = await compute(_enrichEntriesForStopMap, {'entries': entries, 'stopMap': stopMap});
           if (mounted) {
             setState(() {
@@ -499,15 +569,59 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           // ignore enrichment failures; raw entries already displayed
         }
         // populate variants from cache by ensuring route->stops map is built
-        try { await Kmb.buildRouteToStopsMap(); } catch (_) {}
-        _loadVariantsFromCache(r, widget.bound, widget.serviceType);
+        try { await Citybus.buildRouteToStopsMap(); } catch (_) {}
+        _loadVariantsFromCache(r, widget.bound,);
         return true;
       }
 
       // Try base numeric key
       final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1);
       if (base != null && decoded.containsKey(base)) {
-        final entries = List<Map<String, dynamic>>.from((decoded[base] as List).map((e) => Map<String, dynamic>.from(e)));
+        final routeValue = decoded[base];
+        List<Map<String, dynamic>> entries;
+        
+        // Case A: legacy list-of-entries format
+        if (routeValue is List) {
+          entries = List<Map<String, dynamic>>.from(routeValue.map((e) => Map<String, dynamic>.from(e as Map)));
+        }
+        // Case B: optimized per-bound structure { "I": { dest_en, dest_tc, stops: [...] }, "O": {...} }
+        else if (routeValue is Map) {
+          final routeObj = routeValue as Map<String, dynamic>;
+          entries = <Map<String, dynamic>>[];
+          routeObj.forEach((boundKey, boundVal) {
+            try {
+              final boundObj = boundVal as Map<String, dynamic>;
+              final destEn = (boundObj['dest_en'] ?? boundObj['desten'] ?? '')?.toString() ?? '';
+              final destTc = (boundObj['dest_tc'] ?? boundObj['desttc'] ?? '')?.toString() ?? '';
+              final stopsList = boundObj['stops'];
+              if (stopsList is List) {
+                for (final rawEntry in stopsList) {
+                  try {
+                    final entry = Map<String, dynamic>.from(rawEntry as Map);
+                    // Inject bound and dest fields for convenience
+                    // Ensure bound is set correctly - use boundKey from JSON structure
+                    entry['bound'] = boundKey; // 'I' or 'O'
+                    // Also preserve original 'dir' field if present, but normalize to bound
+                    if (entry.containsKey('dir')) {
+                      final dirValue = entry['dir']?.toString().trim().toUpperCase() ?? '';
+                      // If dir is 'I' or 'O', use it; otherwise use boundKey
+                      if (dirValue == 'I' || dirValue == 'O') {
+                        entry['bound'] = dirValue;
+                      }
+                    }
+                    entry['direction'] = boundKey == 'I' ? 'inbound' : 'outbound';
+                    if (destEn.isNotEmpty) entry['dest_en'] = destEn;
+                    if (destTc.isNotEmpty) entry['dest_tc'] = destTc;
+                    entries.add(entry);
+                  } catch (_) {}
+                }
+              }
+            } catch (_) {}
+          });
+        } else {
+          return false; // Unknown format
+        }
+        
         setState(() {
           data = {
             'type': 'RouteStopList',
@@ -518,7 +632,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           _combinedData = null;
         });
         try {
-          final stopMap = await Kmb.buildStopMap();
+          final stopMap = await Citybus.buildStopMap();
           final enriched = await compute(_enrichEntriesForStopMap, {'entries': entries, 'stopMap': stopMap});
           if (mounted) {
             setState(() {
@@ -541,8 +655,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             });
           }
         } catch (_) {}
-        try { await Kmb.buildRouteToStopsMap(); } catch (_) {}
-        _loadVariantsFromCache(r, widget.bound, widget.serviceType);
+        try { await Citybus.buildRouteToStopsMap(); } catch (_) {}
+        _loadVariantsFromCache(r, widget.bound,);
         return true;
       }
     } catch (_) {}
@@ -553,7 +667,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
-    
+
     return Scaffold(
       appBar: AppBar(
         // 1. Custom Back Button (Localized)
@@ -613,13 +727,13 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 tooltip: isEnglish ? 'Scroll to nearest stop' : '捲動至最近站點',
                 onPressed: _locationLoading ? null : () async {
                   // Get current stops from the list
-                  List<Map<String, dynamic>> stops = [];
+                  List<Map<dynamic, dynamic>> stops = [];
                   if (_variantStops != null && _variantStops!.isNotEmpty) {
                     stops = _variantStops!;
                   } else {
                     // Try to get from cached data
                     try {
-                      final routeMap = await Kmb.buildRouteToStopsMap();
+                      final routeMap = await Citybus.buildRouteToStopsMap();
                       final r = widget.route.trim().toUpperCase();
                       final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
                       final entries = routeMap[r] ?? routeMap[base] ?? [];
@@ -802,7 +916,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           )
         else ...[
           // 3. Selectors (Direction/Service Type)
-          if (_serviceTypes.isNotEmpty && !devSettings.useFloatingRouteToggles)
+          // Show selectors if directions exist OR service types exist (CTB may have directions but no service types)
+          if ((_directions.isNotEmpty || _serviceTypes.isNotEmpty) && !devSettings.useFloatingRouteToggles)
             SliverToBoxAdapter(child: _buildSelectorsCard()),
 
           // 4. Combined Data Loading/Error Indicators
@@ -876,7 +991,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
     // B. Fallback: Use Cached Route-To-Stops Map
     return FutureBuilder<List<dynamic>>(
-      future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
+      future: Future.wait([Citybus.buildRouteToStopsMap(), Citybus.buildStopMap()]),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const SliverToBoxAdapter(
@@ -905,9 +1020,29 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           );
         }
 
-        // Process cached data
-        final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
-        final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
+        // Process cached data - handle null data safely
+        if (snap.data == null || snap.data!.length < 2) {
+          return const SliverToBoxAdapter(
+            child: Card(
+              margin: EdgeInsets.all(12),
+              child: Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Text('No data available'),
+              ),
+            ),
+          );
+        }
+        
+        // Safely cast with null checks
+        final routeMapData = snap.data![0];
+        final stopMapData = snap.data![1];
+        
+        final routeMap = (routeMapData is Map<String, List<Map<String, dynamic>>>)
+            ? routeMapData
+            : <String, List<Map<String, dynamic>>>{};
+        final stopMap = (stopMapData is Map<String, Map>)
+            ? stopMapData.map((k, v) => MapEntry(k, Map<String, dynamic>.from(v)))
+            : <String, Map<String, dynamic>>{};
 
         final r = widget.route.trim().toUpperCase();
         final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
@@ -933,8 +1068,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           if (v == null) return null;
           final s = v.toString().trim().toUpperCase();
           if (s.isEmpty) return null;
+          // Accept values starting with I or O (covers 'I','O','IN','OUT','INBOUND','OUTBOUND')
           final c = s[0];
-          return (c == 'I' || c == 'O') ? c : null;
+          if (c == 'I' || c == 'O') return c;
+          return null;
         }
 
         final selectedBoundChar = normChar(_selectedDirection);
@@ -958,8 +1095,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             if (entryServiceType != selectedService) continue;
           }
 
-          if (!uniqueStopsMap.containsKey(seq)) {
-            uniqueStopsMap[seq] = e;
+          // Use composite key: bound + seq to handle same seq in different bounds
+          final boundKey = normChar(e['bound'] ?? e['dir'] ?? e['direction']) ?? '';
+          final compositeKey = '${boundKey}_$seq';
+          if (!uniqueStopsMap.containsKey(compositeKey)) {
+            uniqueStopsMap[compositeKey] = e;
           }
         }
 
@@ -1004,17 +1144,67 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   /// Reusable SliverList builder for both Variant and Cached data
-  Widget _buildSliverVariantList(List<Map<String, dynamic>> stops, double bottomPadding) {
-    // Deduplicate and Sort
-    final uniqueStopsMap = <String, Map<String, dynamic>>{};
+  Widget _buildSliverVariantList(List<Map<dynamic, dynamic>> stops, double bottomPadding) {
+    // Helper to normalize bound
+    String? normChar(dynamic v) {
+      if (v == null) return null;
+      final s = v.toString().trim().toUpperCase();
+      if (s.isEmpty) return null;
+      final c = s[0];
+      if (c == 'I' || c == 'O') return c;
+      return null;
+    }
+
+    // Deduplicate and Sort - use composite key to handle same seq in different bounds
+    final uniqueStopsMap = <String, Map<dynamic, dynamic>>{};
     for (final stop in stops) {
       final seq = stop['seq']?.toString() ?? '';
-      if (seq.isNotEmpty && !uniqueStopsMap.containsKey(seq)) {
-        uniqueStopsMap[seq] = stop;
+      if (seq.isEmpty) {
+        debugPrint('⚠️ Warning: Stop with no seq field found: ${stop['stop']}');
+        continue;
+      }
+
+      // ✅ CRITICAL: Ensure bound is correctly extracted from stop data
+      final boundKey = normChar(stop['bound'] ?? stop['dir'] ?? stop['direction']);
+      
+      // ✅ 新增：如果沒有 bound，使用 selectedDirection 作為 fallback
+      if (boundKey == null || boundKey.isEmpty) {
+        if (_selectedDirection != null) {
+          final fallbackBound = _selectedDirection!.toUpperCase().startsWith('I') ? 'I' : 'O';
+          stop['bound'] = fallbackBound;
+          debugPrint('ℹ️ Using selected direction as fallback for stop seq=$seq: $fallbackBound');
+        } else {
+          debugPrint('⚠️ Warning: Stop seq=$seq has no bound information and no selected direction, skipping');
+          continue; // Skip stops with missing bound when we can't determine it
+        }
+      }
+
+      // Use composite key: bound + seq to handle same seq in different bounds
+      final effectiveBound = normChar(stop['bound']) ?? '';
+      final compositeKey = '${effectiveBound}_$seq';
+      if (!uniqueStopsMap.containsKey(compositeKey)) {
+        uniqueStopsMap[compositeKey] = stop;
       }
     }
+
     final sortedStops = uniqueStopsMap.values.toList();
+    // Sort by bound first (I before O), then by seq within each bound
     sortedStops.sort((a, b) {
+      // First compare by bound (I comes before O)
+      final aBound = (a['bound'] ?? a['dir'] ?? a['direction'])?.toString().trim().toUpperCase() ?? '';
+      final bBound = (b['bound'] ?? b['dir'] ?? b['direction'])?.toString().trim().toUpperCase() ?? '';
+      final aBoundChar = aBound.isNotEmpty ? aBound[0] : '';
+      final bBoundChar = bBound.isNotEmpty ? bBound[0] : '';
+
+      if (aBoundChar != bBoundChar) {
+        // I comes before O
+        if (aBoundChar == 'I') return -1;
+        if (bBoundChar == 'I') return 1;
+        // If neither is I, maintain order
+        return aBoundChar.compareTo(bBoundChar);
+      }
+
+      // Same bound, sort by seq
       final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
       final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
       return ai.compareTo(bi);
@@ -1051,13 +1241,30 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
   /// Core delegate builder to avoid code duplication
   Widget _buildSliverListDelegate(
-    List<Map<String, dynamic>> stops, 
+    List<Map<dynamic, dynamic>> stops,
     Map<String, Map<String, dynamic>> stopMap, // Optional external map for cached mode
-    double bottomPadding
+    double bottomPadding,
   ) {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     final etaByStop = _etaBySeqCache ?? <String, List<Map<String, dynamic>>>{};
+
+    // Helper to normalize bound
+    String? normChar(dynamic v) {
+      if (v == null) return null;
+      final s = v.toString().trim().toUpperCase();
+      if (s.isEmpty) return null;
+      final c = s[0];
+      if (c == 'I' || c == 'O') return c;
+      return null;
+    }
+
+    // 🔍 Debug: 顯示 etaBySeqCache 的所有 keys
+    if (etaByStop.isNotEmpty) {
+      debugPrint('📊 etaBySeqCache keys: ${etaByStop.keys.toList()}');
+    } else {
+      debugPrint('⚠️ etaBySeqCache is EMPTY!');
+    }
 
     return SliverPadding(
       padding: EdgeInsets.only(bottom: bottomPadding),
@@ -1068,28 +1275,72 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             final seq = s['seq']?.toString() ?? '';
             final stopId = s['stop']?.toString() ?? '';
 
-            if (seq.isEmpty || stopId.isEmpty) return const SizedBox.shrink();
+            if (seq.isEmpty || stopId.isEmpty) {
+              return const SizedBox.shrink();
+            }
 
-            // Resolve Metadata (Variant data has it inside, Cached data needs lookup)
-            final meta = stopMap[stopId]; 
-            
-            final nameEn = (meta != null 
-                ? (meta['name_en'] ?? meta['nameen']) 
-                : (s['name_en'] ?? s['nameen']))?.toString() ?? '';
-                
-            final nameTc = (meta != null 
-                ? (meta['name_tc'] ?? meta['nametc']) 
-                : (s['name_tc'] ?? s['nametc']))?.toString() ?? '';
-
+            // Resolve Metadata: Variant data has it inside, Cached data needs lookup
+            final meta = stopMap[stopId];
+            final nameEn = meta != null ? (meta['name_en'] ?? meta['nameen']) : (s['name_en'] ?? s['nameen']?.toString() ?? '');
+            final nameTc = meta != null ? (meta['name_tc'] ?? meta['nametc']) : (s['name_tc'] ?? s['nametc']?.toString() ?? '');
             final displayName = isEnglish
                 ? (nameEn.isNotEmpty ? nameEn : (nameTc.isNotEmpty ? nameTc : stopId))
                 : (nameTc.isNotEmpty ? nameTc : (nameEn.isNotEmpty ? nameEn : stopId));
+            
+            final latStr = meta != null ? (meta['lat'] ?? meta['latitude']) : (s['lat'] ?? s['latitude']?.toString());
+            final lngStr = meta != null ? (meta['long'] ?? meta['lng']) : (s['long'] ?? s['lng']?.toString());
 
-            final latStr = (meta != null ? (meta['lat'] ?? meta['latitude']) : (s['lat'] ?? s['latitude']))?.toString();
-            final lngStr = (meta != null ? (meta['long'] ?? meta['lng']) : (s['long'] ?? s['lng']))?.toString();
+            // ETAs and Nearby check - use composite key for lookup
+            String? getBoundChar(dynamic v) {
+              if (v == null) return null;
+              final s = v.toString().trim().toUpperCase();
+              if (s.isEmpty) return null;
+              final c = s[0];
+              if (c == 'I' || c == 'O') return c;
+              return null;
+            }
 
-            // ETAs and Nearby check
-            final List<Map<String, dynamic>> etas = etaByStop[seq] ?? [];
+            final boundKey = getBoundChar(s['bound'] ?? s['dir'] ?? s['direction']);
+            
+            // ✅ 修正:更強的 fallback 邏輯
+            String effectiveBound;
+            if (boundKey != null && boundKey.isNotEmpty) {
+              effectiveBound = boundKey;
+            } else if (_selectedDirection != null && _selectedDirection!.isNotEmpty) {
+              // Fallback to selectedDirection
+              effectiveBound = _selectedDirection!.toUpperCase().startsWith('I') ? 'I' : 'O';
+              debugPrint('⚠️ Stop seq=$seq, stopId=$stopId has no bound, using selectedDirection fallback: $effectiveBound');
+            } else {
+              // ❌ 最壞情況:沒有 bound 也沒有 selectedDirection
+              debugPrint('❌ CRITICAL: Stop seq=$seq, stopId=$stopId has NO bound and NO selectedDirection!');
+              debugPrint('   Stop data: ${s.keys.toList()}');
+              debugPrint('   s[\'bound\']: ${s['bound']}');
+              debugPrint('   s[\'dir\']: ${s['dir']}');
+              debugPrint('   s[\'direction\']: ${s['direction']}');
+              effectiveBound = ''; // 會導致 compositeKey = '' 然後找不到 ETA
+            }
+
+            // CRITICAL: boundKey must match the format used in ETA cache: 'I' or 'O'
+            // Composite key format: bound+seq (e.g., "I5", "O10")
+            final compositeKey = effectiveBound.isNotEmpty ? '${effectiveBound}_$seq' : '';
+
+            // IMPORTANT: Only use compositeKey for lookup, NO fallback to just `seq`
+            // Fallback to seq-only causes cross-bound collisions and incorrect ETA display
+            final List<Map<String, dynamic>> etas = compositeKey.isNotEmpty 
+                ? (etaByStop[compositeKey] ?? [])
+                : [];
+
+            // 🔍 Debug: 當沒有 ETA 時輸出詳細資訊
+            if (etas.isEmpty && etaByStop.isNotEmpty) {
+              debugPrint('🔍 No ETA for stop:');
+              debugPrint('   stopId: $stopId, seq: $seq');
+              debugPrint('   boundKey: $boundKey');
+              debugPrint('   effectiveBound: $effectiveBound');
+              debugPrint('   compositeKey: "$compositeKey"');
+              debugPrint('   selectedDirection: $_selectedDirection');
+              debugPrint('   etaBySeqCache has keys: ${etaByStop.keys.take(5).toList()}...');
+            }
+
             final isNearby = _userPosition != null && latStr != null && lngStr != null
                 ? _isNearbyStop(latStr, lngStr)
                 : false;
@@ -1237,7 +1488,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       return const SizedBox.shrink();
     }
     
-    // Don't show if no variants available
+    // Show if directions exist (CTB may have directions but no service types)
     if (_directions.isEmpty && _serviceTypes.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -1246,7 +1497,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final availableServiceTypes = _getServiceTypesForDirection(_selectedDirection);
     final hasMultipleDirections = _directions.length > 1;
     final hasMultipleServiceTypes = availableServiceTypes.length > 1;
-    final maxSize = (_serviceTypes.isEmpty) ? 0.25 : 0.38;
+    final maxSize = (_serviceTypes.isEmpty) ? 0.26 : 0.38;
 
     return DraggableScrollableSheet(
       controller: _draggableController,
@@ -1395,8 +1646,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                         onSelected: (selected) {
                                           if (selected) {
                                             setState(() => _selectedDirection = d);
-                                            _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
-                                            _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
+                                            _fetchRouteDetails(widget.route, d,);
+                                            _fetchRouteEta(widget.route, silent: _hasLoadedEtaOnce);
                                             _restartEtaAutoRefresh();
                                           }
                                         },
@@ -1454,8 +1705,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                         onSelected: (selected) {
                                           if (selected) {
                                             setState(() => _selectedServiceType = st);
-                                            _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
-                                            _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
+                                            _fetchRouteDetails(widget.route, _selectedDirection ?? 'O',);
+                                            _fetchRouteEta(widget.route, silent: _hasLoadedEtaOnce);
                                             _restartEtaAutoRefresh();
                                           }
                                         },
@@ -1503,11 +1754,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
     
     // Save to preferences (you'll need to implement this in kmb.dart)
-    await Kmb.pinRoute(
+    await Citybus.pinRoute(
       widget.route, 
       _selectedDirection ?? widget.bound ?? 'O',
-      _selectedServiceType ?? widget.serviceType ?? '1',
-      routeLabel,
+      /*_selectedServiceType ?? widget.serviceType ?? '1',
+      routeLabel,*/
     );
     
     if (mounted) {
@@ -1634,9 +1885,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       if (selected) {
                         setState(() {
                           _selectedDirection = d;
-                          if (_selectedServiceType != null) {
-                            _fetchRouteDetails(widget.route.trim().toUpperCase(), d, _selectedServiceType!);
-                          }
+                          _fetchRouteDetails(widget.route.trim().toUpperCase(), d,);
+                          // Fetch ETA for the selected direction
+                          _fetchRouteEta(widget.route.trim().toUpperCase(), silent: _hasLoadedEtaOnce);
                         });
                         _restartEtaAutoRefresh();
                       }
@@ -1680,9 +1931,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       if (selected) {
                         setState(() {
                           _selectedServiceType = s;
-                          _fetchRouteEta(widget.route.trim().toUpperCase(), s, silent: _hasLoadedEtaOnce);
+                          _fetchRouteEta(widget.route.trim().toUpperCase(), silent: _hasLoadedEtaOnce);
                           if (_selectedDirection != null) {
-                            _fetchRouteDetails(widget.route.trim().toUpperCase(), _selectedDirection!, s);
+                            _fetchRouteDetails(widget.route.trim().toUpperCase(), _selectedDirection!,);
                           }
                         });
                         _restartEtaAutoRefresh();
@@ -1709,7 +1960,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       _combinedData = null;
     });
     try {
-      final combined = await Kmb.fetchCombinedRouteStatus(widget.route);
+      final combined = await Citybus.fetchCombinedRouteStatus(widget.route);
       setState(() { _combinedData = combined; });
     } catch (e) {
       setState(() { _combinedError = e.toString(); });
@@ -1754,91 +2005,188 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     );
   }
 
-  void _loadVariantsFromCache(String r, [String? initialDirection, String? initialServiceType]) async {
+  /// Load available directions from cached data (CTB doesn't use service types)
+  void _loadVariantsFromCache(String r, String? initialDirection) async {
     try {
-      await Kmb.buildRouteToStopsMap();
-      final variants = Kmb.discoverRouteVariants(r);
+      // Ensure route-stops map is built first
+      await Citybus.buildRouteToStopsMap();
+      
+      // Discover available directions for this route
+      final variants = await Citybus.discoverRouteVariants(r);
+      
       setState(() {
-        _directions = variants['directions'] ?? [];
-        _serviceTypes = variants['serviceTypes'] ?? [];
-        _selectedDirection = initialDirection != null && _directions.contains(initialDirection) ? initialDirection : (_directions.isNotEmpty ? (_directions.contains('O') ? 'O' : _directions.first) : null);
-        _selectedServiceType = initialServiceType != null && _serviceTypes.contains(initialServiceType) ? initialServiceType : (_serviceTypes.isNotEmpty ? _serviceTypes.first : null);
+        // Extract and normalize directions (CTB uses 'I'/'O')
+        _directions = (variants['directions'] as List<dynamic>?)?.cast<String>() ?? [];
+        _serviceTypes = []; // CTB doesn't use service types
+        
+        // Auto-select direction with priority: initialDirection > 'O' > first available
+        _selectedDirection = initialDirection != null && _directions.contains(initialDirection)
+            ? initialDirection
+            : _directions.isNotEmpty
+                ? (_directions.contains('O') ? 'O' : _directions.first)
+                : null;
+        
+        _selectedServiceType = null; // CTB doesn't have service types
+        
+        debugPrint('CTB Variants - Route: $r, Directions: $_directions, Selected: $_selectedDirection');
       });
-      if (_selectedServiceType != null) {
-        _fetchRouteEta(r, _selectedServiceType!, silent: _hasLoadedEtaOnce);
+      
+      // Fetch route details and ETA if direction is selected
+      if (_selectedDirection != null) {
+        _fetchRouteDetails(r.trim().toUpperCase(), _selectedDirection!);
+        _fetchRouteEta(r.trim().toUpperCase(), silent: _hasLoadedEtaOnce);
         _restartEtaAutoRefresh();
       }
-      // If both direction and serviceType are selected, fetch variant-specific stops
-      if (_selectedDirection != null && _selectedServiceType != null) {
-        _fetchRouteDetails(r, _selectedDirection!, _selectedServiceType!);
+    } catch (e) {
+      debugPrint('Error loading CTB variants: $e');
+      
+      // Use empty variants if discovery fails
+      if (mounted) {
+        setState(() {
+          _directions = [];
+          _serviceTypes = [];
+        });
       }
-    } catch (_) {}
+    }
   }
 
-  Future<void> _fetchRouteEta(String route, String serviceType, {bool silent = false}) async {
-    if (!silent) {
+  /// Fetch route-level ETA for all stops on this route
+  /// CTB doesn't use service_type - it's always empty/null
+  /// Fetch route-level ETA for all stops on this route
+  /// CTB doesn't use service_type - it's always empty/null
+  bool _isFetchingEta = false;
+  Future<void> _fetchRouteEta(String route, {bool silent = false}) async {
+    // 🛡️ Guard: Prevent overlapping requests
+    if (_isFetchingEta) return;
+    _isFetchingEta = true;
+    
+    // Capture the direction requested to detect race conditions later
+    final requestedDirection = _selectedDirection;
+
+    // CRITICAL: Set loading ONLY if not silent
+    if (!silent && mounted) {
       setState(() {
         _routeEtaLoading = true;
         _routeEtaError = null;
-        _routeEtaEntries = null;
-        _etaBySeqCache = null; // Clear cache when fetching new data
       });
     }
+
     try {
-      final entries = await Kmb.fetchRouteEta(route, serviceType);
-      entries.sort((a, b) {
-        final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
-        final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
-        return ai.compareTo(bi);
-      });
+      final r = route.trim().toUpperCase();
+      if (r.isEmpty) throw ArgumentError('route is empty');
+
+      // Fetch route-level ETA (uses batching internally now)
+      final selectedDirectionForEta = requestedDirection != null
+          ? (requestedDirection.toUpperCase().startsWith('I') ? 'I' : 'O')
+          : null;
+          
+      final entries = await Citybus.fetchRouteEta(r, direction: selectedDirectionForEta);
+
+      if (!mounted) return;
       
-      // Build O(1) lookup cache: HashMap seq -> List<ETA>
-      // Pre-filter by selected direction to avoid redundant filtering in builders
-      final selectedBoundChar = _selectedDirection?.trim().toUpperCase()[0];
-      final Map<String, List<Map<String, dynamic>>> etaBySeq = {};
-      
-      for (final e in entries) {
-        // Filter by direction if selected
-        if (selectedBoundChar != null) {
-          final etaBound = e['dir']?.toString().trim().toUpperCase() ?? '';
-          if (etaBound.isEmpty || etaBound[0] != selectedBoundChar) continue;
-        }
-        
-        final seqNum = e['seq']?.toString() ?? '';
-        if (seqNum.isEmpty) continue;
-        
-        etaBySeq.putIfAbsent(seqNum, () => []).add(Map<String, dynamic>.from(e));
+      // 🛡️ Race Condition Check: If direction changed while fetching, discard results
+      if (_selectedDirection != requestedDirection) {
+        debugPrint('⚠️ Discarding ETA results for $requestedDirection as user switched to $_selectedDirection');
+        return;
       }
-      
-      // Sort each ETA list by eta_seq once during cache build
-      // Use toList() to avoid concurrent modification during iteration
-      for (final k in etaBySeq.keys.toList()) {
-        etaBySeq[k]!.sort((a, b) {
+
+      final selectedBoundChar = _selectedDirection != null
+          ? (_selectedDirection!.toUpperCase().startsWith('I') ? 'I' : 'O')
+          : null;
+
+      // Build O(1) lookup cache: bound_seq -> [ETAs]
+      final Map<String, List<Map<String, dynamic>>> etaBySeq = {};
+
+      String? normChar(dynamic v) {
+        if (v == null) return null;
+        final s = v.toString().trim().toUpperCase();
+        if (s.isEmpty) return null;
+        final c = s[0];
+        if (c == 'I' || c == 'O') return c;
+        return null;
+      }
+
+      // Pre-process stops for quick fallback lookup
+      final routeMap = await Citybus.buildRouteToStopsMap();
+      final routeStops = routeMap[r] ?? [];
+      final stopIdToBound = <String, String>{};
+      final stopIdToSeq = <String, String>{};
+
+      for (final stop in routeStops) {
+        final stopId = (stop['stop'] ?? '').toString();
+        if (stopId.isNotEmpty) {
+          final bound = stop['bound'] ?? stop['dir'] ?? stop['direction'];
+          if (bound != null) {
+            final boundStr = bound.toString().trim().toUpperCase();
+            if (boundStr.isNotEmpty) stopIdToBound[stopId] = boundStr[0];
+          }
+          final seq = (stop['seq'] ?? '').toString();
+          if (seq.isNotEmpty) stopIdToSeq[stopId] = seq;
+        }
+      }
+
+      for (final eta in entries) {
+        final stopId = (eta['stop'] ?? '')?.toString() ?? '';
+        String seq = (eta['seq'] ?? eta['stop_seq'])?.toString() ?? '';
+
+        // Fallback: lookup seq if missing
+        if (seq.isEmpty && stopId.isNotEmpty) seq = stopIdToSeq[stopId] ?? '';
+        if (seq.isEmpty) continue;
+
+        // Fallback: lookup bound if missing
+        String? etaBoundChar = normChar(eta['bound'] ?? eta['dir'] ?? eta['direction']);
+        if (etaBoundChar == null && stopId.isNotEmpty) {
+          etaBoundChar = stopIdToBound[stopId];
+          if (etaBoundChar != null) eta['bound'] = etaBoundChar;
+        }
+
+        // Final Fallback: use selected direction
+        if (etaBoundChar == null && selectedBoundChar != null) {
+          etaBoundChar = selectedBoundChar;
+          eta['bound'] = selectedBoundChar;
+        }
+
+        // Filter by selected bound
+        if (selectedBoundChar != null && etaBoundChar != selectedBoundChar) continue;
+
+        if (etaBoundChar == null || etaBoundChar.isEmpty) continue;
+
+        // Ensure seq matches for display
+        if (!eta.containsKey('seq')) eta['seq'] = seq;
+
+        // Store in cache with composite key
+        final compositeKey = '${etaBoundChar}_$seq';
+        etaBySeq.putIfAbsent(compositeKey, () => []).add(eta);
+      }
+
+      // Sort ETAs by eta_seq
+      for (final list in etaBySeq.values) {
+        list.sort((a, b) {
           final ai = int.tryParse((a['eta_seq'] ?? a['etaseq'])?.toString() ?? '') ?? 0;
           final bi = int.tryParse((b['eta_seq'] ?? b['etaseq'])?.toString() ?? '') ?? 0;
           return ai.compareTo(bi);
         });
       }
-      
-      setState(() { 
-        _routeEtaEntries = entries;
-        _etaBySeqCache = etaBySeq; // Store precomputed HashMap for O(1) lookups
-        _hasLoadedEtaOnce = true; // Mark that we've loaded at least once
-        // Reset error counter on success and normalize interval if needed
-        _etaConsecutiveErrors = 0;
-      });
+
+      if (mounted) {
+        setState(() {
+          _routeEtaEntries = entries;
+          _etaBySeqCache = etaBySeq;
+          _hasLoadedEtaOnce = true;
+          _routeEtaError = null;
+          _etaConsecutiveErrors = 0;
+        });
+      }
     } catch (e) {
-      // Only show error on non-silent fetches
-      if (!silent) {
-        setState(() { _routeEtaError = e.toString(); });
-      }
-      // Increase error counter for backoff handling
       _etaConsecutiveErrors += 1;
-    } finally {
-      if (!silent) {
-        setState(() { _routeEtaLoading = false; });
+      if (!silent && mounted) {
+        setState(() => _routeEtaError = e.toString());
       }
-      // Adjust timer with simple exponential backoff on errors
+    } finally {
+      _isFetchingEta = false; // Release guard
+      if (mounted) {
+        setState(() => _routeEtaLoading = false);
+      }
       _maybeAdjustEtaTimer();
     }
   }
@@ -1871,38 +2219,59 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
   }
 
-  Future<void> _fetchRouteDetails(String route, String direction, String serviceType) async {
+  Future<void> _fetchRouteDetails(String route, String direction) async {
+    if (!mounted) return;
+    
     setState(() {
       _routeDetailsLoading = true;
       _routeDetailsError = null;
       _routeDetails = null;
     });
+
     try {
-      //final directionFull = direction.toUpperCase().startsWith('O') ? 'outbound' : 'inbound';
-      final details = await Kmb.fetchRouteWithParams(route, direction, serviceType); 
-      setState(() { _routeDetails = details; });
+      final details = await Citybus.fetchRouteWithParams(route, direction);
       
+      if (!mounted) return;
+      
+      setState(() {
+        _routeDetails = details;
+      });
+
       // Also fetch route-stops for this specific variant
-      _fetchRouteStopsForVariant(route, direction, serviceType);
+      _fetchRouteStopsForVariant(route, direction);
     } catch (e) {
-      setState(() { _routeDetailsError = e.toString(); });
+      if (mounted) {
+        setState(() {
+          _routeDetailsError = e.toString();
+        });
+      }
     } finally {
-      setState(() { _routeDetailsLoading = false; });
+      if (mounted) {
+        setState(() {
+          _routeDetailsLoading = false;
+        });
+      }
     }
   }
+
 
   // ===== ETA Auto-Refresh (modeled after LRT startAutoRefresh) =====
   void _maybeStartEtaAutoRefresh() {
     if (!_enablePageLevelEtaAutoRefresh) return;
     if (_etaRefreshTimer != null && _etaRefreshTimer!.isActive) return;
-    if (_selectedServiceType == null) return;
+    // CTB: Don't require service type check
+    if (_selectedDirection == null) return;
+
     final r = widget.route.trim().toUpperCase();
-    final st = _selectedServiceType!;
+
     _etaRefreshTimer = Timer.periodic(_etaRefreshInterval, (_) {
-      _fetchRouteEta(r, st, silent: true);
+      if (mounted) {
+        _fetchRouteEta(r, silent: true);
+      }
     });
-    // Trigger an immediate refresh (non-silent so UI shows initial state once)
-    _fetchRouteEta(r, st, silent: _hasLoadedEtaOnce);
+
+    // Trigger an immediate refresh (silent if already loaded)
+    _fetchRouteEta(r, silent: _hasLoadedEtaOnce);
   }
 
   void _stopEtaAutoRefresh() {
@@ -1938,12 +2307,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   // State for variant-specific route stops
-  List<Map<String, dynamic>>? _variantStops;
+  List<Map<dynamic, dynamic>>? _variantStops;
   bool _variantStopsLoading = false;
   String? _variantStopsError;
 
   /// Fetch route-stops for a specific route/direction/service_type combination using the Route-Stop API
-  Future<void> _fetchRouteStopsForVariant(String route, String direction, String serviceType) async {
+  Future<void> _fetchRouteStopsForVariant(String route, String direction) async {
     setState(() {
       _variantStopsLoading = true;
       _variantStopsError = null;
@@ -1952,10 +2321,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     
     try {
       final directionFull = direction.toUpperCase().startsWith('O') ? 'outbound' : 'inbound';
-      final stops = await Kmb.fetchRouteStops(route, directionFull, serviceType);
+      final stops = await Citybus.fetchRouteStops(route, directionFull, /*serviceType*/);
 
       // Enrich with stop metadata
-      final stopMap = await Kmb.buildStopMap();
+      final stopMap = await Citybus.buildStopMap();
       final enriched = stops.map((stopEntry) {
         final stopId = stopEntry['stop'] as String?;
         final stopInfo = stopId != null ? stopMap[stopId] : null;
@@ -1992,8 +2361,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           final co = item['co'] ?? '';
           final bound = item['bound'] ?? '';
           final service = item['servicetype'] ?? '';
-          final origin = item['origen'] ?? item['origtc'] ?? '';
-          final dest = item['desten'] ?? item['desttc'] ?? '';
+          final origin = item['orig_en'] ?? item['origen'] ?? item['origtc'] ?? '';
+          final dest = item['dest_en'] ?? item['desten'] ?? item['desttc'] ?? '';
           return ListTile(
             title: Text('$route ($co)'),
             subtitle: Text('bound: $bound · service: $service\n$origin → $dest'),
@@ -2085,7 +2454,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       child: ExpansionTile(
         title: Text(title),
         children: map.entries.map((e) {
-          final label = kmb.lookup(e.key) ?? e.key;
+          final label = citybus.lookup(e.key) ?? e.key;
           return ListTile(
             title: Text(label),
             subtitle: Text(e.value.toString()),
@@ -2096,7 +2465,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   /// Get user location and find nearest stop index
-  Future<void> _getUserLocationAndScrollToNearest(List<Map<String, dynamic>> stops) async {
+  Future<void> _getUserLocationAndScrollToNearest(List<Map<dynamic, dynamic>> stops) async {
     if (_locationLoading || _userPosition != null) return; // Already loading or loaded
     
     setState(() => _locationLoading = true);
@@ -2167,22 +2536,61 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   }
 
   /// Build station list for a specific route variant using Route-Stop API data
-  Widget _buildVariantStationList(List<Map<String, dynamic>> stops) {
+  Widget _buildVariantStationList(List<Map<dynamic, dynamic>> stops) {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     
-    // 🔴 去重 - 按 seq 去除重複項目
-    final uniqueStopsMap = <String, Map<String, dynamic>>{};
+    // Helper to normalize bound
+    String? normChar(dynamic v) {
+      if (v == null) return null;
+      final s = v.toString().trim().toUpperCase();
+      if (s.isEmpty) return null;
+      final c = s[0];
+      if (c == 'I' || c == 'O') return c;
+      return null;
+    }
+    
+    // 🔴 去重 - 按 bound + seq 去除重複項目（處理同一 seq 在不同 bound 的情況）
+    
+    final uniqueStopsMap = <String, Map<dynamic, dynamic>>{};
     for (final stop in stops) {
       final seq = stop['seq']?.toString() ?? '';
-      if (seq.isNotEmpty && !uniqueStopsMap.containsKey(seq)) {
-        uniqueStopsMap[seq] = stop;
+      if (seq.isEmpty) {
+        debugPrint('⚠️  Warning: Variant stop with no seq field found: ${stop['stop']}');
+        continue;
+      }
+      // ✅ CRITICAL: Ensure bound is correctly extracted from stop data
+      final boundKey = normChar(stop['bound'] ?? stop['dir'] ?? stop['direction']);
+      if (boundKey == null || boundKey.isEmpty) {
+        debugPrint('⚠️  Warning: Variant stop seq=$seq has no bound information: ${stop['stop']}');
+        continue; // Skip stops with missing bound to maintain consistency
+      }
+      // Use composite key: bound + seq to handle same seq in different bounds
+      final compositeKey = '${boundKey}_$seq';
+      if (!uniqueStopsMap.containsKey(compositeKey)) {
+        uniqueStopsMap[compositeKey] = stop;
       }
     }
     
     // Sort by sequence
     final sortedStops = uniqueStopsMap.values.toList();
+    // Sort by bound first (I before O), then by seq within each bound
     sortedStops.sort((a, b) {
+      // First compare by bound (I comes before O)
+      final aBound = (a['bound'] ?? a['dir'] ?? a['direction'])?.toString().trim().toUpperCase() ?? '';
+      final bBound = (b['bound'] ?? b['dir'] ?? b['direction'])?.toString().trim().toUpperCase() ?? '';
+      final aBoundChar = aBound.isNotEmpty ? aBound[0] : '';
+      final bBoundChar = bBound.isNotEmpty ? bBound[0] : '';
+      
+      if (aBoundChar != bBoundChar) {
+        // I comes before O
+        if (aBoundChar == 'I') return -1;
+        if (bBoundChar == 'I') return 1;
+        // If neither is I, maintain order
+        return aBoundChar.compareTo(bBoundChar);
+      }
+      
+      // Same bound, sort by seq
       final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
       final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
       return ai.compareTo(bi);
@@ -2292,20 +2700,45 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     }
     
     // Fallback to cached route-stop data (from Route-Stop List API)
-    // Use the cached/compute helpers in Kmb to get both route->stops and stop metadata maps.
+    // Use the cached/compute helpers in Citybus to get both route->stops and stop metadata maps.
     return FutureBuilder<List<dynamic>>(
-      future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
+      future: Future.wait([Citybus.buildRouteToStopsMap(), Citybus.buildStopMap()]),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: false,))));
         if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))));
 
-        final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
-        final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
+        // Process cached data - handle null data safely
+        if (snap.data == null || snap.data!.length < 2) {
+          return const Card(
+            child: Padding(
+              padding: EdgeInsets.all(12.0),
+              child: Text('No data available'),
+            ),
+          );
+        }
+        
+        // Safely cast with null checks
+        final routeMapData = snap.data![0];
+        final stopMapData = snap.data![1];
+        
+        final routeMap = (routeMapData is Map<String, List<Map<String, dynamic>>>)
+            ? routeMapData
+            : <String, List<Map<String, dynamic>>>{};
+        final stopMap = (stopMapData is Map<String, Map>)
+            ? stopMapData.map((k, v) => MapEntry(k, Map<String, dynamic>.from(v)))
+            : <String, Map<String, dynamic>>{};
 
         final r = widget.route.trim().toUpperCase();
-        final base = RegExp(r'^(\\d+)').firstMatch(r)?.group(1) ?? r;
+        final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
         final entries = routeMap[r] ?? routeMap[base] ?? [];
-  if (entries.isEmpty) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Text('No stop data for route')));
+        if (entries.isEmpty) {
+          return const Card(
+            child: Padding(
+              padding: EdgeInsets.all(12.0),
+              child: Text('No stop data for route'),
+            ),
+          );
+        }
 
         // Language preference
         final lang = context.watch<LanguageProvider>();
@@ -2346,7 +2779,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           if (seq.isEmpty) continue;
           
           // Filter by bound/direction if selected
-          if (selectedBoundChar != null && normChar(e['bound']) != selectedBoundChar) continue;
+          // Check both 'bound' and 'dir' fields, normalize to 'I' or 'O'
+          if (selectedBoundChar != null) {
+            final boundValue = e['bound'] ?? e['dir'] ?? e['direction'];
+            final entryBoundChar = normChar(boundValue);
+            if (entryBoundChar != selectedBoundChar) continue;
+          }
           // Filter by service_type if selected
           if (selectedService != null) {
             final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
@@ -2454,8 +2892,21 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                   final lat = meta != null ? (meta['lat'] ?? meta['latitude'])?.toString() : null;
                   final lng = meta != null ? (meta['long'] ?? meta['lng'] ?? meta['longitude'])?.toString() : null;
 
-                  // O(1) HashMap lookup - instant access to ETAs!
-                  final List<Map<String, dynamic>> etas = etaByStop[seq] ?? [];
+                  // O(1) HashMap lookup - instant access to ETAs using composite key!
+                  // Use composite key: bound_seq for lookup
+                  String? getBoundChar(dynamic v) {
+                    if (v == null) return null;
+                    final s = v.toString().trim().toUpperCase();
+                    if (s.isEmpty) return null;
+                    final c = s[0];
+                    if (c == 'I' || c == 'O') return c;
+                    return null;
+                  }
+                  final boundKey = getBoundChar(s['bound'] ?? s['dir'] ?? s['direction']) ?? '';
+                  final compositeKey = boundKey.isNotEmpty ? '${boundKey}_$seq' : '';
+                  final List<Map<String, dynamic>> etas = compositeKey.isNotEmpty 
+                    ? (etaByStop[compositeKey] ?? [])
+                    : [];
                   
                   // Highlight nearby stops
                   final isNearby = _userPosition != null && lat != null && lng != null
@@ -2593,7 +3044,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     String? longitude,
     bool isNearby = false,
   }) {
-    // Get destination from route details
+    // Get destination from route details for fallback display
     String? destEn;
     String? destTc;
     
@@ -2612,38 +3063,35 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final shouldAutoExpand = (widget.autoExpandSeq != null && seq == widget.autoExpandSeq) ||
         (widget.autoExpandStopId != null && stopId == widget.autoExpandStopId);
     
-    //return KeyedSubtree(
-      //key: _stopKeys.putIfAbsent(seq, () => GlobalKey()),
-      return ExpandableStopCard(
-        key: ValueKey('${widget.route}_${_selectedDirection}_${_selectedServiceType}_$seq'),
-        seq: seq,
-        stopId: stopId,
-        displayName: displayName,
-        nameEn: nameEn,
-        nameTc: nameTc,
-        etas: etas,
-        isEnglish: isEnglish,
-        route: widget.route,
-        selectedServiceType: _selectedServiceType,
-        latitude: latitude,
-        longitude: longitude,
-        destEn: destEn,
-        destTc: destTc,
-        direction: _selectedDirection,
-        isNearby: isNearby,
-        autoExpand: shouldAutoExpand,
-        onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
-      );
-    //);
+    return ExpandableStopCard(
+      key: ValueKey('${widget.route}_${_selectedDirection}_${_selectedServiceType}_$seq'),
+      seq: seq,
+      stopId: stopId, // Passed to enable per-stop fetching
+      displayName: displayName,
+      nameEn: nameEn,
+      nameTc: nameTc,
+      etas: etas, // Initial ETAs from parent (if any)
+      isEnglish: isEnglish,
+      route: widget.route, // Passed to optimize fetch scope
+      selectedServiceType: _selectedServiceType,
+      latitude: latitude,
+      longitude: longitude,
+      destEn: destEn,
+      destTc: destTc,
+      direction: _selectedDirection,
+      isNearby: isNearby,
+      autoExpand: shouldAutoExpand,
+      onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
+    );
   }
-
+  
   /// Build OpenStreetMap view showing all route stops
   Widget _buildMapView() {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
 
     return FutureBuilder<List<dynamic>>(
-      future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
+      future: Future.wait([Citybus.buildRouteToStopsMap(), Citybus.buildStopMap()]),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return Column(
@@ -2664,12 +3112,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         if (snap.hasError) {
           return Column(
             children: [
-              RouteDestinationWidget(
-          route: widget.route,
-          direction: _selectedDirection,
-          serviceType: _selectedServiceType,
-          cachedRouteData: _routeDetails,
-        ),
+                  RouteDestinationWidget(
+                    route: widget.route,
+                    direction: _selectedDirection,
+                    serviceType: _selectedServiceType,
+                    cachedRouteData: _routeDetails,
+                  ),
               const SizedBox(height: 8),
               Expanded(
                 child: Center(child: Text('Error: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))),
@@ -2678,8 +3126,34 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           );
         }
 
-        final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
-        final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
+        // Process cached data - handle null data safely
+        if (snap.data == null || snap.data!.length < 2) {
+          return Column(
+            children: [
+              RouteDestinationWidget(
+                route: widget.route,
+                direction: _selectedDirection,
+                serviceType: _selectedServiceType,
+                cachedRouteData: _routeDetails,
+              ),
+              const SizedBox(height: 8),
+              const Expanded(
+                child: Center(child: Text('No data available')),
+              ),
+            ],
+          );
+        }
+        
+        // Safely cast with null checks
+        final routeMapData = snap.data![0];
+        final stopMapData = snap.data![1];
+        
+        final routeMap = (routeMapData is Map<String, List<Map<String, dynamic>>>)
+            ? routeMapData
+            : <String, List<Map<String, dynamic>>>{};
+        final stopMap = (stopMapData is Map<String, Map>)
+            ? stopMapData.map((k, v) => MapEntry(k, Map<String, dynamic>.from(v)))
+            : <String, Map<String, dynamic>>{};
 
         final r = widget.route.trim().toUpperCase();
         final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
@@ -2689,11 +3163,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           return Column(
             children: [
               RouteDestinationWidget(
-          route: widget.route,
-          direction: _selectedDirection,
-          serviceType: _selectedServiceType,
-          cachedRouteData: _routeDetails,
-        ),
+                route: widget.route,
+                direction: _selectedDirection,
+                serviceType: _selectedServiceType,
+                cachedRouteData: _routeDetails,
+              ),
               const SizedBox(height: 8),
               Expanded(
                 child: Center(child: Text(isEnglish ? 'No stop data available' : '無站點資料')),
@@ -3149,15 +3623,13 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         setState(() {
           _isExpanded = true;
           _autoRefreshEnabled = true;
-          if (widget.isNearby) {
-            _autoEnabledByNearby = true;
-          }
+          if (widget.isNearby) _autoEnabledByNearby = true;
         });
+        // 🆕 Trigger immediate fetch for the specific route
+        _autoRefetchOnExpand(); 
         _startAutoRefreshTimer();
-        Future.delayed(const Duration(milliseconds: 100), scrollIntoView);
       });
     }
-    _startEtaCleanupTimer();
   }
 
   void _startEtaCleanupTimer() {
@@ -3206,6 +3678,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     }).toList();
   }
 
+  /// Auto-refetch when the card is expanded
   Future<void> _autoRefetchOnExpand() async {
     if (widget.stopId?.isEmpty ?? true) return;
     if (!mounted) return;
@@ -3213,19 +3686,88 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     setState(() => _shouldShowRefreshAnimation = true);
     
     try {
-      final allStopEtas = await Kmb.fetchStopEta(widget.stopId!);
+      // ✅ OPTIMIZED: Fetch ETA only for this specific stop and route
+      // This maps to Citybus.fetchStopEta(stopId, route: route)
+      final allStopEtas = await Citybus.fetchStopEta(
+        widget.stopId!, 
+        route: widget.route
+      );
+      
+      // Filter locally to ensure strict safety (double-check direction/service type)
       final filteredEtas = _filterEtas(allStopEtas);
       
       if (mounted) {
         setState(() => _localEtas = filteredEtas);
       }
       
-      await Future.delayed(const Duration(milliseconds: 1500));
+      // Keep loading animation visible briefly for user feedback
+      await Future.delayed(const Duration(milliseconds: 1000));
     } catch (e) {
-      await Future.delayed(const Duration(milliseconds: 1500));
+      debugPrint('Error auto-fetching stop ETA: $e');
+      // On error, keep the animation briefly so it doesn't just flash
+      await Future.delayed(const Duration(milliseconds: 1000));
     } finally {
       if (mounted) setState(() => _shouldShowRefreshAnimation = false);
     }
+  }
+
+  /// Manual refresh triggered by the user tapping the "Refresh" button
+  Future<void> _manualRefetchStopEta() async {
+    if (widget.stopId?.isEmpty ?? true) return;
+    if (!mounted) return;
+
+    setState(() => _etaRefreshing = true);
+    try {
+      // ✅ OPTIMIZED: Direct API call for specific route/stop
+      final allStopEtas = await Citybus.fetchStopEta(
+        widget.stopId!, 
+        route: widget.route
+      );
+      
+      final filteredEtas = _filterEtas(allStopEtas);
+      
+      if (mounted) {
+        setState(() => _localEtas = filteredEtas);
+      }
+      
+      await Future.delayed(const Duration(milliseconds: 800));
+    } catch (e) {
+      debugPrint('Error manually fetching stop ETA: $e');
+      await Future.delayed(const Duration(milliseconds: 800));
+    } finally {
+      if (mounted) setState(() => _etaRefreshing = false);
+    }
+  }
+
+  /// Auto-refresh timer logic (e.g., for "Nearby" stops or "Auto" mode)
+  void _startAutoRefreshTimer({Duration? interval}) {
+    if (widget.stopId?.isEmpty ?? true) return;
+    // Prevent duplicate timers
+    if (_autoRefreshTimer?.isActive ?? false) return;
+
+    final refreshInterval = interval ?? const Duration(seconds: 15);
+
+    _autoRefreshTimer = Timer.periodic(refreshInterval, (_) async {
+      // Skip if widget unmounted or a fetch is already in progress
+      if (!mounted || _autoFetchRunning) return;
+      
+      _autoFetchRunning = true;
+      try {
+        // ✅ OPTIMIZED: Silent background update
+        final allStopEtas = await Citybus.fetchStopEta(
+          widget.stopId!, 
+          route: widget.route
+        );
+        
+        final filteredEtas = _filterEtas(allStopEtas);
+        
+        if (mounted) setState(() => _localEtas = filteredEtas);
+      } catch (e) {
+        debugPrint('Error in auto-refresh timer: $e');
+      } finally {
+        _autoFetchRunning = false;
+      }
+    });
   }
 
   Future<void> scrollIntoView() async {
@@ -3237,28 +3779,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
       );
     } catch (_) {}
   }
-
-  Future<void> _manualRefetchStopEta() async {
-    if (widget.stopId?.isEmpty ?? true) return;
-    if (!mounted) return;
-
-    setState(() => _etaRefreshing = true);
-    try {
-      final allStopEtas = await Kmb.fetchStopEta(widget.stopId!);
-      final filteredEtas = _filterEtas(allStopEtas);
-      
-      if (mounted) {
-        setState(() => _localEtas = filteredEtas);
-      }
-      
-      await Future.delayed(const Duration(milliseconds: 800));
-    } catch (e) {
-      await Future.delayed(const Duration(milliseconds: 800));
-    } finally {
-      if (mounted) setState(() => _etaRefreshing = false);
-    }
-  }
-
+  
   @override
   void didUpdateWidget(ExpandableStopCard oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -3326,27 +3847,6 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     _clockTimer = null;
   }
 
-  void _startAutoRefreshTimer({Duration? interval}) {
-    if (widget.stopId?.isEmpty ?? true) return;
-    if (_autoRefreshTimer?.isActive ?? false) return;
-
-    final refreshInterval = interval ?? const Duration(seconds: 15);
-
-    _autoRefreshTimer = Timer.periodic(refreshInterval, (_) async {
-      if (!mounted || _autoFetchRunning) return;
-      
-      _autoFetchRunning = true;
-      try {
-        final allStopEtas = await Kmb.fetchStopEta(widget.stopId!);
-        final filteredEtas = _filterEtas(allStopEtas);
-        
-        if (mounted) setState(() => _localEtas = filteredEtas);
-      } catch (_) {
-      } finally {
-        _autoFetchRunning = false;
-      }
-    });
-  }
 
   void _stopAutoRefreshTimer() {
     _autoRefreshTimer?.cancel();
@@ -3357,7 +3857,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
   Future<void> _pinStop(BuildContext context) async {
     try {
-      await Kmb.pinStop(
+      await Citybus.pinStop(
         route: widget.route,
         stopId: widget.stopId ?? '',
         seq: widget.seq,
@@ -3837,7 +4337,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                   if (!_autoFetchRunning && (widget.stopId?.isNotEmpty ?? false)) {
                                     _autoFetchRunning = true;
                                     try {
-                                      await Kmb.fetchStopEta(widget.stopId!);
+                                      await Citybus.fetchStopEta(widget.stopId!);
                                     } catch (_) {}
                                     _autoFetchRunning = false;
                                   }
@@ -3949,7 +4449,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
       error = null;
     });
     try {
-      final list = await Kmb.fetchStopEta(widget.stopId);
+      final list = await Citybus.fetchStopEta(widget.stopId);
       setState(() {
         etas = list;
       });
@@ -4017,85 +4517,41 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
   String? _error;
   Map<String, dynamic>? _routeData;
   Timer? _refreshTimer;
-  Timer? _errorRetryTimer; // Auto-retry on error
 
   @override
   void initState() {
     super.initState();
-    // Use cached data immediately if available (no API call needed)
-    if (widget.cachedRouteData != null) {
-      final data = widget.cachedRouteData!.containsKey('data')
-          ? (widget.cachedRouteData!['data'] as Map<String, dynamic>?)
-          : widget.cachedRouteData!;
-      if (data != null) {
-        _routeData = data;
-        _loading = false;
-      }
-    }
-    // Only fetch if no cached data
-    if (_routeData == null) {
-      _fetchRouteData();
-    }
-    _startAutoRefresh();
+    _loadData();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    _errorRetryTimer?.cancel();
     super.dispose();
-  }
-
-  void _startAutoRefresh() {
-    // Route destination info is static - no need to refresh
-    // Only refresh if parent updates cachedRouteData prop
-    // This saves unnecessary API calls
-    _refreshTimer?.cancel();
-  }
-
-  void _startErrorRetry() {
-    // Auto-retry failed fetch after 5 seconds
-    _errorRetryTimer?.cancel();
-    _errorRetryTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) {
-        _fetchRouteData(silent: false);
-      }
-    });
   }
 
   @override
   void didUpdateWidget(RouteDestinationWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Use cached data if available (instant update, no API call)
-    if (widget.cachedRouteData != oldWidget.cachedRouteData && widget.cachedRouteData != null) {
-      final data = widget.cachedRouteData!.containsKey('data')
-          ? (widget.cachedRouteData!['data'] as Map<String, dynamic>?)
-          : widget.cachedRouteData!;
-      if (data != null) {
-        setState(() {
-          _routeData = data;
-          _loading = false;
-          _error = null;
-        });
-        return;
-      }
+    // Refresh if route or cached data changes
+    if (oldWidget.route != widget.route || 
+        oldWidget.cachedRouteData != widget.cachedRouteData) {
+      _loadData();
     }
-    // Refetch only if route parameters change AND no cached data
-    if ((oldWidget.route != widget.route ||
-        oldWidget.direction != widget.direction ||
-        oldWidget.serviceType != widget.serviceType) && widget.cachedRouteData == null) {
-      _refreshTimer?.cancel();
-      _fetchRouteData();
-      _startAutoRefresh();
+    // If direction changes, we just need to rebuild to update the swap logic, 
+    // but no new fetch is required if we already have the base route info.
+    if (oldWidget.direction != widget.direction && _routeData != null) {
+      if (mounted) setState(() {});
     }
   }
 
-  Future<void> _fetchRouteData({bool silent = false}) async {
-    // Use cached data from parent if available (avoids duplicate API call)
+  Future<void> _loadData() async {
+    // 1. Use cached data if provided (Fastest)
     if (widget.cachedRouteData != null) {
       final data = widget.cachedRouteData!.containsKey('data')
           ? (widget.cachedRouteData!['data'] as Map<String, dynamic>?)
           : widget.cachedRouteData!;
+      
       if (data != null && mounted) {
         setState(() {
           _routeData = data;
@@ -4105,19 +4561,16 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
         return;
       }
     }
+    
 
-    // Skip fetch if route is empty
-    if (widget.route.isEmpty) {
-      if (!silent) {
-        setState(() {
-          _loading = false;
-          _error = 'No route specified';
-        });
-      }
-      return;
-    }
+    // 2. Fetch from Official API if no cache
+    await _fetchRouteData();
+  }
 
-    if (!silent) {
+  Future<void> _fetchRouteData() async {
+    if (widget.route.isEmpty) return;
+
+    if (mounted) {
       setState(() {
         _loading = true;
         _error = null;
@@ -4125,58 +4578,42 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     }
 
     try {
-      // Construct direction parameter from single char or full string
-      String dirParam = 'outbound';
-      if (widget.direction != null && widget.direction!.isNotEmpty) {
-        final dirStr = widget.direction!.trim().toUpperCase();
-        if (dirStr.isNotEmpty) {
-          // Handle both single char ('O', 'I') and full strings ('OUTBOUND', 'INBOUND')
-          final firstChar = dirStr[0];
-          dirParam = (firstChar == 'I') ? 'inbound' : 'outbound';
+      // Official CTB Route API
+      final url = Uri.parse('https://rt.data.gov.hk/v2/transport/citybus/route/CTB/${widget.route}');
+      final request = await HttpClient().getUrl(url);
+      final response = await request.close();
+      
+      if (response.statusCode == 200) {
+        final jsonString = await response.transform(utf8.decoder).join();
+        final jsonResponse = json.decode(jsonString);
+        
+        if (jsonResponse is Map<String, dynamic> && jsonResponse['data'] is List) {
+          final list = jsonResponse['data'] as List;
+          if (list.isNotEmpty) {
+            // Usually the API returns one entry defining the route (Orig->Dest).
+            // We take the first matching entry.
+            final routeInfo = list.firstWhere(
+              (e) => e['route'] == widget.route,
+              orElse: () => list.first,
+            );
+
+            if (mounted) {
+              setState(() {
+                _routeData = routeInfo;
+                _loading = false;
+              });
+              return;
+            }
+          }
         }
       }
-
-      final svcType = widget.serviceType ?? '1';
-      final routeUpper = widget.route.trim().toUpperCase();
-      
-      final details = await Kmb.fetchRouteWithParams(
-        routeUpper, 
-        dirParam, 
-        svcType
-      );
-      
-      if (!mounted) return; // Check if widget is still mounted
-      
-      setState(() {
-        _routeData = details.containsKey('data')
-            ? (details['data'] as Map<String, dynamic>?)
-            : details;
-        _error = null; // Clear any previous error on successful fetch
-        if (!silent) {
-          _loading = false;
-        }
-      });
+      throw Exception('Route data not found');
     } catch (e) {
-      if (!mounted) return; // Check if widget is still mounted
-      
-      // Show error and start auto-retry
-      if (!silent) {
-        print('RouteDestinationWidget error for route ${widget.route}: $e');
+      if (mounted) {
         setState(() {
           _error = e.toString();
           _loading = false;
         });
-        // Start auto-retry timer on error
-        _startErrorRetry();
-      } else {
-        // Silent refresh failed - keep showing old data if available
-        // Only update error if we don't have any data yet
-        if (_routeData == null) {
-          setState(() {
-            _error = e.toString();
-          });
-        }
-        // Otherwise, silently fail and keep showing existing data
       }
     }
   }
@@ -4186,50 +4623,32 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
 
-    // Loading state with smooth animation
+    // Loading State
     if (_loading) {
-      return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, animation) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, -0.1),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
-              child: child,
-            ),
-          );
-        },
-        child: Padding(
-          key: const ValueKey('route_dest_loading'),
-          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
-              child: Container(
-                height: 60,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
-                    width: 1.0,
-                  ),
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+            child: Container(
+              height: 60,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                  width: 1.0,
                 ),
-                child: Center(
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Theme.of(context).colorScheme.primary,
-                      ),
+              ),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ),
@@ -4240,113 +4659,60 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
       );
     }
 
-    // Error state with smooth animation
-    if (_error != null) {
-      return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, animation) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, -0.1),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
-              child: child,
-            ),
-          );
-        },
-        child: Padding(
-          key: ValueKey('route_dest_error_$_error'),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Row(
-                children: [
-                  Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Error loading route',
-                          style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Retrying in 5 seconds...',
-                          style: TextStyle(color: Theme.of(context).colorScheme.tertiary, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: () => _fetchRouteData(silent: false),
-                    icon: const Icon(Icons.refresh, size: 16),
-                    label: const Text('Retry', style: TextStyle(fontSize: 11)),
-                  )
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
+    // Error State
+    if (_error != null || _routeData == null) {
+      // Fallback: show just the route number if loading fails
+      //return const SizedBox.shrink(); 
     }
 
-    // No data state
-    if (_routeData == null) {
-      return const SizedBox.shrink();
+    // --- Data Extraction & Direction Logic ---
+    // ✅ MODIFIED SECTION: Fallback instead of shrinking
+    // If we have an error or no data, show the container with just the Route Number
+    // instead of disappearing.
+    Map<String, dynamic> safeRouteData = _routeData ?? {};
+    
+    // 1. Get Base Info (Safely)
+    String rawOrig = '';
+    String rawDest = '';
+    
+    if (safeRouteData.isNotEmpty) {
+      rawOrig = isEnglish
+          ? (safeRouteData['orig_en'] ?? safeRouteData['origen'] ?? '')
+          : (safeRouteData['orig_tc'] ?? safeRouteData['origtc'] ?? '');
+
+      rawDest = isEnglish
+          ? (safeRouteData['dest_en'] ?? safeRouteData['desten'] ?? '')
+          : (safeRouteData['dest_tc'] ?? safeRouteData['desttc'] ?? '');
     }
 
-    // Extract route information
-    final orig = isEnglish
-        ? (_routeData!['orig_en'] ?? _routeData!['orig_tc'] ?? '')
-        : (_routeData!['orig_tc'] ?? _routeData!['orig_en'] ?? '');
-    final dest = isEnglish
-        ? (_routeData!['dest_en'] ?? _routeData!['dest_tc'] ?? '')
-        : (_routeData!['dest_tc'] ?? _routeData!['dest_en'] ?? '');
-    final bound = _routeData!['bound'] as String?;
+    // 2. Determine User Selected Direction
+    final selectedDir = widget.direction?.trim().toUpperCase();
+    final isInbound = selectedDir != null && selectedDir.startsWith('I');
+    
+    // 3. Apply Swapping Logic
+    final displayFrom = isInbound ? rawDest : rawOrig;
+    final displayTo   = isInbound ? rawOrig : rawDest;
 
-    // Direction icon
-    IconData dirIcon = Icons.arrow_forward;
+    // 4. Styling Variables
+    IconData dirIcon = Icons.arrow_circle_right;
     final cs = Theme.of(context).colorScheme;
-    Color dirColor = cs.secondary;
-    if (bound == 'O') {
-      dirIcon = Icons.arrow_circle_right;
-      dirColor = cs.primary;
-    } else if (bound == 'I') {
+    Color dirColor = cs.primary; 
+
+    if (isInbound) {
       dirIcon = Icons.arrow_circle_left;
-      dirColor = cs.tertiary;
+      dirColor = cs.tertiary; 
     }
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
       switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
-      transitionBuilder: (child, animation) {
-        return FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, -0.1),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
-            child: child,
-          ),
-        );
-      },
       child: Padding(
-        key: ValueKey('route_dest_${widget.route}_${widget.direction}_${widget.serviceType}'),
+        key: ValueKey('${widget.route}-${widget.direction}'),
         padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),//ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
             child: Container(
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
@@ -4359,51 +4725,59 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 child: Row(
-                      children: [
-                        Padding(  // 🆕 添加 padding
-                          padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),  // 或使用 EdgeInsets.symmetric(horizontal: 8, vertical: 4)
-                          child: Row(
-                            children: [
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 6.0,),
-                                  child: AutoSizeText(
-                                    widget.route,
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                    maxLines: 1,
-                                  ),
-                                ),
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                width: 36,
-                                height: 36,
-                                decoration: BoxDecoration(
-                                  color: dirColor.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(
-                                  dirIcon,
-                                  color: dirColor,
-                                  size: 20,
-                                ),
-                              )
-                            ]
+                  children: [
+                    // Route Number Badge
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
+                      child: Row(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6.0),
+                            child: AutoSizeText(
+                              widget.route,
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              maxLines: 1,
+                            ),
                           ),
-                        ),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: dirColor.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              dirIcon,
+                              color: dirColor,
+                              size: 20,
+                            ),
+                          )
+                        ],
+                      ),
+                    ),
                     const SizedBox(width: 6),
-                    // Route origin and destination
+                    
+                    // Origin and Destination Text (Only show if we have data)
                     Expanded(
-                      child: Column(
+                      child: displayFrom.isEmpty && displayTo.isEmpty 
+                      ? Text(
+                          isEnglish ? 'Details unavailable' : '暫無路線資料',
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5)),
+                        )
+                      : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Origin Line (From)
-                          if (orig.isNotEmpty) ...[
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.baseline, // ✅ 關鍵
-                              textBaseline: TextBaseline.alphabetic,          // ✅ 關鍵
+                          // "From" Line
+                          if (displayFrom.isNotEmpty) ...[
+                             // ... existing From logic ...
+                             Row(
+                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                              textBaseline: TextBaseline.alphabetic,
                               children: [
                                 Text(
                                   '${isEnglish ? 'From' : '由'}:  ',
@@ -4411,18 +4785,16 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                     letterSpacing: -0.05,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
-                                    // height: 0, // ❌ 移除
                                     color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                   ),
                                 ),
                                 Expanded(
                                   child: OptionalMarquee(
-                                    text: orig.toString().toTitleCase(),
+                                    text: displayFrom.toTitleCase(),
                                     style: TextStyle(
                                       letterSpacing: -0.05,
                                       fontSize: 10,
                                       fontWeight: FontWeight.w400,
-                                      // height: 0, // ❌ 移除
                                       color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                     ),
                                   ),
@@ -4431,29 +4803,28 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                             ),
                             const SizedBox(height: 2),
                           ],
-                          // Destination Line (To)
+                          
+                          // "To" Line
                           Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline, // ✅ 關鍵：基線對齊
-                            textBaseline: TextBaseline.alphabetic,          // ✅ 關鍵：指定基線類型
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
                             children: [
                               Text(
                                 '${isEnglish ? 'To' : '往'}:  ',
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w500,
-                                  // height: 0, // ❌ 移除
                                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   letterSpacing: -0.2,
                                 ),
                               ),
                               Expanded(
                                 child: OptionalMarquee(
-                                  text: dest.toString().toTitleCase(),
+                                  text: displayTo.toTitleCase(),
                                   style: TextStyle(
                                     letterSpacing: -0.05,
                                     fontSize: 16,
                                     fontWeight: FontWeight.w500,
-                                    // height: 1, // ❌ 移除
                                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                                 ),
@@ -4473,8 +4844,6 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     );
   }
 }
-
-
 
 /// Pulsing ring animation widget for highlighted map markers
 class _PulsingRing extends StatefulWidget {

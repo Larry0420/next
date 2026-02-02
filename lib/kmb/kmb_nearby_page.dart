@@ -1220,6 +1220,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                                 route: route,
                                                 bound: normalizedBound, // 傳遞正規化後的方向
                                                 serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
+                                                companyId: null,
                                                 autoExpandSeq: seq,
                                                 autoExpandStopId: stopIdFromEta,
                                               ),
