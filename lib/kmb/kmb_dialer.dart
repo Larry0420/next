@@ -593,7 +593,7 @@ class _KmbDialerState extends State<KmbDialer> {
           : (v['dest_tc'] ?? v['dest_en'] ?? '').toString();
 
       final serviceType = v['service_type']?.toString();
-      final hasService = serviceType != null && serviceType != '1';
+      final hasService = serviceType != null && serviceType != '1' && serviceType != 'Normal';
 
       // Subtitle Logic
       String subtitle;
@@ -643,7 +643,15 @@ class _KmbDialerState extends State<KmbDialer> {
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+              OptionalMarquee(
+                text: subtitle,
+                style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                velocity: 80.0,
+                pauseAfterRound: const Duration(milliseconds: 1500),
+              ),
+              //Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 6),
               Row(
                 children: [
@@ -676,7 +684,9 @@ class _KmbDialerState extends State<KmbDialer> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        isEnglish ? 'Type $serviceType' : '類型$serviceType',
+                        serviceType == 'Special'
+                          ? (isEnglish ? 'Special Departure' : '特別班次')
+                          : (isEnglish ? 'Special Departure $serviceType' : '特別班次 $serviceType'),
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,

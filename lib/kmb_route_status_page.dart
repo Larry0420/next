@@ -2943,10 +2943,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                             polylines: [
                               Polyline(
                                 points: polylinePoints,
-                                strokeWidth: 4.0,
+                                strokeWidth: 6.0,
                                 color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
-                                borderStrokeWidth: 2.0,
-                                borderColor: Theme.of(context).colorScheme.surface,
+                                borderStrokeWidth: 1.0,
+                                borderColor: Theme.of(context).colorScheme.surface.withOpacity(0.1),
                               ),
                             ],
                           ),
@@ -4405,13 +4405,14 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                               crossAxisAlignment: CrossAxisAlignment.baseline, // ✅ 關鍵
                               textBaseline: TextBaseline.alphabetic,          // ✅ 關鍵
                               children: [
+                                const SizedBox(height: 4),
                                 Text(
                                   '${isEnglish ? 'From' : '由'}:  ',
                                   style: TextStyle(
                                     letterSpacing: -0.05,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
-                                    // height: 0, // ❌ 移除
+                                    height: 1, // ❌ 移除
                                     color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                   ),
                                 ),
@@ -4422,7 +4423,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                       letterSpacing: -0.05,
                                       fontSize: 10,
                                       fontWeight: FontWeight.w400,
-                                      // height: 0, // ❌ 移除
+                                      height: 1, // ❌ 移除
                                       color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                     ),
                                   ),
@@ -4436,6 +4437,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                             crossAxisAlignment: CrossAxisAlignment.baseline, // ✅ 關鍵：基線對齊
                             textBaseline: TextBaseline.alphabetic,          // ✅ 關鍵：指定基線類型
                             children: [
+                              const SizedBox(height: 4,),
                               Text(
                                 '${isEnglish ? 'To' : '往'}:  ',
                                 style: TextStyle(

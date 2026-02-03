@@ -27,29 +27,33 @@ class OptionalMarquee extends StatelessWidget {
       builder: (context, constraints) {
         final double maxWidth = width ?? constraints.maxWidth;
 
-        // ✅ 修正：移除 height: 0，改用標準行高 (null 或 1.x)
-        // 如果傳入 height: 0，我們覆蓋它，因為這會導致渲染問題
+        // Ensure proper height for descenders
         final TextStyle effectiveStyle = style.copyWith(
-          height: style.height == 0 ? 1.2 : style.height, // 強制一個合理的行高
-          leadingDistribution: TextLeadingDistribution.even, // 解決中文偏移
+          height: style.height ?? 1.4, // Use 1.4 if not specified
+          leadingDistribution: TextLeadingDistribution.even,
+        );
+
+        // Define consistent StrutStyle for both Marquee and Text
+        final strutStyle = StrutStyle(
+          fontSize: effectiveStyle.fontSize,
+          height: effectiveStyle.height,
+          forceStrutHeight: true,
+          leading: 0.0,
         );
 
         final textPainter = TextPainter(
           text: TextSpan(text: text, style: effectiveStyle),
           textDirection: TextDirection.ltr,
           maxLines: 1,
+          strutStyle: strutStyle,
         )..layout(maxWidth: double.infinity);
 
         final bool overflows = textPainter.width > maxWidth;
-        final double textHeight = textPainter.height;
 
-        // 我們使用 Stack 技巧來確保對齊
-        // 底層放一個隱藏的 Text 來撐開高度和基線
-        // 上層放 Marquee 或 Text
-        return Container(
+        // Use exact measured height (no multiplication)
+        return SizedBox(
           width: maxWidth,
-          height: textHeight,
-          alignment: Alignment.centerLeft,
+          height: textPainter.height, // No extra padding
           child: overflows
               ? Marquee(
                   text: text,
@@ -70,6 +74,7 @@ class OptionalMarquee extends StatelessWidget {
                   style: effectiveStyle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  strutStyle: strutStyle, // Same strut as Marquee
                 ),
         );
       },

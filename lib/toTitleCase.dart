@@ -11,7 +11,7 @@ extension StringCasingExtension on String {
       'HKFYG', 'BBI', 'KMB', 'MTR', 'HK', 'VTC', 'IVE', 'HKDI',
       'HKUST', 'HKU', 'CUHK', 'PolyU', 'CityU', 'HKMU', 'THEi',
       'HKCEC', 'AWE', 'YMCA', 'YWCA', 'S.K.H.', 'TWGHs', 'P.L.K.',
-      'HKJC', 'JPC', 'FEHD', 'LCSD', 'H.K.', 'GPO', 'TE', 'G/F', 'UG/F', 'II', 'I'
+      'HKJC', 'JPC', 'FEHD', 'LCSD', 'H.K.', 'GPO', 'TE', 'G/F', 'UG/F', 'II', 'I', 'HZMB', 'GTC'
     };
 
     final alphaNumericStart = RegExp(r'^[a-zA-Z0-9]');

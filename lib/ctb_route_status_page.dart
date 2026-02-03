@@ -3096,12 +3096,12 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         if (snap.connectionState == ConnectionState.waiting) {
           return Column(
             children: [
-              RouteDestinationWidget(
-          route: widget.route,
-          direction: _selectedDirection,
-          serviceType: _selectedServiceType,
-          cachedRouteData: _routeDetails,
-        ),
+              /*RouteDestinationWidget(
+                route: widget.route,
+                direction: _selectedDirection,
+                serviceType: _selectedServiceType,
+                cachedRouteData: _routeDetails,
+              ),*/
               const SizedBox(height: 8),
               const Expanded(
                 child: Center(child: CircularProgressIndicator(year2023: false,)),
@@ -3230,7 +3230,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
           final latLng = LatLng(lat, lng);
           polylinePoints.add(latLng);
 
-          final nameEn = meta['name_en']?.toString() ?? '';
+          final nameEn = meta['name_en']?.toString().toTitleCase() ?? '';
           final nameTc = meta['name_tc']?.toString() ?? '';
           final displayName = isEnglish ? (nameEn.isNotEmpty ? nameEn : nameTc) : (nameTc.isNotEmpty ? nameTc : nameEn);
           final seq = entry['seq']?.toString() ?? '';
@@ -3247,6 +3247,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 onTap: () {
                   // Show stop details in a bottom sheet
                   showModalBottomSheet(
+                    showDragHandle: true,
+                    enableDrag: true,
+                    requestFocus: true,
                     context: context,
                     builder: (context) => Container(
                       padding: const EdgeInsets.all(16),
@@ -3406,10 +3409,24 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                           urlTemplate: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
                           subdomains: const ['a', 'b', 'c'],
                           userAgentPackageName: 'com.example.lrtnexttrain',
+                          
+                          // Performance optimizations
                           maxZoom: 19,
-                          panBuffer: 1,
+                          minZoom: 10, // Prevent over-zooming out (saves bandwidth)
+                          maxNativeZoom: 18, // Tile server's actual max zoom
+                          panBuffer: 2, // Increased for smoother panning (was 1)
+                          
                           tileSize: 256,
-                          retinaMode: false,
+                          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5, // Dynamic based on device
+
+                          
+                          tileProvider: NetworkTileProvider(), // Explicit (has built-in caching)
+                          
+                          // Error handling
+                          errorImage: const AssetImage('assets/map_error_tile.png'), // Optional fallback
+                          
+                          // Keep alive for better scrolling performance
+                          keepBuffer: 5, // Keep 5 extra tiles in memory
                         ),
                         // Polyline showing route path
                         if (polylinePoints.length > 1)
@@ -3417,10 +3434,10 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                             polylines: [
                               Polyline(
                                 points: polylinePoints,
-                                strokeWidth: 4.0,
+                                strokeWidth: 6.0,
                                 color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
-                                borderStrokeWidth: 2.0,
-                                borderColor: Theme.of(context).colorScheme.surface,
+                                borderStrokeWidth: 1.0,
+                                borderColor: Theme.of(context).colorScheme.surface.withOpacity(0.1),
                               ),
                             ],
                           ),
@@ -4779,12 +4796,14 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                               crossAxisAlignment: CrossAxisAlignment.baseline,
                               textBaseline: TextBaseline.alphabetic,
                               children: [
+                                const SizedBox(height: 4),
                                 Text(
                                   '${isEnglish ? 'From' : '由'}:  ',
                                   style: TextStyle(
                                     letterSpacing: -0.05,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
+                                    height: 1,
                                     color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                   ),
                                 ),
@@ -4794,6 +4813,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                     style: TextStyle(
                                       letterSpacing: -0.05,
                                       fontSize: 10,
+                                      height: 1,
                                       fontWeight: FontWeight.w400,
                                       color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                     ),
@@ -4809,6 +4829,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                             crossAxisAlignment: CrossAxisAlignment.baseline,
                             textBaseline: TextBaseline.alphabetic,
                             children: [
+                              const SizedBox(height: 4,),
                               Text(
                                 '${isEnglish ? 'To' : '往'}:  ',
                                 style: TextStyle(

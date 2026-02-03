@@ -54,6 +54,10 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
   final MapController _mapController = MapController();
   final DraggableScrollableController _draggableController = DraggableScrollableController();
   
+  // Animated highlight state for clicked stop
+  String? _highlightedStopId;
+  Timer? _highlightTimer;
+
   // Location
   Position? _userPosition;
   bool _locationLoading = false;
@@ -406,8 +410,12 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
           child: FakeGlass(
             shape: LiquidRoundedSuperellipse(borderRadius: 20),
             settings: LiquidGlassSettings(
-              blur: 10.0,
-              glassColor: theme.colorScheme.surface.withOpacity(0.85),
+              blur: 0.0, 
+              thickness: 19,
+              glassColor: theme.colorScheme.surface.withOpacity(0.15), // ✅ 降至 0.15
+              lightIntensity: 1.2,
+              saturation: 1.1,
+              refractiveIndex: 1.3,
             ),
             child: ListView(
               controller: scrollController,
@@ -462,7 +470,7 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
   Widget _buildStopCard(Map<String, dynamic> stopEntry, int index) {
     final stopId = stopEntry['stop'].toString();
     final seq = stopEntry['seq'].toString();
-    final fare = stopEntry['fare']?.toString() ?? '0.0';
+    final fare = stopEntry['fare']?.toString() ?? '';
     
     // Enrich with metadata
     final meta = _stopMap[stopId];
@@ -540,6 +548,7 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
 
       final point = LatLng(lat, lng);
       points.add(point);
+      final isHighlighted = _highlightedStopId == stopId;
 
       markers.add(Marker(
         point: point,
@@ -556,18 +565,94 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
               }
             });
           },
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: Center(
-              child: Text(seq, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-            ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Animated pulsing ring for highlighted stop
+              if (isHighlighted)
+                _PulsingRing(
+                  color: Theme.of(context).colorScheme.tertiary,
+                ),
+              // Main marker circle
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 280),
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: isHighlighted 
+                    ? Theme.of(context).colorScheme.tertiary
+                    : Theme.of(context).colorScheme.primary,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.surface, 
+                    width: isHighlighted ? 3 : 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isHighlighted
+                        ? Theme.of(context).colorScheme.tertiary.withOpacity(0.5)
+                        : Theme.of(context).colorScheme.shadow.withOpacity(0.3),
+                      blurRadius: isHighlighted ? 8 : 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  seq,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontSize: isHighlighted ? 14 : 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ));
+    }
+    
+
+    // Build markers for stops
+    
+    final List<LatLng> polylinePoints = [];
+    // Calculate center and zoom level
+    LatLng center;
+    double zoom = 13.0;
+    
+    // Prefer user location if available, otherwise use route center
+    if (_userPosition != null) {
+      // Center on user's current location
+      center = LatLng(_userPosition!.latitude, _userPosition!.longitude);
+      zoom = 14.0; // Closer zoom when centered on user
+    } else if (points.isNotEmpty) {
+      // Calculate bounding box for route
+      double minLat = points.first.latitude;
+      double maxLat = points.first.latitude;
+      double minLng = points.first.longitude;
+      double maxLng = points.first.longitude;
+      
+      for (final point in points) {
+        if (point.latitude < minLat) minLat = point.latitude;
+        if (point.latitude > maxLat) maxLat = point.latitude;
+        if (point.longitude < minLng) minLng = point.longitude;
+        if (point.longitude > maxLng) maxLng = point.longitude;
+      }
+      
+      center = LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
+      
+      // Adjust zoom based on distance
+      final latDiff = maxLat - minLat;
+      final lngDiff = maxLng - minLng;
+      final maxDiff = latDiff > lngDiff ? latDiff : lngDiff;
+      
+      if (maxDiff > 0.1) {
+        zoom = 11.0;
+      } else if (maxDiff > 0.05) zoom = 12.0;
+      else if (maxDiff > 0.02) zoom = 13.0;
+      else zoom = 14.0;
+    } else {
+      // Default to Hong Kong
+      center = const LatLng(22.3193, 114.1694);
     }
 
     return ClipRRect(
@@ -575,20 +660,61 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
       child: FlutterMap(
         mapController: _mapController,
         options: MapOptions(
-          initialCenter: points.isNotEmpty ? points.first : const LatLng(22.25, 113.95), // Lantau approx
-          initialZoom: 11,
+          initialCenter: center,
+          initialZoom: zoom,
+          minZoom: 10.0,
+          maxZoom: 18.0,
         ),
         children: [
           TileLayer(
-             urlTemplate: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-             subdomains: const ['a', 'b', 'c'],
+            urlTemplate: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+            subdomains: const ['a', 'b', 'c'],
+            userAgentPackageName: 'com.example.lrtnexttrain',
+            
+            // Performance optimizations
+            maxZoom: 19,
+            minZoom: 10, // Prevent over-zooming out (saves bandwidth)
+            maxNativeZoom: 18, // Tile server's actual max zoom
+            panBuffer: 2, // Increased for smoother panning (was 1)
+            
+            tileSize: 256,
+            retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5, // Dynamic based on device
+
+            
+            tileProvider: NetworkTileProvider(), // Explicit (has built-in caching)
+            
+            // Error handling
+            errorImage: const AssetImage('assets/map_error_tile.png'), // Optional fallback
+            
+            // Keep alive for better scrolling performance
+            keepBuffer: 5, // Keep 5 extra tiles in memory
           ),
           if (points.length > 1)
             PolylineLayer(polylines: [
               Polyline(points: points, strokeWidth: 4.0, color: Colors.blue.withOpacity(0.7)),
             ]),
           MarkerLayer(markers: markers),
-          CurrentLocationLayer(),
+          CurrentLocationLayer(
+            alignPositionOnUpdate: AlignOnUpdate.never,
+            alignDirectionOnUpdate: AlignOnUpdate.never,
+            style: LocationMarkerStyle(
+              marker: DefaultLocationMarker(
+                color: Theme.of(context).colorScheme.error,
+                child: Icon(
+                  Icons.navigation,
+                  color: Theme.of(context).colorScheme.onError,
+                  size: 10,
+                ),
+              ),
+              markerSize: const Size(18, 18),
+              markerDirection: MarkerDirection.heading,
+              headingSectorColor: Theme.of(context).colorScheme.error.withOpacity(0.2),
+              headingSectorRadius: 60,
+              accuracyCircleColor: Theme.of(context).colorScheme.error.withOpacity(0.1),
+              showAccuracyCircle: true,
+              showHeadingSector: true,
+            ),
+          ),
         ],
       ),
     );
@@ -811,6 +937,60 @@ class _NlbStopCardState extends State<NlbStopCard> {
           ],
         )
       ],
+    );
+  }
+}
+
+/// Pulsing ring animation widget for highlighted map markers
+class _PulsingRing extends StatefulWidget {
+  final Color color;
+  
+  const _PulsingRing({required this.color});
+  
+  @override
+  State<_PulsingRing> createState() => _PulsingRingState();
+}
+
+class _PulsingRingState extends State<_PulsingRing> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat();
+    
+    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+  }
+  
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: 40 + (_animation.value * 25),
+          height: 40 + (_animation.value * 25),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: widget.color.withOpacity(1.0 - _animation.value),
+              width: 3,
+            ),
+          ),
+        );
+      },
     );
   }
 }
