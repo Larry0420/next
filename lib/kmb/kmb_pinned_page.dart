@@ -1,5 +1,6 @@
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:ui';
@@ -8,7 +9,9 @@ import 'dart:math' as math;
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
 import 'api/kmb.dart';
+import 'api/citybus.dart';
 import '../kmb_route_status_page.dart';
+import '../ctb_route_status_page.dart';
 import '../main.dart' show LanguageProvider;
 
 import '../toTitleCase.dart';
@@ -71,17 +74,45 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
   Future<void> _loadData() async {
     setState(() => _loading = true);
     try {
-      final pinned = await Kmb.getPinnedRoutes();
-      final pinnedStops = await Kmb.getPinnedStops();
-      final history = await Kmb.getRouteHistory();
+      final kmbPinned = await Kmb.getPinnedRoutes();
+      final kmbPinnedStops = await Kmb.getPinnedStops();
+      final kmbHistory = await Kmb.getRouteHistory();
 
-      final enrichedRoutes = await _enrichWithDestination(pinned);
-      final enrichedStops = await _enrichStopsWithDestination(pinnedStops);
+      // Load CTB data
+      final ctbPinned = await Citybus.getPinnedRoutes();
+      final ctbPinnedStops = await Citybus.getPinnedStops();
+      final ctbHistory = await Citybus.getRouteHistory();
+
+
+      // Merge and enrich
+      final allPinned = [...kmbPinned, ...ctbPinned.map((e) => Map<String, dynamic>.from(e)),];
+      final allPinnedStops = [...kmbPinnedStops, ...ctbPinnedStops.map((e) => Map<String, dynamic>.from(e)),];
+    
+      final allHistory = [
+      ...kmbHistory.map((e) => Map<String, dynamic>.from(e)),
+      ...ctbHistory.map((e) => Map<String, dynamic>.from(e)),
+      ];
+
+      // Sort by timestamp (newest first)
+      allPinned.sort((a, b) {
+        final aTime = a['pinnedAt'] ?? '';
+        final bTime = b['pinnedAt'] ?? '';
+        return bTime.compareTo(aTime);
+      });
+      
+      allHistory.sort((a, b) {
+        final aTime = a['accessedAt'] ?? '';
+        final bTime = b['accessedAt'] ?? '';
+        return bTime.compareTo(aTime);
+      });
+    
+      final enrichedRoutes = await _enrichWithDestination(allPinned);
+      final enrichedStops = await _enrichStopsWithDestination(allPinnedStops);
 
       setState(() {
         _pinnedRoutes = enrichedRoutes;
         _pinnedStops = enrichedStops;
-        _historyRoutes = history;
+        _historyRoutes = allHistory;
         _loading = false;
       });
     } catch (e) {
@@ -91,15 +122,28 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
 
   Future<List<Map<String, dynamic>>> _enrichWithDestination(List<Map<String, dynamic>> items) async {
     try {
-      final routeIndex = await Kmb.buildRouteIndex();
+      final kmbIndex = await Kmb.buildRouteIndex();
+      final ctbIndex = await Citybus.buildRouteIndex();
+
       final enriched = <Map<String, dynamic>>[];
       for (final item in items) {
-        final route = item['route']?.toString().trim().toUpperCase();
-        final direction = item['direction']?.toString() ?? 'O';
-        final serviceType = item['serviceType']?.toString() ?? '1';
-        if (route != null && route.isNotEmpty) {
-          final indexKey = '${route}_${direction}_$serviceType';
+          final route = item['route']?.toString().trim().toUpperCase();
+          final direction = item['direction']?.toString() ?? 'O';
+          final serviceType = item['serviceType']?.toString() ?? '1';
+          final companyId = item['co']?.toString().toLowerCase() ?? 'kmb';
+          if (route != null && route.isNotEmpty) {
+            // Choose correct index based on company
+          final routeIndex = (companyId == 'ctb' || companyId == 'nwfb') 
+              ? ctbIndex 
+              : kmbIndex;
+          
+          // CTB doesn't use service type in key
+          final indexKey = (companyId == 'ctb' || companyId == 'nwfb')
+              ? '$route$direction'
+              : '$route$direction$serviceType';
+          
           final routeData = routeIndex[indexKey];
+          
           if (routeData != null) {
             final enrichedItem = Map<String, dynamic>.from(item);
             enrichedItem['destEn'] = routeData['dest_en'];
@@ -285,7 +329,20 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
             lang: lang,
             isPinned: true,
             onUnpin: () async {
-              await Kmb.unpinRoute(route['route'], route['direction'], route['serviceType']);
+              final companyId = route['co']?.toString().toLowerCase() ?? 'kmb';
+  
+              if (companyId == 'ctb' || companyId == 'nwfb') {
+                await Citybus.unpinRoute(
+                  route['route'],
+                  companyId: companyId,
+                );
+              } else {
+                await Kmb.unpinRoute(
+                  route['route'],
+                  route['direction'],
+                  route['serviceType'],
+                );
+              }
               _loadData();
             },
           );
@@ -435,10 +492,25 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
           color: Colors.transparent,
           child: InkWell(
             onTap: () {
+              final companyId = route['co']?.toString().toLowerCase() ?? 'kmb';
+              if (companyId == 'ctb' || companyId == 'nwfb') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CtbRouteStatusPage(
+                      route: routeNum,
+                      bound: direction,
+                      serviceType: null,  // CTB doesn't use service type
+                      companyId: companyId,
+                    ),
+                  ),
+                ).then((_) => _loadData());
+              } else {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => KmbRouteStatusPage(route: routeNum, bound: direction, serviceType: serviceType, companyId: null,)),
               ).then((_) => _loadData());
+              }
             },
             borderRadius: BorderRadius.circular(14),
             child: Padding(
@@ -566,10 +638,27 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
             stop: stop,
             lang: lang,
             onUnpin: () async {
-              await Kmb.unpinStop(stop['route'], stop['stopId'], stop['seq']);
+              // ✅ Check company ID and call correct API
+              final companyId = stop['co']?.toString().toLowerCase() ?? 'kmb';
+              
+              if (companyId == 'ctb' || companyId == 'nwfb') {
+                await Citybus.unpinStop(
+                  stop['route'],
+                  stop['stopId'],
+                  stop['seq'],
+                  companyId: companyId,
+                );
+              } else {
+                await Kmb.unpinStop(
+                  stop['route'],
+                  stop['stopId'],
+                  stop['seq'],
+                );
+              }
+              
               _loadData();
             },
-            compact: _pinnedStops.length > 8,
+
           );
         },
       ),
@@ -581,9 +670,8 @@ class PinnedStopCard extends StatefulWidget {
   final Map<String, dynamic> stop;
   final LanguageProvider lang;
   final VoidCallback onUnpin;
-  final bool compact;
 
-  const PinnedStopCard({super.key, required this.stop, required this.lang, required this.onUnpin, this.compact = false});
+  const PinnedStopCard({super.key, required this.stop, required this.lang, required this.onUnpin,});
 
   @override
   State<PinnedStopCard> createState() => _PinnedStopCardState();
@@ -635,6 +723,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       final serviceType = widget.stop['serviceType']?.toString() ?? '1';
       final seq = widget.stop['seq']?.toString() ?? '';
       final direction = widget.stop['direction']?.toString().trim().toUpperCase() ?? '';
+      final companyId = widget.stop['co']?.toString().toLowerCase() ?? 'kmb';
 
       if (route.isEmpty) {
         setState(() {
@@ -644,14 +733,42 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
         return;
       }
 
-      final entries = await Kmb.fetchRouteEta(route, serviceType);
+      // ✅ Call correct API based on company
+      final List<Map<String, dynamic>> entries;
+
+      if (companyId == 'ctb' || companyId == 'nwfb') {
+        // CTB API - no service type, use direction instead
+        final directionForEta = direction.isNotEmpty 
+            ? (direction[0] == 'I' ? 'I' : 'O') 
+            : null;
+        
+        final rawEntries = await Citybus.fetchRouteEta(
+          route,
+          direction: directionForEta,
+          companyId: companyId,
+        );
+        entries = rawEntries.map((e) => Map<String, dynamic>.from(e)).toList();
+      } else {
+        // KMB API - uses service type
+        final rawEntries = await Kmb.fetchRouteEta(route, serviceType);
+        entries = rawEntries.map((e) => Map<String, dynamic>.from(e)).toList();
+      }
+      if (!mounted) return;
+    
+       // Filter ETAs for this specific stop
       final directionChar = direction.isNotEmpty ? direction[0] : '';
+
       final freshEtas = entries.where((e) {
+        // Match sequence number
         if (e['seq']?.toString() != seq) return false;
+        
+        // Match direction if available
         if (directionChar.isNotEmpty) {
-          final etaDir = e['dir']?.toString().trim().toUpperCase() ?? '';
+          final etaDir = e['dir']?.toString().trim().toUpperCase() ?? 
+                        e['bound']?.toString().trim().toUpperCase() ?? '';
           if (etaDir.isEmpty || etaDir[0] != directionChar) return false;
         }
+        
         return true;
       }).toList();
 
@@ -709,7 +826,15 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     final longitude = widget.stop['longitude'];
     final destEn = widget.stop['destEn'];
     final destTc = widget.stop['destTc'];
-    final dest = widget.lang.isEnglish ? (destEn.toString().toTitleCase() ?? destTc ?? '') : (destTc ?? destEn.toString().toTitleCase() ?? '');
+
+    // ✅ FIX: Check null BEFORE toString()
+    final destEnStr = destEn?.toString() ?? '';
+    final destTcStr = destTc?.toString() ?? '';
+
+    final dest = widget.lang.isEnglish 
+        ? (destEnStr.isNotEmpty ? destEnStr : destTcStr).toTitleCase()
+        : (destTcStr.isNotEmpty ? destTcStr : destEnStr).toTitleCase();
+
     final direction = widget.stop['direction']?.toString() ?? 'O';
 
     final cs = Theme.of(context).colorScheme;
@@ -723,136 +848,62 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       directionIcon = Icons.arrow_circle_left;
     }
 
-    if (widget.compact) {
-      String? firstEtaText;
-      if (!_loading && _etas.isNotEmpty) {
-        final e = _etas.first;
-        final etaRaw = e['eta'] ?? e['eta_time'];
-        if (etaRaw != null) {
-          try {
-            final dt = DateTime.parse(etaRaw.toString()).toLocal();
-            final diff = dt.difference(DateTime.now());
-            if (diff.inMinutes <= 0 && diff.inSeconds > -60) {
-              firstEtaText = widget.lang.isEnglish ? 'Arr' : '到達';
-            } else if (diff.isNegative) {
-              firstEtaText = '-';
-            } else {
-              final mins = diff.inMinutes;
-              firstEtaText = widget.lang.isEnglish ? '${mins}m' : '$mins分';
-            }
-          } catch (_) {}
-        }
-      }
-
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6.0),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.15), width: 1.0),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => KmbRouteStatusPage(
-                    route: route, 
-                    bound: widget.stop['direction'], 
-                    serviceType: widget.stop['serviceType'],
-                    companyId: widget.stop['company'],
-                    autoExpandSeq: widget.stop['seq']?.toString(),
-                    autoExpandStopId: widget.stop['stopId']?.toString(),
-                  )),
-                );
-              },
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(color: directionColor.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
-                      alignment: Alignment.center,
-                      child: Text(route, style: TextStyle(fontWeight: FontWeight.bold, color: directionColor, fontSize: 13)),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          AutoSizeText(stopName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          if (dest.isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9)), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (_loading)
-                      const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    else if (firstEtaText != null)
-                      Text(firstEtaText, style: TextStyle(fontWeight: FontWeight.bold, color: _getEtaColor(_etas.first['eta'] ?? _etas.first['eta_time'])))
-                    else
-                      const SizedBox.shrink(),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      key: const ValueKey('pinned'),
-                      onPressed: widget.onUnpin,
-                      icon: const Icon(Icons.push_pin, size: 29),
-                      style: IconButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
-                        foregroundColor: Theme.of(context).colorScheme.primary,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(50),
-                        ),
-                        //padding: const EdgeInsets.all(6),
-                        minimumSize: const Size(20, 20),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
           child: Container(
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.15), width: 1.0),
             ),
             child: Material(
               color: Colors.transparent,
               child: InkWell(
                 onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => KmbRouteStatusPage(
-                      route: route, 
-                      bound: widget.stop['direction'], 
-                      serviceType: widget.stop['serviceType'],
-                      companyId: widget.stop['company'],
-                      autoExpandSeq: widget.stop['seq']?.toString(),
-                      autoExpandStopId: widget.stop['stopId']?.toString(),
-                    )),
-                  );
+                  // ✅ Extract values from widget.stop
+                  final route = widget.stop['route']?.toString() ?? '';
+                  final companyId = widget.stop['co']?.toString().toLowerCase() ?? 'kmb';
+                  final direction = widget.stop['direction']?.toString() ?? 'O';
+                  final serviceType = widget.stop['serviceType']?.toString() ?? '1';
+                  final seq = widget.stop['seq']?.toString();
+                  final stopId = widget.stop['stopId']?.toString();
+                  
+                  if (companyId == 'ctb' || companyId == 'nwfb') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CtbRouteStatusPage(
+                          route: route,              // ✅ Now defined
+                          bound: direction,           // ✅ Use extracted variable
+                          serviceType: null,          // CTB doesn't use service type
+                          companyId: companyId,
+                          autoExpandSeq: seq,
+                          autoExpandStopId: stopId,
+                        ),
+                      ),
+                    );
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => KmbRouteStatusPage(
+                          route: route,              // ✅ Now defined
+                          bound: direction,           // ✅ Use extracted variable
+                          serviceType: serviceType,   // ✅ Use extracted variable
+                          companyId: null,            // KMB uses null, not 'kmb'
+                          autoExpandSeq: seq,
+                          autoExpandStopId: stopId,
+                        ),
+                      ),
+                    );
+                  }
                 },
+
                 borderRadius: BorderRadius.circular(14),
                 child: Padding(
                   padding: const EdgeInsets.all(14.0),

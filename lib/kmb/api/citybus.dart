@@ -469,6 +469,9 @@ class Citybus {
       'latitude': latitude,
       'longitude': longitude,
       'direction': direction,
+      'destEn': destEn,        // ✅ ADD THIS
+      'destTc': destTc,        // ✅ ADD THIS
+      'serviceType': serviceType, // ✅ ADD THIS (optional, but good to have)
       'pinnedAt': DateTime.now().toIso8601String(),
     });
 
@@ -489,11 +492,33 @@ class Citybus {
 
     final r = route.trim().toUpperCase();
     final s = stopId.trim();
-    final co = _normalizeCompanyIdForEta(companyId);
+    final co = _normalizeCompanyIdForEta(companyId).toLowerCase();
 
-    pinned.removeWhere((item) => (item is Map) && item['route'] == r && item['stopId'] == s && item['seq'] == seq && item['co'] == co);
+    // ✅ DEBUG: Print what we're trying to remove
+    debugPrint('🔍 Trying to unpin: route=$r, stopId=$s, seq=$seq, co=$co');
+    
+    // ✅ DEBUG: Print all pinned stops
+    for (var item in pinned) {
+      if (item is Map) {
+        debugPrint('📌 Pinned: route=${item['route']}, stopId=${item['stopId']}, seq=${item['seq']}, co=${item['co']}');
+      }
+    }
+
+    final initialLength = pinned.length;
+    pinned.removeWhere((item) => 
+      (item is Map) && 
+      item['route'] == r && 
+      item['stopId'] == s && 
+      item['seq'].toString() == seq.toString() &&  // ✅ FIX: Compare as strings
+      item['co'] == co
+    );
+    
+    final removed = initialLength - pinned.length;
+    debugPrint('✅ Removed $removed stops');
+
     await prefs.setString(_pinnedStopsKey, json.encode(pinned));
   }
+
 
   static Future addToHistory(String route, String label, {String companyId = 'ctb'}) async {
     final prefs = await SharedPreferences.getInstance();

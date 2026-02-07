@@ -543,7 +543,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
 
         // Enrich stop entries with metadata off the main isolate to avoid jank
         try {
+          
           final stopMap = await Citybus.buildStopMap();
+          /*
           final enriched = await compute(_enrichEntriesForStopMap, {'entries': entries, 'stopMap': stopMap});
           if (mounted) {
             setState(() {
@@ -552,8 +554,34 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 'version': 'prebuilt-asset',
                 'generatedtimestamp': DateTime.now().toIso8601String(),
                 'data': enriched,
+              };*/
+          // ✅ NEW - Direct enrichment, no compute
+          final enriched = <Map<String, dynamic>>[];
+          for (final e in entries) {
+            final stopId = e['stop']?.toString() ?? '';
+            final meta = stopMap[stopId];
+            
+            // Inject stop metadata directly
+            enriched.add({
+              ...e,
+              if (meta != null) ...{
+                'nameen': meta['nameen'] ?? meta['name_en'],
+                'nametc': meta['nametc'] ?? meta['name_tc'],
+                'lat': meta['lat'] ?? meta['latitude'],
+                'long': meta['long'] ?? meta['lng'] ?? meta['longitude'],
+              }
+            });
+          }
+
+          if (mounted) {
+            setState(() {
+              data = {
+                'type': 'RouteStopList',
+                'version': 'prebuilt-asset',
+                'data': enriched,
               };
-              _combinedData = {
+
+              /*_combinedData = {
                 'type': 'CombinedRouteStatus',
                 'route': r,
                 'serviceType': null,
@@ -562,7 +590,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                   'stops': enriched,
                   'routeEta': [],
                 }
-              };
+              };*/
             });
           }
         } catch (_) {
@@ -1357,7 +1385,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               latitude: latStr,
               longitude: lngStr,
               isNearby: isNearby,
+              stopEntry: s,  // ✅ ADD THIS - pass the full stop map
             );
+
           },
           childCount: stops.length,
         ),
@@ -1756,7 +1786,8 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
     // Save to preferences (you'll need to implement this in kmb.dart)
     await Citybus.pinRoute(
       widget.route, 
-      _selectedDirection ?? widget.bound ?? 'O',
+      //_selectedDirection ?? widget.bound ?? 'O',
+      routeLabel,
       /*_selectedServiceType ?? widget.serviceType ?? '1',
       routeLabel,*/
     );
@@ -2668,6 +2699,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
           latitude: lat,
           longitude: lng,
           isNearby: isNearby,
+          stopEntry: s,
         );
       },
     );
@@ -2929,6 +2961,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                     latitude: lat,
                     longitude: lng,
                     isNearby: isNearby,
+                    stopEntry: s,
                   );
                 },
               ),
@@ -3043,19 +3076,23 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
     String? latitude,
     String? longitude,
     bool isNearby = false,
+    Map<dynamic, dynamic>? stopEntry,  // ✅ ADD THIS - pass the full stop entry
   }) {
-    // Get destination from route details for fallback display
-    String? destEn;
-    String? destTc;
+    // ✅ Get destination from stop entry FIRST (most specific)
+    String? destEn = stopEntry?['desten']?.toString();
+    String? destTc = stopEntry?['desttc']?.toString();
     
-    if (_routeDetails != null) {
-      final routeData = _routeDetails!.containsKey('data') 
-        ? (_routeDetails!['data'] as Map<String, dynamic>?)
-        : _routeDetails!;
-      
-      if (routeData != null) {
-        destEn = routeData['dest_en'];
-        destTc = routeData['dest_tc'];
+    // ✅ Fallback to routeDetails if stop doesn't have destination
+    if ((destEn == null || destEn.isEmpty) && 
+        (destTc == null || destTc.isEmpty)) {
+      if (_routeDetails != null) {
+        final routeData = _routeDetails!.containsKey('data')
+            ? _routeDetails!['data'] as Map<String, dynamic>?
+            : _routeDetails!;
+        if (routeData != null) {
+          destEn = routeData['desten'];
+          destTc = routeData['desttc'];
+        }
       }
     }
     
