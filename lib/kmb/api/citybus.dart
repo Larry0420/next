@@ -192,7 +192,7 @@ class Citybus {
         final destEn = first['dest_en']?.toString() ?? '';
         final destTc = first['dest_tc']?.toString() ?? '';
 
-        final uniqueKey = '$route$bound$serviceType'; // ✅ 包含 bound，969I1 與 969O1 會分開
+        final uniqueKey = '${route}_${bound}_$serviceType'; // ✅ 包含 bound，969I1 與 969O1 會分開
         
         out[uniqueKey] = {
           'route': route,
@@ -1165,6 +1165,7 @@ class Citybus {
   static Future<List<Map<String, dynamic>>> fetchStopEta(
     String stopId, {
     String? route,
+    String? direction,
     String companyId = 'ctb',
   }) async {
     final s = stopId.trim();

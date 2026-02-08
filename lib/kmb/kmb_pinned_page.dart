@@ -7,6 +7,7 @@ import 'dart:ui';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:intl/intl.dart';
 
 import 'api/kmb.dart';
 import 'api/citybus.dart';
@@ -15,6 +16,8 @@ import '../ctb_route_status_page.dart';
 import '../main.dart' show LanguageProvider;
 
 import '../toTitleCase.dart';
+
+
 
 class KmbPinnedPage extends StatefulWidget {
   const KmbPinnedPage({super.key});
@@ -139,8 +142,8 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
           
           // CTB doesn't use service type in key
           final indexKey = (companyId == 'ctb' || companyId == 'nwfb')
-              ? '$route$direction'
-              : '$route$direction$serviceType';
+              ? '${route}_${direction}_$serviceType'
+              : '${route}_${direction}_$serviceType';
           
           final routeData = routeIndex[indexKey];
           
@@ -162,35 +165,100 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     }
   }
 
-  Future<List<Map<String, dynamic>>> _enrichStopsWithDestination(List<Map<String, dynamic>> stops) async {
+  Future<List<Map<String, dynamic>>> _enrichStopsWithDestination(
+    List<Map<String, dynamic>> stops,
+  ) async {
     try {
-      final routeIndex = await Kmb.buildRouteIndex();
+      debugPrint('🔍 === Starting _enrichStopsWithDestination ===');
+      debugPrint('📦 Total stops to enrich: ${stops.length}');
+      
+      // ✅ Load BOTH route indices
+      final kmbIndex = await Kmb.buildRouteIndex();
+      final ctbIndex = await Citybus.buildRouteIndex();
+      
+      debugPrint('📚 KMB index has ${kmbIndex.length} entries');
+      debugPrint('📚 CTB index has ${ctbIndex.length} entries');
+      debugPrint('📚 Sample CTB keys: ${ctbIndex.keys.take(5).toList()}');
+      
       final enriched = <Map<String, dynamic>>[];
-      for (final stop in stops) {
+      
+      for (int i = 0; i < stops.length; i++) {
+        final stop = stops[i];
         final route = stop['route']?.toString().trim().toUpperCase();
         final direction = stop['direction']?.toString() ?? 'O';
         final serviceType = stop['serviceType']?.toString() ?? '1';
+        final companyId = stop['co']?.toString().toLowerCase() ?? 'kmb';
 
-        if (stop['destEn'] != null || stop['destTc'] != null) {
+        debugPrint('\n🛑 Stop ${i + 1}/${stops.length}:');
+        debugPrint('   Route: $route, Direction: $direction, ServiceType: $serviceType, Company: $companyId');
+        debugPrint('   Existing destEn: ${stop['destEn']}, destTc: ${stop['destTc']}');
+
+        // ✅ Skip if already enriched
+        if (stop['destEn'] != null && stop['destTc'] != null) {
+          debugPrint('   ✅ Already enriched - skipping');
           enriched.add(stop);
           continue;
         }
 
         if (route != null && route.isNotEmpty) {
-          final indexKey = '${route}_${direction}_$serviceType';
+          // ✅ Choose correct index and key format based on company
+          final Map<String, dynamic> routeIndex;
+          final String indexKey;
+          
+          if (companyId == 'ctb' || companyId == 'nwfb') {
+            // CTB: Use CTB index with route_direction format (no service type)
+            routeIndex = ctbIndex;
+            indexKey = '${route}_${direction}_$serviceType';
+            debugPrint('   🚌 CTB/NWFB stop - using key: $indexKey');
+          } else {
+            // KMB: Use KMB index with route_direction_serviceType format
+            routeIndex = kmbIndex;
+            indexKey = '${route}_${direction}_$serviceType';
+            debugPrint('   🚌 KMB stop - using key: $indexKey');
+          }
+          
           final routeData = routeIndex[indexKey];
+          
           if (routeData != null) {
+            debugPrint('   ✅ FOUND in index!');
+            debugPrint('   📍 dest_en: ${routeData['dest_en']}');
+            debugPrint('   📍 desten: ${routeData['desten']}');
+            debugPrint('   📍 dest_tc: ${routeData['dest_tc']}');
+            debugPrint('   📍 desttc: ${routeData['desttc']}');
+            
             final enrichedStop = Map<String, dynamic>.from(stop);
-            enrichedStop['destEn'] = routeData['dest_en'];
-            enrichedStop['destTc'] = routeData['dest_tc'];
+            
+            // ✅ Handle both field name formats
+            enrichedStop['destEn'] = routeData['dest_en'] ?? routeData['desten'];
+            enrichedStop['destTc'] = routeData['dest_tc'] ?? routeData['desttc'];
+            enrichedStop['origEn'] = routeData['orig_en'] ?? routeData['origen'];
+            enrichedStop['origTc'] = routeData['orig_tc'] ?? routeData['origtc'];
+            
+            debugPrint('   ✅ Enriched with destEn: ${enrichedStop['destEn']}, destTc: ${enrichedStop['destTc']}');
+            
             enriched.add(enrichedStop);
             continue;
+          } else {
+            debugPrint('   ❌ NOT FOUND in index for key: $indexKey');
+            debugPrint('   💡 Available keys with same route:');
+            final sameRouteKeys = routeIndex.keys.where((k) => k.startsWith(route)).take(3).toList();
+            debugPrint('      $sameRouteKeys');
           }
         }
+        
+        debugPrint('   ⚠️ Adding without enrichment');
         enriched.add(stop);
       }
+      
+      debugPrint('\n✅ === Enrichment Complete ===');
+      debugPrint('📊 Total enriched: ${enriched.length}');
+      debugPrint('📊 With destEn: ${enriched.where((s) => s['destEn'] != null).length}');
+      debugPrint('📊 With destTc: ${enriched.where((s) => s['destTc'] != null).length}');
+      
       return enriched;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error enriching stops: $e');
+      debugPrint('Stack trace: $stackTrace');
       return stops;
     }
   }
@@ -214,7 +282,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
           // 1. 底層內容 (背景)
           Positioned.fill(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(year2023: false))
+                ? const Center(child: LinearProgressIndicator())
                 : TabBarView(
                     controller: _tabController,
                     children: [
@@ -437,7 +505,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     final destTc = route['destTc'];
     final origEn = route['origEn'];
     final origTc = route['origTc'];
-
+    
     String destinationText = '';
     if (lang.isEnglish) {
       final orig = origEn ?? origTc ?? '';
@@ -677,6 +745,8 @@ class PinnedStopCard extends StatefulWidget {
   State<PinnedStopCard> createState() => _PinnedStopCardState();
 }
 
+
+
 class _PinnedStopCardState extends State<PinnedStopCard> {
   Timer? _etaRefreshTimer;
   List<Map<String, dynamic>> _etas = [];
@@ -684,6 +754,20 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
   bool _hasLoadedOnce = false;
   Duration _refreshInterval = const Duration(seconds: 15);
   int _consecutiveErrors = 0;
+  bool _hasNoScheduledBuses = false;  // ✅ ADD THIS
+
+  // ✅ Add helper method to _PinnedStopCardState class
+  String _formatEtaTime(DateTime dt) {
+    // Respect device/user 24-hour preference when available
+    final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
+    if (use24) {
+      return DateFormat.Hm().format(dt); // 24-hour HH:mm (e.g., 17:30)
+    } else {
+      // jm() will format as e.g. 5:08 PM for en_US, or follow locale conventions
+      final locale = Localizations.localeOf(context).toString();
+      return DateFormat.jm(locale).format(dt);
+    }
+  }
 
   @override
   void initState() {
@@ -721,11 +805,12 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     try {
       final route = widget.stop['route']?.toString().trim().toUpperCase() ?? '';
       final serviceType = widget.stop['serviceType']?.toString() ?? '1';
+      final stopId = widget.stop['stopId']?.toString() ?? '';
       final seq = widget.stop['seq']?.toString() ?? '';
       final direction = widget.stop['direction']?.toString().trim().toUpperCase() ?? '';
       final companyId = widget.stop['co']?.toString().toLowerCase() ?? 'kmb';
 
-      if (route.isEmpty) {
+      if (route.isEmpty || stopId.isEmpty) {
         setState(() {
           _etas = [];
           _loading = false;
@@ -733,45 +818,40 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
         return;
       }
 
-      // ✅ Call correct API based on company
+      // ✅ Use route-stop ETA API (faster and more efficient)
       final List<Map<String, dynamic>> entries;
 
       if (companyId == 'ctb' || companyId == 'nwfb') {
-        // CTB API - no service type, use direction instead
-        final directionForEta = direction.isNotEmpty 
-            ? (direction[0] == 'I' ? 'I' : 'O') 
-            : null;
-        
-        final rawEntries = await Citybus.fetchRouteEta(
+        // CTB: Use fetchEta(stopId, route, companyId)
+        final rawEntries = await Citybus.fetchEta(
+          stopId,
           route,
-          direction: directionForEta,
           companyId: companyId,
         );
         entries = rawEntries.map((e) => Map<String, dynamic>.from(e)).toList();
       } else {
-        // KMB API - uses service type
-        final rawEntries = await Kmb.fetchRouteEta(route, serviceType);
+        // KMB: Use fetchStopRouteEta(stopId, route, serviceType)
+        final rawEntries = await Kmb.fetchStopRouteEta(stopId, route, serviceType);
         entries = rawEntries.map((e) => Map<String, dynamic>.from(e)).toList();
       }
+      
       if (!mounted) return;
     
-       // Filter ETAs for this specific stop
+      // ✅ Since we're using stop-specific API, we still need to filter by direction
       final directionChar = direction.isNotEmpty ? direction[0] : '';
 
       final freshEtas = entries.where((e) {
-        // Match sequence number
-        if (e['seq']?.toString() != seq) return false;
-        
-        // Match direction if available
+        // Match direction if available (some stops serve multiple directions)
         if (directionChar.isNotEmpty) {
           final etaDir = e['dir']?.toString().trim().toUpperCase() ?? 
                         e['bound']?.toString().trim().toUpperCase() ?? '';
-          if (etaDir.isEmpty || etaDir[0] != directionChar) return false;
+          if (etaDir.isNotEmpty && etaDir[0] != directionChar) return false;
         }
         
         return true;
       }).toList();
 
+      // Sort by ETA sequence
       freshEtas.sort((a, b) {
         final ai = int.tryParse(a['eta_seq']?.toString() ?? '') ?? 0;
         final bi = int.tryParse(b['eta_seq']?.toString() ?? '') ?? 0;
@@ -783,19 +863,30 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           _etas = freshEtas;
           _loading = false;
           _hasLoadedOnce = true;
-          _consecutiveErrors = 0;
+          _consecutiveErrors = 0;  // ✅ Reset errors on successful fetch
           _refreshInterval = const Duration(seconds: 15);
+          
+          // ✅ Track if this is "no schedule" vs "error"
+          // If we got data from API but no ETAs match, it's likely time-constrained
+          _hasNoScheduledBuses = freshEtas.isEmpty && entries.isNotEmpty;
+          //_lastUpdated = DateTime.now();  // ✅ Track update time
         });
         _startAutoRefresh();
       }
     } catch (e) {
+      debugPrint('❌ Error fetching ETAs: $e');
+      
       _consecutiveErrors++;
-      _refreshInterval = Duration(seconds: math.min(60, 15 * math.pow(2, _consecutiveErrors).toInt()));
+      _refreshInterval = Duration(
+        seconds: math.min(60, 15 * math.pow(2, _consecutiveErrors).toInt()),
+      );
       _startAutoRefresh();
+      
       if (mounted && !silent) {
         setState(() {
           _etas = [];
           _loading = false;
+          _hasNoScheduledBuses = false;  // ✅ This is an error, not "no schedule"
         });
       }
     }
@@ -943,46 +1034,96 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                             ],
                             const SizedBox(height: 6),
                             if (_loading)
-                              const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                              const SizedBox(height: 2, width: 100, child: LinearProgressIndicator(stopIndicatorRadius: 20, trackGap: 60,))
                             else if (_etas.isEmpty)
-                              Text(widget.lang.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士', style: TextStyle(color: Colors.grey[600], fontSize: 11))
+                              Text(
+                                _hasNoScheduledBuses 
+                                    ? (widget.lang.isEnglish 
+                                        ? 'No scheduled buses' 
+                                        : '暫無班次')
+                                    : (widget.lang.isEnglish 
+                                        ? 'Service not available' 
+                                        : '服務暫停'),
+                                style: TextStyle(
+                                  color: _hasNoScheduledBuses 
+                                      ? Colors.grey.shade600 
+                                      : Colors.orange.shade700,
+                                  fontSize: 11,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              )
                             else
+                              // ✅ Update the Wrap widget in build() method:
                               Wrap(
                                 spacing: 12,
                                 runSpacing: 4,
                                 children: _etas.take(3).map((e) {
                                   final etaRaw = e['eta'] ?? e['eta_time'];
-                                  final rmk = widget.lang.isEnglish ? (e['rmk_en'] ?? '') : (e['rmk_tc'] ?? '');
+                                  final rmk = widget.lang.isEnglish 
+                                      ? (e['rmk_en'] ?? e['rmktc'] ?? '') 
+                                      : (e['rmk_tc'] ?? e['rmktc'] ?? e['rmk_en'] ?? '');
+                                  
                                   String etaText = widget.lang.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士';
+                                  String etaTime = '';  // ✅ Will be populated below
                                   bool isDeparted = false;
                                   bool isNearlyArrived = false;
+                                  
                                   if (etaRaw != null) {
                                     try {
                                       final dt = DateTime.parse(etaRaw.toString()).toLocal();
                                       final diff = dt.difference(DateTime.now());
                                       final mins = diff.inMinutes;
+                                      
+                                      // ✅ Format the actual time
+                                      etaTime = _formatEtaTime(dt);
+                                      
                                       if (mins <= 0 && diff.inSeconds > -60) {
                                         etaText = widget.lang.isEnglish ? 'Arriving' : '到達中';
                                         isNearlyArrived = true;
                                       } else if (diff.isNegative) {
                                         etaText = widget.lang.isEnglish ? '- min' : '- 分鐘';
                                         isDeparted = true;
+                                      } else if (mins < 1) {
+                                        etaText = widget.lang.isEnglish ? 'Due' : '即將抵達';
+                                        isNearlyArrived = true;
                                       } else {
-                                        if (mins < 1) {
-                                          etaText = widget.lang.isEnglish ? 'Due' : '即將抵達';
-                                          isNearlyArrived = true;
-                                        } else {
-                                          etaText = widget.lang.isEnglish ? '$mins min' : '$mins分鐘';
-                                        }
+                                        etaText = widget.lang.isEnglish ? '$mins min' : '$mins分鐘';
                                       }
                                     } catch (_) {}
                                   }
+                                  
                                   return Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Text(etaText, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDeparted ? Colors.grey[400] : (isNearlyArrived ? Colors.green : _getEtaColor(etaRaw)))),
-                                      if (rmk.isNotEmpty) Text(rmk, style: TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7))),
+                                      Text(
+                                        etaText, 
+                                        style: TextStyle(
+                                          fontSize: 14, 
+                                          fontWeight: FontWeight.bold, 
+                                          color: isDeparted 
+                                              ? Colors.grey[400] 
+                                              : (isNearlyArrived 
+                                                  ? Colors.green 
+                                                  : _getEtaColor(etaRaw)),
+                                        ),
+                                      ),
+                                      if (etaTime.isNotEmpty) 
+                                        Text(
+                                          etaTime, 
+                                          style: TextStyle(
+                                            fontSize: 9, 
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                          ),
+                                        ),
+                                      if (rmk.isNotEmpty) 
+                                        Text(
+                                          rmk, 
+                                          style: TextStyle(
+                                            fontSize: 9, 
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                          ),
+                                        ),
                                     ],
                                   );
                                 }).toList(),

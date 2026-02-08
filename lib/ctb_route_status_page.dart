@@ -3922,8 +3922,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         longitude: widget.longitude,
         direction: widget.direction,
         serviceType: widget.selectedServiceType,
-        destEn: widget.destEn,
-        destTc: widget.destTc,
+        //destEn: widget.destEn,
+        //destTc: widget.destTc,
       );
       
       if (mounted) {
