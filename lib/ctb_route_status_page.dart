@@ -749,7 +749,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                       ),
                     )
                   : Icon(
-                      _userPosition != null ? Icons.my_location : Icons.location_searching,
+                      _userPosition != null ? Icons.near_me : Icons.location_searching,
                       size: 24 * accessibility.iconScale,
                     ),
                 tooltip: isEnglish ? 'Scroll to nearest stop' : '捲動至最近站點',
@@ -834,7 +834,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 padding: EdgeInsets.only(
                   left: 12.0, 
                   right: 12.0, 
-                  top: 12.0, 
+                  top: 0.0, 
                   bottom: devSettings.useFloatingRouteToggles ? 80.0 : 12.0,
                 ),
                 child: showSplitView
@@ -846,7 +846,10 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                             // Map on left (less space on mobile)
                             Expanded(
                               flex: isMobile ? 2 : 1,
+                              child: Padding(
+                                padding: EdgeInsets.only(top: 12.0, bottom: devSettings.useFloatingRouteToggles ? 150.0 : 12.0,), // 修正包裹順序
                               child: _buildMapView(),
+                            ),
                             ),
                             const SizedBox(width: 8),
                             // List on right (more space on mobile for better readability)
@@ -887,7 +890,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
 
     /// Build the list view using Slivers for better performance and flexibility
   Widget _buildListView(DeveloperSettingsProvider devSettings) {
-    final bottomPadding = devSettings.useFloatingRouteToggles ? 250.0 : 50.0;
+    final bottomPadding = devSettings.useFloatingRouteToggles ? 200.0 : 12.0;
 
     return CustomScrollView(
       controller: _scrollController,
@@ -904,7 +907,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                   serviceType: _selectedServiceType,
                   cachedRouteData: _routeDetails,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
               ],
             ),
           ),
@@ -3520,7 +3523,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                             14.0,
                           );
                         },
-                        child: const Icon(Icons.my_location),
+                        child: const Icon(Icons.near_me),
                       ),
                     ),
                 ],
