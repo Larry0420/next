@@ -2612,9 +2612,9 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     final shouldAutoExpand = (widget.autoExpandSeq != null && seq == widget.autoExpandSeq) ||
         (widget.autoExpandStopId != null && stopId == widget.autoExpandStopId);
     
-    //return KeyedSubtree(
-      //key: _stopKeys.putIfAbsent(seq, () => GlobalKey()),
-      return ExpandableStopCard(
+    return KeyedSubtree(
+      key: _stopKeys.putIfAbsent(seq, () => GlobalKey()),
+      child: ExpandableStopCard(
         key: ValueKey('${widget.route}_${_selectedDirection}_${_selectedServiceType}_$seq'),
         seq: seq,
         stopId: stopId,
@@ -2633,8 +2633,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         isNearby: isNearby,
         autoExpand: shouldAutoExpand,
         onJumpToMap: (lat, lng) => _jumpToMapLocation(lat, lng, stopId: stopId),
-      );
-    //);
+      ),
+    );
   }
 
   /// Build OpenStreetMap view showing all route stops
@@ -2648,12 +2648,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         if (snap.connectionState == ConnectionState.waiting) {
           return Column(
             children: [
-              RouteDestinationWidget(
-          route: widget.route,
-          direction: _selectedDirection,
-          serviceType: _selectedServiceType,
-          cachedRouteData: _routeDetails,
-        ),
+              /*RouteDestinationWidget(
+                route: widget.route,
+                direction: _selectedDirection,
+                serviceType: _selectedServiceType,
+                cachedRouteData: _routeDetails,
+              ),*/
               const SizedBox(height: 8),
               const Expanded(
                 child: Center(child: CircularProgressIndicator(year2023: false,)),
@@ -3149,15 +3149,13 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         setState(() {
           _isExpanded = true;
           _autoRefreshEnabled = true;
-          if (widget.isNearby) {
-            _autoEnabledByNearby = true;
-          }
+          if (widget.isNearby) _autoEnabledByNearby = true;
         });
+        // 🆕 Trigger immediate fetch for the specific route
+        _autoRefetchOnExpand(); 
         _startAutoRefreshTimer();
-        Future.delayed(const Duration(milliseconds: 100), scrollIntoView);
       });
     }
-    _startEtaCleanupTimer();
   }
 
   void _startEtaCleanupTimer() {
