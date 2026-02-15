@@ -1,6 +1,7 @@
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:lrt_next_train/ctb_route_status_page.dart';
+import 'package:lrt_next_train/optionalMarquee.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:ui';
@@ -270,7 +271,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     // This prevents the app from trying to use _tabController before it exists.
     if (_isInitializing) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator(year2023: false,)),
+        body: Center(child: CircularProgressIndicator(year2023: true,)),
       );
     }
     
@@ -1021,7 +1022,12 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 2, overflow: TextOverflow.ellipsis),
+                            OptionalMarquee(
+                              text: stopName,
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface),
+                            ),
+
+                            //AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 2, overflow: TextOverflow.ellipsis),
                             if (dest.isNotEmpty) ...[
                               const SizedBox(height: 3),
                               Row(
@@ -1128,6 +1134,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                                   );
                                 }).toList(),
                               ),
+                            /*
                             if (latitude != null && longitude != null) ...[
                               const SizedBox(height: 4),
                               Row(
@@ -1138,6 +1145,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                                 ],
                               ),
                             ],
+                            */
                           ],
                         ),
                       ),

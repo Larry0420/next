@@ -718,7 +718,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
           Consumer<AccessibilityProvider>(
             builder: (context, accessibility, _) => IconButton(
               icon: Icon(
-                _showMapView ? Icons.splitscreen : Icons.map,
+                _showMapView ? Icons.list_rounded : Icons.map_rounded,
                 size: 24 * accessibility.iconScale,
               ),
               tooltip: _showMapView
@@ -749,7 +749,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                       ),
                     )
                   : Icon(
-                      _userPosition != null ? Icons.near_me : Icons.location_searching,
+                      _userPosition != null ? Icons.near_me_rounded : Icons.near_me_disabled_rounded,
                       size: 24 * accessibility.iconScale,
                     ),
                 tooltip: isEnglish ? 'Scroll to nearest stop' : '捲動至最近站點',
@@ -801,7 +801,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
           // 4. Pin Button
           Consumer<AccessibilityProvider>(
             builder: (context, accessibility, _) => IconButton(
-              icon: const Icon(Icons.push_pin_outlined),
+              icon: const Icon(Icons.push_pin_rounded),
               tooltip: lang.pinRoute,
               onPressed: _pinRoute,
             ),
@@ -831,11 +831,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               
               return Padding(
                 // Add bottom padding only when floating bar is enabled
-                padding: EdgeInsets.only(
+                padding: const EdgeInsets.only(
                   left: 12.0, 
                   right: 12.0, 
-                  top: 0.0, 
-                  bottom: devSettings.useFloatingRouteToggles ? 80.0 : 12.0,
                 ),
                 child: showSplitView
                   ? (isLandscape 
@@ -866,9 +864,11 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                             // Map on top (less space on mobile for more list visibility)
                             Expanded(
                               flex: isMobile ? 2 : 1,
-                              child: _buildMapView(),
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 6.0,), // 修正包裹順序
+                                child: _buildMapView(),
+                              ),
                             ),
-                            const SizedBox(height: 8),
                             // List on bottom (more space on mobile)
                             Expanded(
                               flex: isMobile ? 3 : 1,
@@ -890,7 +890,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
 
     /// Build the list view using Slivers for better performance and flexibility
   Widget _buildListView(DeveloperSettingsProvider devSettings) {
-    final bottomPadding = devSettings.useFloatingRouteToggles ? 200.0 : 12.0;
+    final bottomPadding = devSettings.useFloatingRouteToggles ? 250.0 : 12.0;
 
     return CustomScrollView(
       controller: _scrollController,
@@ -918,11 +918,11 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
             hasScrollBody: false,
             child: Center(
               key: const ValueKey('loading'),
-              child: CircularProgressIndicator(
-                strokeWidth: 3.0,
+              child: LinearProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(
                   Theme.of(context).colorScheme.primary,
                 ),
+                year2023: true,
               ),
             ),
           )
@@ -948,10 +948,11 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         else ...[
           // 3. Selectors (Direction/Service Type)
           // Show selectors if directions exist OR service types exist (CTB may have directions but no service types)
-          if ((_directions.isNotEmpty || _serviceTypes.isNotEmpty) && !devSettings.useFloatingRouteToggles)
-            SliverToBoxAdapter(child: _buildSelectorsCard()),
+          //if ((_directions.isNotEmpty || _serviceTypes.isNotEmpty) && !devSettings.useFloatingRouteToggles)
+            //SliverToBoxAdapter(child: _buildSelectorsCard()),
 
           // 4. Combined Data Loading/Error Indicators
+          /*
           if (_combinedLoading)
             SliverToBoxAdapter(
               child: Padding(
@@ -966,6 +967,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 ),
               ),
             ),
+          */
           if (_combinedError != null)
             SliverToBoxAdapter(
               child: Padding(
@@ -978,32 +980,35 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
             ),
 
           // 5. Station List (Sliver Implementation)
-          _buildSliverStationList(bottomPadding),
+          _buildSliverStationList(bottomPadding)
         ],
       ],
     );
   }
 
   /// Helper to build the correct SliverList based on data source (Variant or Cached)
-  Widget _buildSliverStationList(double bottomPadding) {
+  Widget _buildSliverStationList(double bottomPadding,) {
     // A. Priority: Use Variant Stops (Route-Stop API) if available
+    /*
     if (_variantStops != null && _selectedDirection != null && _selectedServiceType != null) {
       return _buildSliverVariantList(_variantStops!, bottomPadding);
     }
+    */
 
     // Variant loading state
+    /*
     if (_variantStopsLoading) {
       return const SliverToBoxAdapter(
         child: Card(
           margin: EdgeInsets.all(12),
           child: Padding(
             padding: EdgeInsets.all(24.0),
-            child: Center(child: CircularProgressIndicator(year2023: false,)),
+            child: Center(child: CircularProgressIndicator(year2023: true,)),
           ),
         ),
       );
     }
-
+    */
     // Variant error state
     if (_variantStopsError != null) {
       return SliverToBoxAdapter(
@@ -1030,7 +1035,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               margin: EdgeInsets.all(12),
               child: Padding(
                 padding: EdgeInsets.all(24.0),
-                child: Center(child: CircularProgressIndicator(year2023: false,)),
+                child: Center(child: LinearProgressIndicator(year2023: true,)),
               ),
             ),
           );
@@ -1149,8 +1154,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                child: Padding(
                  padding: const EdgeInsets.all(24.0),
                  child: Center(
-                   child: CircularProgressIndicator(
-                     valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                   child: LinearProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                      year2023: true,
                    ),
                  ),
                ),
@@ -1298,7 +1304,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
     }
 
     return SliverPadding(
-      padding: EdgeInsets.only(bottom: bottomPadding),
+      padding: EdgeInsets.only(bottom: bottomPadding,),
       sliver: SliverList(
         delegate: SliverChildBuilderDelegate(
           (context, index) {
@@ -1598,6 +1604,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                             direction: _selectedDirection,
                             serviceType: _selectedServiceType,
                             cachedRouteData: _routeDetails,
+                            co: isEnglish ? 'CTB' : '城巴',
                           ),
                           const SizedBox(height: 8),
 
@@ -2727,7 +2734,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         
   
     if (_variantStopsLoading) {
-      return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: false,))));
+      return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: true,))));
     }
     
     if (_variantStopsError != null) {
@@ -2739,7 +2746,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
     return FutureBuilder<List<dynamic>>(
       future: Future.wait([Citybus.buildRouteToStopsMap(), Citybus.buildStopMap()]),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: false,))));
+        if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: true,))));
         if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))));
 
         // Process cached data - handle null data safely
@@ -3144,7 +3151,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               ),*/
               const SizedBox(height: 8),
               const Expanded(
-                child: Center(child: CircularProgressIndicator(year2023: false,)),
+                child: Center(child: CircularProgressIndicator(year2023: true,)),
               ),
             ],
           );
@@ -3157,6 +3164,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                     direction: _selectedDirection,
                     serviceType: _selectedServiceType,
                     cachedRouteData: _routeDetails,
+                    co: isEnglish ? 'CTB' : '城巴',
                   ),
               const SizedBox(height: 8),
               Expanded(
@@ -3175,6 +3183,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 direction: _selectedDirection,
                 serviceType: _selectedServiceType,
                 cachedRouteData: _routeDetails,
+                co: isEnglish ? 'CTB' : '城巴',
               ),
               const SizedBox(height: 8),
               const Expanded(
@@ -3207,6 +3216,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 direction: _selectedDirection,
                 serviceType: _selectedServiceType,
                 cachedRouteData: _routeDetails,
+                co: isEnglish ? 'CityBus' : '城巴',
               ),
               const SizedBox(height: 8),
               Expanded(
@@ -3685,6 +3695,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         // 🆕 Trigger immediate fetch for the specific route
         _autoRefetchOnExpand(); 
         _startAutoRefreshTimer();
+        scrollIntoView();
+        Future.delayed(const Duration(milliseconds: 100), scrollIntoView);
       });
     }
   }
@@ -4109,74 +4121,59 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
   }
 
   Widget _buildStatusSection(ThemeData theme, ColorScheme colorScheme, Color? nearbyTextSecondary) {
-  final statusStyle = theme.textTheme.bodySmall!.copyWith(
-    color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
-    height: 1.2, // Consistent line-height is key for stability
-  );
+    final statusStyle = theme.textTheme.bodySmall!.copyWith(
+      color: widget.isNearby ? nearbyTextSecondary : colorScheme.onSurfaceVariant,
+      height: 1.2,
+    );
 
-   // 取得第一班車的 raw 資料來判斷是否為 null
-  final firstEta = _displayEtas.isNotEmpty ? _displayEtas.first : null;
-  final etaRaw = firstEta != null ? (firstEta['eta'] ?? firstEta['eta_time']) : null;
+    final firstEta = _displayEtas.isNotEmpty ? _displayEtas.first : null;
+    final etaRaw = firstEta != null ? (firstEta['eta'] ?? firstEta['eta_time']) : null;
 
-  // [新增] 計算無 ETA 時的備註
-  String? noEtaRemark;
-  if (firstEta != null && etaRaw == null) {
-      final rmkEn = firstEta['rmk_en']?.toString() ?? firstEta['rmken']?.toString() ?? '';
-      final rmkTc = firstEta['rmk_tc']?.toString() ?? firstEta['rmktc']?.toString() ?? '';
-      final r = widget.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
-      if (r.isNotEmpty) noEtaRemark = r;
-  }
+    String? noEtaRemark;
+    if (firstEta != null && etaRaw == null) {
+        final rmkEn = firstEta['rmk_en']?.toString() ?? firstEta['rmken']?.toString() ?? '';
+        final rmkTc = firstEta['rmk_tc']?.toString() ?? firstEta['rmktc']?.toString() ?? '';
+        final r = widget.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
+        if (r.isNotEmpty) noEtaRemark = r;
+    }
 
-
-  return AnimatedSwitcher(
-    duration: const Duration(milliseconds: 300),
-    switchInCurve: Curves.easeOutCubic,
-    transitionBuilder: (child, animation) => FadeTransition(
-      opacity: animation,
-      child: SizeTransition(sizeFactor: animation, axisAlignment: -1.0, child: child),
-    ),
-    child: _isExpanded 
-      ? (_shouldShowRefreshAnimation 
-          ? Row(
-              key: const ValueKey('loading'),
-              children: [
-                SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, strokeAlign: BorderSide.strokeAlignInside, color: colorScheme.primary)),
-                const SizedBox(width: 8),
-                Text(widget.isEnglish ? 'Loading...' : '更新中...', style: statusStyle.copyWith(color: colorScheme.primary, fontWeight: FontWeight.w600)),
-              ],
-            )
-           : (etaRaw == null
-                  // [修改] 改為 Column 以同時顯示提示文字與備註
-                  ? Column(
-                      key: const ValueKey('empty'),
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                            widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-                            style: statusStyle),
-                        // [新增] 如果有備註則顯示 (例如: 服務暫停)
-                        if (noEtaRemark != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2.0, bottom: 2.0),
-                            child: Text(
-                              noEtaRemark, 
-                              style: statusStyle.copyWith(
-                                color: colorScheme.error, 
-                                fontSize: 11
-                              )
-                            ),
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      switchInCurve: Curves.easeOutCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SizeTransition(sizeFactor: animation, axisAlignment: -1.0, child: child),
+      ),
+      child: _isExpanded 
+        ? (_shouldShowRefreshAnimation 
+            ? Row(
+                key: const ValueKey('loading'),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0, bottom: 8.0, right: 8.0),
+                    child: SizedBox(width: 100, height: 2, child: LinearProgressIndicator(color: colorScheme.primary,),),
+                  ),
+                  Text(widget.isEnglish ? 'Loading...' : '更新中...', style: statusStyle.copyWith(color: colorScheme.primary, fontWeight: FontWeight.w600)),
+                ],
+              )
+            : (etaRaw == null
+                    ? Column(
+                        key: const ValueKey('empty'),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            noEtaRemark ?? (widget.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士'),
+                            style: noEtaRemark != null 
+                              ? statusStyle.copyWith(color: colorScheme.error, fontSize: 11)
+                              : statusStyle
                           ),
-                      ],
-                    )
-                  : Row(key: const ValueKey('etas'), children: _buildEtaItems(theme, colorScheme))))
-      : Text(
-          key: const ValueKey('collapsed'),
-          widget.isEnglish ? 'Hidden' : '班次隱藏',
-          style: statusStyle,
-        ),
-  );
-}
+                        ],
+                      )
+                    : Row(key: const ValueKey('etas'), children: _buildEtaItems(theme, colorScheme))))
+        : const SizedBox.shrink(key: ValueKey('collapsed')),
+    );
+  }
 
 
   @override
@@ -4242,12 +4239,11 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
       child: Card(
         elevation: isActive ? 1 : 0,
         margin: EdgeInsets.zero,
-        color: isActive ? activeSurface : inactiveSurface, 
+        color: isActive ? activeSurface : inactiveSurface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
           side: BorderSide(
-            // REPLACED: Logic moved to currentBorderColor variable
-            color: currentBorderColor, 
+            color: currentBorderColor,
             width: isActive ? 1.5 : 1.0,
           ),
         ),
@@ -4258,37 +4254,32 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
           child: Column(
             children: [
               if (isActive && isNear)
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.fromLTRB(16.0, 2.0, 0.0, 2.0), // left, top, right, bottom
-                              decoration: BoxDecoration(
-                                color: nearbyTextSecondary.withOpacity(0.1),
-                                border: Border(
-                                  bottom: BorderSide(color: nearbyBorderColor, width: 1.5),
-                                ),
-                              ),
-                              child: Text(
-                                widget.isEnglish ? 'Nearby Stop' : '附近站點',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: nearbyTextSecondary,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                textAlign: TextAlign.left,
-                              ),
-                            ),
-
-                          
-
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                  decoration: BoxDecoration(
+                    color: nearbyTextSecondary.withOpacity(0.1),
+                    border: Border(
+                      bottom: BorderSide(color: nearbyBorderColor, width: 1.5),
+                    ),
+                  ),
+                  child: Text(
+                    widget.isEnglish ? 'Nearby Stop' : '附近站點',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: nearbyTextSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               Padding(
-                padding: const EdgeInsets.all(14.0),
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: isActive 
+                        color: isActive
                             ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary)
                             : colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(8),
@@ -4298,26 +4289,19 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 14,
-                          color: isActive 
+                          color: isActive
                               ? (widget.isNearby ? colorScheme.onTertiary : colorScheme.onPrimary)
                               : colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    
-
-                  
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          //const SizedBox(height: 2),
-                          // Animated Status Area
                           _buildStatusSection(theme, colorScheme, nearbyTextSecondary),
-                          
-                          const SizedBox(height: 0), // Tighter grouping for better visual hierarchy
-
+                          //const SizedBox(height: 6),
                           OptionalMarquee(
                             text: widget.displayName.toTitleCase(),
                             style: theme.textTheme.titleMedium?.copyWith(
@@ -4325,32 +4309,26 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                               color: widget.isNearby ? nearbyTextPrimary : colorScheme.onSurface,
                               letterSpacing: -0.2,
                             ) ?? const TextStyle(),
-                          )
-
-
+                          ),
                         ],
                       ),
                     ),
-
-                    // Modernized Animated Icon Button
                     IconButton(
-                      visualDensity: VisualDensity.compact, // Cleaner look inside cards
-                      onPressed: _toggleExpanded, // Use existing toggle logic
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _toggleExpanded,
                       icon: AnimatedRotation(
                         turns: _isExpanded ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 300), // Matched to switcher
-                        curve: Curves.easeInOutBack, // Adds a tiny "spring" to the arrow
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOutBack,
                         child: Icon(
-                          Icons.keyboard_arrow_down, // Sleeker modern chevron
+                          Icons.keyboard_arrow_down,
                           color: colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
-
                   ],
                 ),
               ),
-
               AnimatedSize(
                 duration: const Duration(milliseconds: 280),
                 curve: Curves.easeOutCubic,
@@ -4362,24 +4340,28 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                             top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.2)),
                           ),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
+                            /*
                             TextButton.icon(
                               onPressed: _etaRefreshing ? null : _manualRefetchStopEta,
                               icon: _etaRefreshing
                                   ? SizedBox(
-                                      width: 20,
-                                      height: 20,
+                                      width: 18,
+                                      height: 18,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
                                         valueColor: AlwaysStoppedAnimation(colorScheme.secondary),
                                       ),
                                     )
-                                  : const Icon(Icons.refresh, size: 20),
+                                  : const Icon(Icons.refresh, size: 18),
                               label: Text(widget.isEnglish ? 'Refresh' : '刷新'),
-                              style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
+                              style: TextButton.styleFrom(
+                                foregroundColor: colorScheme.secondary,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              ),
                             ),
                             TextButton.icon(
                               onPressed: () async {
@@ -4388,7 +4370,6 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                   _autoRefreshEnabled = newState;
                                   _autoEnabledByNearby = false;
                                 });
-
                                 if (_isExpanded) {
                                   _startAutoRefreshTimer();
                                   if (!_autoFetchRunning && (widget.stopId?.isNotEmpty ?? false)) {
@@ -4404,19 +4385,23 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                               },
                               icon: Icon(
                                 _autoRefreshEnabled ? Icons.autorenew : Icons.autorenew_outlined,
-                                size: 20,
-                                color: _autoRefreshEnabled ? colorScheme.secondary : null,
+                                size: 18,
                               ),
                               label: Text(widget.isEnglish ? 'Auto' : '自動'),
                               style: TextButton.styleFrom(
-                                foregroundColor: _autoRefreshEnabled ? colorScheme.secondary : colorScheme.onSurfaceVariant
+                                foregroundColor: _autoRefreshEnabled ? colorScheme.secondary : colorScheme.onSurfaceVariant,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               ),
                             ),
+                            */
                             TextButton.icon(
                               onPressed: () => _pinStop(context),
-                              icon: const Icon(Icons.push_pin_outlined, size: 20),
+                              icon: const Icon(Icons.push_pin_rounded, size: 18),
                               label: Text(widget.isEnglish ? 'Pin' : '釘選'),
-                              style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
+                              style: TextButton.styleFrom(
+                                foregroundColor: colorScheme.secondary,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              ),
                             ),
                             if (widget.latitude != null && widget.longitude != null)
                               TextButton.icon(
@@ -4426,9 +4411,12 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                                     double.tryParse(widget.longitude!) ?? 0,
                                   );
                                 },
-                                icon: const Icon(Icons.map_outlined, size: 20),
+                                icon: const Icon(Icons.map_rounded, size: 18),
                                 label: Text(widget.isEnglish ? 'Map' : '地圖'),
-                                style: TextButton.styleFrom(foregroundColor: colorScheme.secondary),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: colorScheme.secondary,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                ),
                               ),
                           ],
                         ),
@@ -4529,7 +4517,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator(year2023: false,)));
+    if (loading) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator(year2023: true,)));
     if (error != null) return Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: $error', style: TextStyle(color: Theme.of(context).colorScheme.error)));
     if (etas == null || etas!.isEmpty) return const Padding(padding: EdgeInsets.all(8.0), child: Text('No ETA data'));
 
@@ -4556,6 +4544,7 @@ class RouteDestinationWidget extends StatefulWidget {
   final String? serviceType;
   /// Optional pre-fetched route data from parent to avoid duplicate API calls
   final Map<String, dynamic>? cachedRouteData;
+  final String? co;
 
   const RouteDestinationWidget({
     super.key,
@@ -4563,6 +4552,7 @@ class RouteDestinationWidget extends StatefulWidget {
     this.direction,
     this.serviceType,
     this.cachedRouteData,
+    this.co,
   });
 
   @override
@@ -4687,7 +4677,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+            filter: ImageFilter.blur(sigmaX: 1.2, sigmaY: 1.2),
             child: Container(
               height: 60,
               decoration: BoxDecoration(
@@ -4785,37 +4775,53 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                   children: [
                     // Route Number Badge
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
+                      padding: const EdgeInsets.fromLTRB(0, 5, 0, 5),
                       child: Row(
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6.0),
-                            child: AutoSizeText(
-                              widget.route,
-                              style: TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              maxLines: 1,
-                            ),
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 6.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      AutoSizeText(
+                                        widget.route,
+                                        style: TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                        maxLines: 1,
+                                      ),
+                                      if (widget.co != null && widget.co!.isNotEmpty)
+                                        Text(
+                                          widget.co!,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w500,
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: dirColor.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  dirIcon,
+                                  color: dirColor,
+                                  size: 20,
+                                ),
+                              )
+                            ]
                           ),
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: dirColor.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              dirIcon,
-                              color: dirColor,
-                              size: 20,
-                            ),
-                          )
-                        ],
-                      ),
                     ),
                     const SizedBox(width: 6),
                     
@@ -4898,6 +4904,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                   ],
                 ),
               ),
+            
             ),
           ),
         ),

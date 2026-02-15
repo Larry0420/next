@@ -447,7 +447,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               alignment: Alignment.bottomCenter, 
               child: Padding(
                 padding: EdgeInsets.only(bottom: 2.0), // Adds 16 pixels of space at the top
-                child: LinearProgressIndicator(year2023: false,),
+                child: LinearProgressIndicator(year2023: true,),
               ),
             )
           : (_error != null
