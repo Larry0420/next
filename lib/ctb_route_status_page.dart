@@ -848,8 +848,8 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                               flex: isMobile ? 2 : 1,
                               child: Padding(
                                 padding: EdgeInsets.only(top: 12.0, bottom: devSettings.useFloatingRouteToggles ? 150.0 : 12.0,), // 修正包裹順序
-                              child: _buildMapView(),
-                            ),
+                                child: _buildMapView(),
+                              ),
                             ),
                             const SizedBox(width: 8),
                             // List on right (more space on mobile for better readability)
@@ -2561,7 +2561,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
             );
           }
         } catch (_) {}
-      }
+        }
     } catch (e) {
       // Silently fail - location is optional
     } finally {
