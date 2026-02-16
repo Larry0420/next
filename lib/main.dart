@@ -29,6 +29,7 @@ import 'kmb/api/kmb.dart';
 import 'kmb/kmb_dialer.dart';
 import 'kmb/kmb_nearby_page.dart';
 import 'kmb/kmb_pinned_page.dart';
+import 'kmb/company_name.dart';
 
 // ========================= Station Grouping (Top-level) =========================
 class _StationGroupInfo {
@@ -766,6 +767,7 @@ class LrtApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RoutesCatalogProvider()..loadFromEmbeddedJson()),
         ChangeNotifierProvider(create: (_) => MtrCatalogProvider()),
         ChangeNotifierProvider(create: (_) => MtrScheduleProvider()),
+        ChangeNotifierProvider(create: (_) => CompanyProvider()), // Add here
       ],
       child: Consumer3<LanguageProvider, ThemeProvider, AccessibilityProvider>(
         builder: (context, lang, theme, accessibility, _) {

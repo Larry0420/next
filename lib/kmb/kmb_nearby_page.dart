@@ -2,6 +2,7 @@ import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'api/kmb.dart';
+import 'api/citybus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:geolocator/geolocator.dart';
@@ -10,7 +11,7 @@ import 'package:provider/provider.dart';
 import '../kmb_route_status_page.dart';
 import '../main.dart' show AccessibilityProvider, LanguageProvider;
 import '../toTitleCase.dart';
-
+import 'company_name.dart';
 
 class KmbNearbyPage extends StatefulWidget {
   const KmbNearbyPage({super.key});
@@ -220,7 +221,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
     
 
-
+    
     
 
       // Use Geolocator to obtain a position
@@ -229,9 +230,16 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
       // O(1) optimization: Build stop map and coordinates list once globally
       if (_globalStopMap == null || _allStopsWithCoords == null || _spatialGrid == null) {
-        final stopMap = await Kmb.buildStopMap();
-        
-        if (stopMap.isEmpty) {
+        // Fetch both stop maps in parallel
+        final stopResults = await Future.wait([
+          Kmb.buildStopMap(),
+          Citybus.buildStopMap(),
+        ]);
+
+        final kmbStops = stopResults[0];
+        final ctbStopsRaw = stopResults[1];
+
+        if (kmbStops.isEmpty && ctbStopsRaw.isEmpty) {
           setState(() {
             _error = langProv?.isEnglish ?? true 
               ? 'No stops data available. Please check your internet connection.' 
@@ -240,14 +248,33 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           });
           return;
         }
-        
-        _globalStopMap = stopMap;
-        
+
+        // Initialize and merge both providers into the unified map
+        final Map<String, Map<String, dynamic>> unifiedMap = {};
+
+        // Process KMB
+        kmbStops.forEach((id, data) {
+          unifiedMap['kmb-$id'] = {
+            ...Map<String, dynamic>.from(data),
+            'co': 'KMB',
+          };
+        });
+
+        // Process Citybus with deep cast
+        ctbStopsRaw.forEach((id, data) {
+          unifiedMap['ctb-$id'] = {
+            ...Map<String, dynamic>.from(data as Map),
+            'co': 'CTB',
+          };
+        });
+
+        _globalStopMap = unifiedMap;
+
         // Pre-compute all stop coordinates once and build spatial grid index
         final List<_StopDistance> allStops = [];
         final Map<String, List<_StopDistance>> grid = {};
         
-        stopMap.forEach((stopId, meta) {
+        unifiedMap.forEach((stopId, meta) {
           try {
             final latRaw = meta['lat'] ?? meta['latitude'];
             final lngRaw = meta['long'] ?? meta['lng'] ?? meta['longitude'];
@@ -323,16 +350,41 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   }
 
   Future<void> _fetchEtasForNearbyStops() async {
-    // Fetch all ETAs in parallel for better performance
     final futures = _nearby.map((stop) async {
       try {
-        final etas = await Kmb.fetchStopEta(stop.stopId);
+        final co = stop.meta['co'];
+        final rawId = stop.stopId.split('-').last; // Remove 'kmb-' or 'ctb-' prefix
+
+        List<Map<String, dynamic>> etas = [];
+        
+        if (co == 'CTB') {
+          // 1. Fetch the list of all routes for this stop from the JSON mapping
+          final routes = await Citybus.getRoutesForStop(rawId);
+          
+          if (routes.isNotEmpty) {
+            // 2. Fetch ETAs for every route in parallel to save time
+            final etaResults = await Future.wait(
+              routes.map((r) => Citybus.fetchEta(rawId, r,))
+            );
+            
+            // 3. Flatten the list of lists into a single unified ETA list
+            etas = etaResults
+                .expand((list) => list)
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
+          }
+        } else {
+          // KMB supports fetching all routes for a stop in a single call
+          etas = await Kmb.fetchStopEta(rawId);
+        }
+        
         return MapEntry(stop.stopId, etas);
-      } catch (_) {
+      } catch (e) {
+        debugPrint('Error fetching ETAs for ${stop.stopId}: $e');
         return MapEntry(stop.stopId, <Map<String, dynamic>>[]);
       }
     }).toList();
-    
+
     final results = await Future.wait(futures);
     
     if (mounted) {
@@ -764,9 +816,9 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                 const Padding(
                   padding: EdgeInsets.only(top: 8.0),
                   child: SizedBox(
-                    height: 14,
-                    width: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    height: 2.5,
+                    width: 100,
+                    child: LinearProgressIndicator(),
                   ),
                 ),
             ],
@@ -917,7 +969,9 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
   void _showStopDetails(BuildContext context, _StopDistance stop, List<Map<String, dynamic>> etas) {
     final langProv = context.read<LanguageProvider>();
-    
+    // 1. Extract the company code from the stop metadata
+    final String? co = stop.meta['co']; 
+
     // Extract stop names (same as _buildStopCard for consistency)
     final nameEn = stop.meta['name_en'] ?? stop.meta['nameen'] ?? '';
     final nameTc = stop.meta['name_tc'] ?? stop.meta['nametc'] ?? '';
@@ -926,12 +980,20 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         : ((nameTc?.toString().isNotEmpty ?? false) ? nameTc.toString() : (nameEn?.toString().isNotEmpty ?? false ? nameEn.toString() : stop.stopId));
     
     // Group ETAs by route
+    // Use a composite key to distinguish directions and variants
     final Map<String, List<Map<String, dynamic>>> etasByRoute = {};
     for (final eta in etas) {
       final route = eta['route']?.toString() ?? '';
+      final dir = eta['dir']?.toString() ?? '';
+      final serviceType = eta['service_type']?.toString() ?? '1';
+      
       if (route.isEmpty) continue;
-      etasByRoute.putIfAbsent(route, () => []).add(eta);
+      
+      // Composite key ensures "968-O-1" and "968-I-1" are separate entries
+      final compositeKey = '$route-$dir-$serviceType';
+      etasByRoute.putIfAbsent(compositeKey, () => []).add(eta);
     }
+
     final distance = stop.distanceMeters;
     
     // 在 showModalBottomSheet 調用處直接使用
@@ -1013,348 +1075,29 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               minChildSize: 0.5,
               maxChildSize: 0.95,
               builder: (context, scrollController) => LiquidGlassLayer(
-                // Define global glass settings for this layer
                 settings: LiquidGlassSettings(
-                  thickness: 19, // Glass refraction depth
-                  blur: 10, // Background blur strength
-                  glassColor: Theme.of(context).colorScheme.surface.withOpacity(0.3), // Semi-transparent tint
-                  lightIntensity: 1.2,
-                  saturation: 1.1,
-                  refractiveIndex: 1.3,
-                ),
-                child: FakeGlass(
-                  // Define the shape with top-rounded corners
-                  shape: LiquidRoundedSuperellipse(
-                    borderRadius: 20, // Matches your original BorderRadius.circular(20)
+                    thickness: 5, 
+                    blur: 5, // Requested: no blur
+                    glassColor: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.3,), // Translucency fix
+                    lightIntensity: 1.4, // Highlights for surface presence
+                    saturation: 1.0,
+                    refractiveIndex: 1.6, // Higher index for clearer "thick glass" refraction
                   ),
-                  child: Column(
-                    children: [
-                      // Drag handle
-                      Container(
-                        margin: const EdgeInsets.only(top: 12, bottom: 8),
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      
-                      // Header
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                langProv.isEnglish 
-                                    ? 'KMB - ${displayName.toTitleCase()}' 
-                                    : '九巴 - ${displayName.toTitleCase()}',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                sortOptionNotifier.dispose();
-                                Navigator.of(context).pop();
-                              },
-                              style: IconButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      // Sort options
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.sort,
-                              size: 16,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: [
-                                    _buildSortChip(
-                                      context: context,
-                                      label: langProv.isEnglish ? 'Time' : '時間',
-                                      icon: Icons.access_time,
-                                      isSelected: sortOption == 0,
-                                      onTap: () => sortOptionNotifier.value = 0,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _buildSortChip(
-                                      context: context,
-                                      label: langProv.isEnglish ? 'Route No.' : '路線編號',
-                                      icon: Icons.numbers,
-                                      isSelected: sortOption == 1,
-                                      onTap: () => sortOptionNotifier.value = 1,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      // Distance info
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.location_on,
-                                  size: 14,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '${langProv.isEnglish ? "Distance" : "距離"} ${_fmtDistance(distance, langProv: langProv)}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      
-                      const Divider(height: 8),
-                      
-                      // Content - ListView with sorted entries
-                      Expanded(
-                        child: sortedEntries.isEmpty
-                            ? Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.access_time, size: 48, color: Colors.grey[400]),
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次',
-                                      style: TextStyle(color: Colors.grey[600], fontSize: 15),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : ListView.builder(
-                                controller: scrollController,
-                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-                                itemCount: sortedEntries.length,
-                                itemBuilder: (context, index) {
-                                    final entry = sortedEntries[index];
-                                    final route = entry.key;
-                                    final routeEtas = entry.value;
-                                    
-                                    // ... 其餘的 ListView.builder 代碼保持不變
-                                    routeEtas.sort((a, b) {
-                                      final etaA = a['eta']?.toString() ?? '';
-                                      final etaB = b['eta']?.toString() ?? '';
-                                      return etaA.compareTo(etaB);
-                                    });
-                                    
-                                    final destEn = routeEtas.first['dest_en'] ?? routeEtas.first['desten'] ?? '';
-                                    final destTc = routeEtas.first['dest_tc'] ?? routeEtas.first['desttc'] ?? '';
-                                    final displayDest = langProv.isEnglish ? destEn.toString().toTitleCase() : (destTc.isNotEmpty ? destTc.toString().toTitleCase() : destEn.toString().toTitleCase());
-                                    final bound = routeEtas.first['dir'] ?? routeEtas.first['bound'] ?? '';
-                                    final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
-                                    final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
-                                    
-                                    return Container(
-                                      margin: const EdgeInsets.only(bottom: 3, top: 6),
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: hasValidEta 
-                                              ? Theme.of(context).colorScheme.primary.withOpacity(0.3)
-                                              : Theme.of(context).colorScheme.outline.withOpacity(0.15),
-                                          width: hasValidEta ? 1.5 : 1,
-                                        ),
-                                      ),
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          onTap: () {
-                                            Navigator.of(context).pop();
-                                            final seq = routeEtas.first['seq']?.toString();
-                                            
-                                            // ✓ 修正 1: 直接使用當前站點物件的 stopId
-                                            // 這樣能保證 ID 與路線資料庫中的 ID 一致，StatusPage 才能正確比對
-                                            final stopIdFromEta = stop.stopId;
-                                            
-                                            // ✓ 修正 2: 處理 Bound 方向格式，只取第一個字元 (O/I)
-                                            String? normalizedBound;
-                                            if (bound != null && bound.toString().isNotEmpty) {
-                                              final b = bound.toString().trim().toUpperCase();
-                                              if (b.isNotEmpty) normalizedBound = b[0]; // 取 'O' 或 'I'
-                                            }
-
-                                            Navigator.of(context).push(MaterialPageRoute(
-                                              builder: (_) => KmbRouteStatusPage(
-                                                route: route,
-                                                bound: normalizedBound, // 傳遞正規化後的方向
-                                                serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
-                                                companyId: null,
-                                                autoExpandSeq: seq,
-                                                autoExpandStopId: stopIdFromEta,
-                                              ),
-                                            ));
-                                          },
-
-
-                                          borderRadius: BorderRadius.circular(12),
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(12),
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                      decoration: BoxDecoration(
-                                                        color: Theme.of(context).colorScheme.primaryContainer,
-                                                        borderRadius: BorderRadius.circular(6),
-                                                      ),
-                                                      child: Text(
-                                                        route,
-                                                        style: TextStyle(
-                                                          fontWeight: FontWeight.bold,
-                                                          fontSize: 14,
-                                                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Expanded(
-                                                      child: Text(
-                                                        langProv.isEnglish ? 'To $displayDest' : '往 $displayDest',
-                                                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                    ),
-                                                    const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 8),
-                                                ...routeEtas.take(3).map((eta) {
-                                                  final etaStr = eta['eta']?.toString() ?? '';
-                                                  final rmkEn = eta['rmk_en'] ?? eta['rmken'] ?? '';
-                                                  final rmkTc = eta['rmk_tc'] ?? eta['rmktc'] ?? '';
-                                                  final rmk = langProv.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
-                                                  
-                                                  String timeDisplay = '—', abs = '';
-                  
-                                                  Color timeColor = Colors.grey;
-                                                  if (etaStr.isNotEmpty) {
-                                                    try {
-                                                      final dt = DateTime.parse(etaStr).toLocal();
-                                                      final now = DateTime.now();
-                                                      final diff = dt.difference(now);
-                                                      if (diff.inMinutes <= 0) {
-                                                        timeDisplay = langProv.isEnglish ? 'Due' : '即將到站';
-                                                        timeColor = Colors.red;
-                                                        abs = DateFormat.Hm().format(dt);
-                                                      } else if (diff.inMinutes <= 5) {
-                                                        timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
-                                                        timeColor = Colors.orange;
-                                                        abs = DateFormat.Hm().format(dt);
-                                                      } else if (diff.inMinutes < 60) {
-                                                        timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
-                                                        timeColor = Colors.green;
-                                                        abs = DateFormat.Hm().format(dt);
-                                                      } else {
-                                                        timeDisplay = DateFormat.Hm().format(dt);
-                                                        timeColor = Colors.blue;
-                                                      }
-                                                    } catch (_) {}
-                                                  }
-                                                  
-                                                  return Padding(
-                                                    padding: const EdgeInsets.only(top: 4),
-                                                    child: Row(
-                                                      children: [
-                                                        Text(
-                                                          abs,
-                                                          style: TextStyle(
-                                                            fontSize: 13,
-                                                            fontWeight: FontWeight.w600,
-                                                            color: timeColor,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 8),
-                                                        Container(
-                                                          width: 4,
-                                                          height: 4,
-                                                          decoration: BoxDecoration(
-                                                            color: timeColor,
-                                                            shape: BoxShape.circle,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 8),
-                                                        Text(
-                                                          timeDisplay,
-                                                          style: TextStyle(
-                                                            fontSize: 13,
-                                                            fontWeight: FontWeight.w600,
-                                                            color: timeColor,
-                                                          ),
-                                                        ),
-                                                        if (rmk.toString().isNotEmpty) ...[
-                                                          const SizedBox(width: 8),
-                                                          Expanded(
-                                                            child: Text(
-                                                              rmk,
-                                                              style: TextStyle(
-                                                                fontSize: 13,
-                                                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                                              ),
-                                                              maxLines: 2,
-                                                              overflow: TextOverflow.ellipsis,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ],
-                                                    ),
-                                                  );
-                                                }),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                              ),
-                        ),
-                    ],
+                useBackdropGroup: true,
+                fake: true,
+                child: LiquidGlass(
+                  shape: const LiquidRoundedSuperellipse(borderRadius: 20),
+                  child: _buildSheetBody(
+                    context, 
+                    langProv, 
+                    sortOptionNotifier, 
+                    displayName, 
+                    sortOption, 
+                    distance, 
+                    sortedEntries, 
+                    scrollController, 
+                    stop,
+                    co,
                   ),
                 ),
               ),
@@ -1482,6 +1225,410 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       ),
     );*/
   }
+  // Rename to _buildSheetBody to avoid conflict with the existing _buildContent list method
+  Widget _buildSheetBody(
+    BuildContext context,
+    LanguageProvider langProv,
+    ValueNotifier<int> sortOptionNotifier,
+    String displayName,
+    int sortOption,
+    double distance,
+    List<MapEntry<String, List<Map<String, dynamic>>>> sortedEntries,
+    ScrollController scrollController,
+    _StopDistance stop,
+    String? co,
+  ) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildDragHandle(context),
+        _buildHeader(context, langProv, sortOptionNotifier, displayName, co),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Distance badge on the left
+              _buildDistanceInfo(context, langProv, distance),
+              // Sort options on the right (ensure _buildSortOptions is wrapped in Flexible/Expanded if needed)
+              Flexible(
+                child: _buildSortOptions(context, langProv, sortOption, sortOptionNotifier),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 8),
+        _buildContent(context, langProv, sortedEntries, scrollController, stop),
+      ],
+    );
+
+  }
+
+
+  // Add these methods to your class:
+  Widget _buildDragHandle(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 12, bottom: 8),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+
+  // Update method signature
+  Widget _buildHeader(
+    BuildContext context,
+    LanguageProvider langProv,
+    ValueNotifier<int> sortOptionNotifier,
+    String displayName,
+    String? co, // Added company code parameter
+  ) {
+    final companyProv = Provider.of<CompanyProvider>(context, listen: false);
+    final coName = companyProv.getName(co, langProv.isEnglish);
+    final coColor = companyProv.getColor(co, context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: coColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: coColor.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    coName,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: coColor == Colors.grey ? Theme.of(context).colorScheme.primary : coColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    displayName.toTitleCase(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () {
+              sortOptionNotifier.dispose();
+              Navigator.of(context).pop();
+            },
+            style: IconButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSortOptions(BuildContext context, LanguageProvider langProv, int sortOption, ValueNotifier<int> sortOptionNotifier) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Icon(
+            Icons.sort,
+            size: 16,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildSortChip(
+                    context: context,
+                    label: langProv.isEnglish ? 'Time' : '時間',
+                    icon: Icons.access_time_rounded,
+                    isSelected: sortOption == 0,
+                    onTap: () => sortOptionNotifier.value = 0,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSortChip(
+                    context: context,
+                    label: langProv.isEnglish ? 'Route No.' : '路線編號',
+                    icon: Icons.numbers_rounded,
+                    isSelected: sortOption == 1,
+                    onTap: () => sortOptionNotifier.value = 1,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDistanceInfo(BuildContext context, LanguageProvider langProv, double distance) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.location_on_rounded,
+                size: 14,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '${langProv.isEnglish ? "Distance" : "距離"} ${_fmtDistance(distance, langProv: langProv)}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(
+    BuildContext context,
+    LanguageProvider langProv,
+    List<MapEntry<String, List<Map<String, dynamic>>>> sortedEntries,
+    ScrollController scrollController,
+    _StopDistance stop,
+  ) {
+    return Expanded(
+      child: sortedEntries.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.access_time_filled_rounded, size: 48, color: Colors.grey[400]),
+                  const SizedBox(height: 12),
+                  Text(
+                    langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 15),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              controller: scrollController,
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+              itemCount: sortedEntries.length,
+              itemBuilder: (context, index) => _buildRouteEtaCard(context, sortedEntries[index], langProv, stop),
+            ),
+    );
+  }
+
+  // 2. Ensure _buildRouteEtaCard is defined inside _KmbNearbyPageState class
+  Widget _buildRouteEtaCard(
+    BuildContext context,
+    MapEntry<String, List<Map<String, dynamic>>> entry,
+    LanguageProvider langProv,
+    _StopDistance stop,
+  ) {
+    
+    final routeKey = entry.key;
+    final routeEtas = entry.value;
+    final route = routeEtas.first['route']?.toString() ?? '';
+
+    routeEtas.sort((a, b) {
+      final etaA = a['eta']?.toString() ?? '';
+      final etaB = b['eta']?.toString() ?? '';
+      return etaA.compareTo(etaB);
+    });
+
+    final destEn = routeEtas.first['dest_en'] ?? '';
+    final destTc = routeEtas.first['dest_tc'] ?? '';
+    final displayDest = langProv.isEnglish 
+      ? destEn.toString().toTitleCase() 
+      : (destTc.isNotEmpty ? destTc : destEn).toString();
+
+    final bound = routeEtas.first['dir'] ?? routeEtas.first['bound'] ?? '';
+    final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
+    final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 3, top: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: hasValidEta
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
+              : Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+          width: hasValidEta ? 1.5 : 1,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            Navigator.of(context).pop();
+            final seq = routeEtas.first['seq']?.toString();
+            final stopIdFromEta = stop.stopId;
+
+            String? normalizedBound;
+            if (bound != null && bound.toString().isNotEmpty) {
+              final b = bound.toString().trim().toUpperCase();
+              if (b.isNotEmpty) normalizedBound = b[0];
+            }
+
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => KmbRouteStatusPage(
+                route: route,
+                bound: normalizedBound,
+                serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
+                companyId: null,
+                autoExpandSeq: seq,
+                autoExpandStopId: stopIdFromEta,
+              ),
+            ));
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _buildRouteBadge(route, bound, context), // Badge color can change based on dir (O/I)
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        langProv.isEnglish ? 'To $displayDest' : '往 $displayDest',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ...routeEtas.take(3).map((eta) {
+                  final etaStr = eta['eta']?.toString() ?? '';
+                  final rmkEn = eta['rmk_en'] ?? eta['rmken'] ?? '';
+                  final rmkTc = eta['rmk_tc'] ?? eta['rmktc'] ?? '';
+                  final rmk = langProv.isEnglish ? rmkEn : (rmkTc.isNotEmpty ? rmkTc : rmkEn);
+
+                  String timeDisplay = '—', abs = '';
+                  Color timeColor = Colors.grey;
+
+                  if (etaStr.isNotEmpty) {
+                    try {
+                      final dt = DateTime.parse(etaStr).toLocal();
+                      final now = DateTime.now();
+                      final diff = dt.difference(now);
+                      if (diff.inMinutes <= 0) {
+                        timeDisplay = langProv.isEnglish ? 'Due' : '即將到站';
+                        timeColor = Colors.red;
+                        abs = DateFormat.Hm().format(dt);
+                      } else if (diff.inMinutes <= 5) {
+                        timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
+                        timeColor = Colors.orange;
+                        abs = DateFormat.Hm().format(dt);
+                      } else if (diff.inMinutes < 60) {
+                        timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
+                        timeColor = Colors.green;
+                        abs = DateFormat.Hm().format(dt);
+                      } else {
+                        timeDisplay = DateFormat.Hm().format(dt);
+                        timeColor = Colors.blue;
+                      }
+                    } catch (_) {}
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      children: [
+                        Text(abs, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: timeColor)),
+                        const SizedBox(width: 8),
+                        Container(width: 4, height: 4, decoration: BoxDecoration(color: timeColor, shape: BoxShape.circle)),
+                        const SizedBox(width: 8),
+                        Text(timeDisplay, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: timeColor)),
+                        if (rmk.toString().isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(rmk, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant), maxLines: 2, overflow: TextOverflow.ellipsis),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRouteBadge(String route, String dir, BuildContext context) {
+    // Determine direction colors (matching existing app logic)
+    Color dirColor = Colors.blue;
+    if (dir.toUpperCase().startsWith('O')) {
+      dirColor = Colors.green;
+    } else if (dir.toUpperCase().startsWith('I')) {
+      dirColor = Colors.orange;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: dirColor.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: dirColor.withValues(alpha: 0.4),
+          width: 1,
+        ),
+      ),
+      child: Text(
+        route,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: dirColor,
+          letterSpacing: -0.2,
+        ),
+      ),
+    );
+  }
+
+
 }
 
 class _StopDistance {
