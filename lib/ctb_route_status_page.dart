@@ -989,14 +989,14 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
   /// Helper to build the correct SliverList based on data source (Variant or Cached)
   Widget _buildSliverStationList(double bottomPadding,) {
     // A. Priority: Use Variant Stops (Route-Stop API) if available
-    /*
+    
     if (_variantStops != null && _selectedDirection != null && _selectedServiceType != null) {
       return _buildSliverVariantList(_variantStops!, bottomPadding);
     }
-    */
+    
 
     // Variant loading state
-    /*
+    
     if (_variantStopsLoading) {
       return const SliverToBoxAdapter(
         child: Card(
@@ -1008,7 +1008,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         ),
       );
     }
-    */
+    
     // Variant error state
     if (_variantStopsError != null) {
       return SliverToBoxAdapter(
@@ -1132,11 +1132,16 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
           }
 
           // Use composite key: bound + seq to handle same seq in different bounds
-          final boundKey = normChar(e['bound'] ?? e['dir'] ?? e['direction']) ?? '';
-          final compositeKey = '${boundKey}_$seq';
+          //final boundKey = normChar(e['bound'] ?? e['dir'] ?? e['direction']) ?? '';
+          //final compositeKey = '${boundKey}_$seq';
+          // Simple deduplication like KMB
+          if (!uniqueStopsMap.containsKey(seq)) {
+            uniqueStopsMap[seq] = e;
+          }
+          /*
           if (!uniqueStopsMap.containsKey(compositeKey)) {
             uniqueStopsMap[compositeKey] = e;
-          }
+          }*/
         }
 
         final stops = uniqueStopsMap.values.toList();
@@ -1215,13 +1220,25 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
           continue; // Skip stops with missing bound when we can't determine it
         }
       }
-
+        /*
       // Use composite key: bound + seq to handle same seq in different bounds
       final effectiveBound = normChar(stop['bound']) ?? '';
       final compositeKey = '${effectiveBound}_$seq';
       if (!uniqueStopsMap.containsKey(compositeKey)) {
         uniqueStopsMap[compositeKey] = stop;
       }
+        */
+      // Use composite key: bound + seq to handle same seq in different bounds
+          //final boundKey = normChar(e['bound'] ?? e['dir'] ?? e['direction']) ?? '';
+          //final compositeKey = '${boundKey}_$seq';
+          // Simple deduplication like KMB
+          if (!uniqueStopsMap.containsKey(seq)) {
+            uniqueStopsMap[seq] = stop;
+          }
+          /*
+          if (!uniqueStopsMap.containsKey(compositeKey)) {
+            uniqueStopsMap[compositeKey] = e;
+          }*/
     }
 
     final sortedStops = uniqueStopsMap.values.toList();

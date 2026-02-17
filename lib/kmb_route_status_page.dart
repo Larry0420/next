@@ -776,12 +776,12 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             hasScrollBody: false,
             child: Center(
               key: const ValueKey('loading'),
-              /*child: LinearProgressIndicator(
+              child: LinearProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(
                   Theme.of(context).colorScheme.primary,
                 ),
                 
-              ),*/
+              ),
             ),
           )
         else if (error != null)

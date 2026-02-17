@@ -1,5 +1,8 @@
+import 'dart:ui';
+
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'dart:async';
 import 'api/kmb.dart';
 import 'api/citybus.dart';
@@ -61,6 +64,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
     return cells;
   }
+
+  final DraggableScrollableController _sheetController = DraggableScrollableController();
 
   @override
   void initState() {
@@ -929,35 +934,42 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final activeColor = colorScheme.primaryContainer;
+    final inactiveColor = colorScheme.surfaceContainerHighest.withOpacity(0.5);
+    final activeContentColor = colorScheme.onPrimaryContainer;
+    final inactiveContentColor = colorScheme.onSurfaceVariant;
+
     return Material(
-      color: isSelected 
-          ? Theme.of(context).colorScheme.primaryContainer 
-          : Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+      color: isSelected ? activeColor : inactiveColor,
       borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias, // Ensures ink splash respects rounded corners
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        // No need for borderRadius here since parent clips
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), // Increased vertical padding for better touch target
           child: Row(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center, // Ensure vertical center alignment
             children: [
               Icon(
                 icon,
-                size: 16,
-                color: isSelected 
-                    ? Theme.of(context).colorScheme.onPrimaryContainer
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                size: 18, // Slightly larger icon for better visibility
+                color: isSelected ? activeContentColor : inactiveContentColor,
               ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  color: isSelected 
-                      ? Theme.of(context).colorScheme.onPrimaryContainer
-                      : Theme.of(context).colorScheme.onSurfaceVariant,
+              const SizedBox(width: 6), // More breathing room between icon and text
+              Flexible( // Prevents overflow if text is long
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13, // Standard readable size
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    color: isSelected ? activeContentColor : inactiveContentColor,
+                    height: 1.2, // Fixes line height to vertically center text with icon
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -967,12 +979,15 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     );
   }
 
+  // Update _showStopDetails to include company info in title
   void _showStopDetails(BuildContext context, _StopDistance stop, List<Map<String, dynamic>> etas) {
     final langProv = context.read<LanguageProvider>();
-    // 1. Extract the company code from the stop metadata
-    final String? co = stop.meta['co']; 
-
-    // Extract stop names (same as _buildStopCard for consistency)
+    final companyProv = context.read<CompanyProvider>();
+    final String? co = stop.meta['co'];
+    
+    final companyName = companyProv.getName(co, langProv.isEnglish);
+    
+    // Extract stop names
     final nameEn = stop.meta['name_en'] ?? stop.meta['nameen'] ?? '';
     final nameTc = stop.meta['name_tc'] ?? stop.meta['nametc'] ?? '';
     final displayName = langProv.isEnglish
@@ -1071,37 +1086,41 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
             final sortedEntries = getSortedEntries();
             
             return DraggableScrollableSheet(
+              controller: _sheetController,
               initialChildSize: 0.8,
               minChildSize: 0.5,
               maxChildSize: 0.95,
-              builder: (context, scrollController) => LiquidGlassLayer(
-                settings: LiquidGlassSettings(
-                  thickness: 20, 
-                  blur: 0, // 設為 0 以獲得完全清晰的折射
-                  glassColor: Colors.white.withValues(alpha: 0.1), // 降低透明度讓底色更純淨
-                  lightIntensity: 1.6, // 稍微拉高，讓「清晰玻璃」邊緣更有光澤
-                  refractiveIndex: 1.45, // 接近真實玻璃 (1.52) 可減少過度扭曲帶來的雜亂感
-                  // 建議加上：
-                  // ambientStrength: 0.3, // 增加環境光，避免玻璃在暗處變黑
-                ),
-                useBackdropGroup: true,
-                fake: true,
-                child: LiquidGlass(
-                  shape: const LiquidRoundedSuperellipse(borderRadius: 20),
-                  child: _buildSheetBody(
-                    context, 
-                    langProv, 
-                    sortOptionNotifier, 
-                    displayName, 
-                    sortOption, 
-                    distance, 
-                    sortedEntries, 
-                    scrollController, 
-                    stop,
-                    co,
+              snap: true,
+              snapAnimationDuration: const Duration(milliseconds: 300),
+              builder: (context, scrollController) {
+                return ExcludeSemantics(
+                  excluding: true,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: _buildSheetBody(
+                          context, 
+                          langProv, 
+                          sortOptionNotifier, 
+                          displayName, 
+                          sortOption, 
+                          distance, 
+                          sortedEntries, 
+                          scrollController, 
+                          stop,
+                          co,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             );
           }
         );
@@ -1226,6 +1245,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       ),
     );*/
   }
+  
   // Rename to _buildSheetBody to avoid conflict with the existing _buildContent list method
   Widget _buildSheetBody(
     BuildContext context,
@@ -1268,16 +1288,19 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
   // Add these methods to your class:
   Widget _buildDragHandle(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(top: 12, bottom: 8),
-      width: 40,
-      height: 4,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(2),
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.only(top: 12, bottom: 8),
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(2),
+        ),
       ),
     );
   }
+
 
   // Update method signature
   Widget _buildHeader(
@@ -1458,7 +1481,6 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     LanguageProvider langProv,
     _StopDistance stop,
   ) {
-    
     final routeKey = entry.key;
     final routeEtas = entry.value;
     final route = routeEtas.first['route']?.toString() ?? '';
@@ -1479,6 +1501,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
     final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
 
+    // DETECT COMPANY: Check 'co' or 'company' field
+    final companyId = routeEtas.first['co']?.toString() ?? 
+                      routeEtas.first['company']?.toString() ?? 
+                      'KMB'; // Default to KMB if not specified
+
     return Container(
       margin: const EdgeInsets.only(bottom: 3, top: 6),
       decoration: BoxDecoration(
@@ -1492,7 +1519,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         ),
       ),
       child: Material(
-        color: Colors.transparent,
+        color: const Color.fromARGB(0, 0, 0, 0),
         child: InkWell(
           onTap: () {
             Navigator.of(context).pop();
@@ -1505,16 +1532,34 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               if (b.isNotEmpty) normalizedBound = b[0];
             }
 
-            Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => KmbRouteStatusPage(
-                route: route,
-                bound: normalizedBound,
-                serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
-                companyId: null,
-                autoExpandSeq: seq,
-                autoExpandStopId: stopIdFromEta,
-              ),
-            ));
+            // ROUTING LOGIC: Navigate to appropriate page based on company
+            final companyUpper = companyId.toUpperCase();
+            
+            if (companyUpper == 'CTB' || companyUpper == 'NWFB') {
+              // Navigate to CTB Route Status Page
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => CtbRouteStatusPage(
+                  route: route,
+                  bound: normalizedBound,
+                  serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
+                  companyId: companyUpper, // Required parameter
+                  autoExpandStopId: stopIdFromEta,
+                  autoExpandSeq: seq,
+                ),
+              ));
+            } else {
+              // Navigate to KMB Route Status Page (default)
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => KmbRouteStatusPage(
+                  route: route,
+                  bound: normalizedBound,
+                  serviceType: serviceType.toString().isNotEmpty ? serviceType.toString() : null,
+                  companyId: null,
+                  autoExpandSeq: seq,
+                  autoExpandStopId: stopIdFromEta,
+                ),
+              ));
+            }
           },
           borderRadius: BorderRadius.circular(12),
           child: Padding(
@@ -1524,7 +1569,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               children: [
                 Row(
                   children: [
-                    _buildRouteBadge(route, bound, context), // Badge color can change based on dir (O/I)
+                    _buildRouteBadge(route, bound, context),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
