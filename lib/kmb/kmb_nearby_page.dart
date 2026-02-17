@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:lrt_next_train/ctb_route_status_page.dart';
+import 'package:lrt_next_train/optionalMarquee.dart';
 import 'dart:async';
 import 'api/kmb.dart';
 import 'api/citybus.dart';
@@ -12,7 +13,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../kmb_route_status_page.dart';
-import '../main.dart' show AccessibilityProvider, LanguageProvider;
+import '../main.dart' show AccessibilityProvider, LanguageProvider, DeveloperSettingsProvider;
 import '../toTitleCase.dart';
 import 'company_name.dart';
 
@@ -498,12 +499,16 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   Widget build(BuildContext context) {
     final langProv = context.watch<LanguageProvider>();
     
+    // ADD THESE TWO LINES to resolve "Undefined name" errors
+    final position = _position; 
+    final nearby = _nearby; 
+
     return Scaffold(
       body: _loading
           ? const Align(
               alignment: Alignment.bottomCenter, 
               child: Padding(
-                padding: EdgeInsets.only(bottom: 2.0), // Adds 16 pixels of space at the top
+                padding: EdgeInsets.only(bottom: 10.0), // Adds 16 pixels of space at the top
                 child: LinearProgressIndicator(),
               ),
             )
@@ -602,28 +607,26 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     ),
 
                     // Location header
+                    // Location header
                     Container(
                       width: double.infinity,
-                      // 1. Reduced Padding (was 16/12)
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface.withOpacity(0.5),
+                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
                         border: Border(
                           bottom: BorderSide(
-                            color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                            color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
                             width: 1,
                           ),
                         ),
                       ),
                       child: Row(
                         children: [
-                          // 2. Reduced Icon Size (was 20)
                           Icon(
-                            Icons.my_location,
+                            Icons.near_me_rounded,
                             size: 16, 
                             color: Theme.of(context).colorScheme.primary,
                           ),
-                          // 3. Reduced Spacing (was 8)
                           const SizedBox(width: 8), 
                           Expanded(
                             child: Column(
@@ -633,22 +636,37 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                                   crossAxisAlignment: CrossAxisAlignment.baseline,
                                   textBaseline: TextBaseline.alphabetic,
                                   children: [
-                                    Text(
-                                      (langProv.isEnglish ? 'Current Location' : '目前位置'),
-                                      // 4. Explicitly smaller font (was labelMedium)
-                                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                        fontWeight: FontWeight.w600, // Added weight for readability at small size
-                                        fontSize: 11, // Force specific size if needed
+                                    Expanded(
+                                      child: Text(
+                                        nearby.isNotEmpty 
+                                          ? (() {
+                                              final s = nearby.first; // Use 1st nearby stop
+                                              final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
+                                              final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
+                                              
+                                              // Your specific display logic from _buildStopCard
+                                              final String displayName = langProv.isEnglish
+                                                  ? ((nameEn.toString().isNotEmpty) ? nameEn.toString() : (nameTc.toString().isNotEmpty ? nameTc.toString() : s.stopId))
+                                                  : ((nameTc.toString().isNotEmpty) ? nameTc.toString() : (nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : s.stopId));
+                                              
+                                              return displayName.toTitleCase();
+                                            })()
+                                          : (langProv.isEnglish ? 'Current Location' : '目前位置'),
+                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 11,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
-                                      '${_position?.latitude.toStringAsFixed(6) ?? '-'}, ${_position?.longitude.toStringAsFixed(6) ?? '-'}',
-                                      // 5. Explicitly smaller font (was labelSmall)
+                                      '${position?.latitude.toStringAsFixed(6) ?? '-'}, ${position?.longitude.toStringAsFixed(6) ?? '-'}',
                                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
-                                        fontSize: 10, // Even smaller for coordinates
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                        fontSize: 10,
                                         fontFeatures: [const FontFeature.tabularFigures()],
                                       ),
                                     ),
@@ -660,7 +678,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                         ],
                       ),
                     ),
-                    
+
+
                     // Stops list
                     Expanded(
                       child: ListView.builder(
@@ -684,14 +703,24 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   Widget _buildStopCard(BuildContext context, int idx, LanguageProvider langProv) {
     final s = _nearby[idx];
     
-    // Extract stop names from metadata
-    // Fields come from API (/v1/transport/kmb/stop) or prebuilt JSON
-    // API returns: name_en, name_tc, lat, long
+    final devSettings = context.watch<DeveloperSettingsProvider>();
+    final showRank = devSettings.showRankBadge; // 假設欄位名稱為 showRankBadge
+    // 獲取主題狀態 (假設你用 Provider)
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 1. Get Company Information
+    final companyProv = context.watch<CompanyProvider>();
+    final String? companyId = s.meta['co'] ?? s.meta['company']; // Extract company code
+    final badgeBgColor = companyProv.getBadgeBgColor(companyId, context);
+    final badgeBorderColor = companyProv.getBadgeBorderColor(companyId, context);
+    final badgeTextColor = companyProv.getBadgeTextColor(companyId, context);
+    final companyName = companyProv.getName(companyId, langProv.isEnglish);
+      // Extract stop names from metadata
     final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
     final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
     final displayName = langProv.isEnglish
-        ? ((nameEn?.toString().isNotEmpty ?? false) ? nameEn.toString() : (nameTc?.toString().isNotEmpty ?? false ? nameTc.toString() : s.stopId))
-        : ((nameTc?.toString().isNotEmpty ?? false) ? nameTc.toString() : (nameEn?.toString().isNotEmpty ?? false ? nameEn.toString().toTitleCase() : s.stopId));
+        ? ((nameEn.toString().isNotEmpty) ? nameEn.toString() : (nameTc.toString().isNotEmpty ? nameTc.toString() : s.stopId))
+        : ((nameTc.toString().isNotEmpty) ? nameTc.toString() : (nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : s.stopId));
     
     // Get ETAs for this stop
     final etas = _stopEtaCache[s.stopId] ?? [];
@@ -706,102 +735,115 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      elevation: 4,
+      // 使用三段色風格優化 Card 邊框
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
+          color: badgeBorderColor.withValues(alpha: 0.3), // 統一使用公司邊框色
           width: 1,
         ),
       ),
       child: InkWell(
         onTap: () => _showStopDetails(context, s, etas),
-        borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(14.0),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Stop header
               Row(
                 children: [
-                  // Rank badge
-                  Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.54),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Center(
-                      child: Text(
-                        '${idx + 1}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  // 2. 序號 Badge 套用三段色
+                  // 條件判斷：只有當開發者設定開啟時才顯示序號
+                  if (showRank) ...[
+                    Container(
+                      width: 28, height: 28,
+                      decoration: BoxDecoration(
+                        color: badgeBgColor,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: badgeBorderColor, width: 1.5),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${idx + 1}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: badgeTextColor,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  
-                  // Stop name and info
+                    const SizedBox(width: 10), // 只有顯示 Badge 時才需要的間距
+                  ],
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        AutoSizeText(
-                          displayName.toTitleCase(),
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            height: 1.2,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        Row(
+                          children: [
+                            // 3. 公司標籤套用三段色 (同 Dialer 一致)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: badgeBgColor,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: badgeBorderColor, width: 0.5),
+                              ),
+                              child: Text(
+                                companyName,
+                                style: TextStyle(
+                                  fontSize: 9, 
+                                  color: badgeTextColor, 
+                                  fontWeight: FontWeight.bold
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: OptionalMarquee(
+                                text: displayName.toTitleCase(),
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: badgeTextColor, // 站名顏色跟隨公司主色
+                                  height: 1.2, // 配合你的 OptionalMarquee 高度檢測
+                                ),
+                                velocity: 50.0, // 列表中建議速度中等
+                                blankSpace: 30.0,
+                                pauseAfterRound: const Duration(seconds: 2),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 3),
                         Row(
                           children: [
-                            Icon(Icons.location_on, size: 11, color: Theme.of(context).colorScheme.primary),
+                            Icon(Icons.location_on, size: 11, color: badgeTextColor),
                             const SizedBox(width: 3),
                             Text(
                               _fmtDistance(s.distanceMeters, langProv: langProv),
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Theme.of(context).colorScheme.onSecondaryContainer.withOpacity(0.7),
+                                color: Theme.of(context).colorScheme.onSecondaryContainer.withValues(alpha: 0.7),
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            //Removed StopID for better visibility
-                            /* Text(
-                              s.stopId,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.grey[500],
-                                fontFamily: 'monospace',
-                              ),
-                            ), */
                           ],
                         ),
                       ],
                     ),
                   ),
-                  
                   Icon(Icons.chevron_right, size: 30, color: Colors.grey[400]),
                 ],
               ),
               
-              // Routes
+              // Routes Section - Routes 部分
               if (etasByRoute.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: etasByRoute.entries.take(8).map((entry) {
+                    // 確保 _buildRouteChip 內部也處理了與 coColor 相關的邏輯 (如有需要)
                     return _buildRouteChip(context, entry.key, entry.value, langProv);
                   }).toList(),
                 ),
@@ -812,7 +854,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     langProv.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
                     style: TextStyle(
                       fontSize: 10,
-                      color: Colors.grey[500],
+                      // 修正：深色模式使用較亮的灰色
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
                       fontStyle: FontStyle.italic,
                     ),
                   ),
@@ -1308,11 +1351,16 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     LanguageProvider langProv,
     ValueNotifier<int> sortOptionNotifier,
     String displayName,
-    String? co, // Added company code parameter
+    String? co, 
   ) {
+    // 1. 獲取 CompanyProvider 資源
     final companyProv = Provider.of<CompanyProvider>(context, listen: false);
-    final coName = companyProv.getName(co, langProv.isEnglish);
-    final coColor = companyProv.getColor(co, context);
+    
+    // 2. 獲取三段色與名稱
+    final companyName = companyProv.getName(co, langProv.isEnglish);
+    final badgeBgColor = companyProv.getBadgeBgColor(co, context);
+    final badgeBorderColor = companyProv.getBadgeBorderColor(co, context);
+    final badgeTextColor = companyProv.getBadgeTextColor(co, context);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1321,38 +1369,51 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           Expanded(
             child: Row(
               children: [
+                // 3. 套用三段色風格的公司標籤
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: coColor.withValues(alpha: 0.15),
+                    color: badgeBgColor, // 淡色背景
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: coColor.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: badgeBorderColor, // 中深色邊框
+                      width: 1,
+                    ),
                   ),
                   child: Text(
-                    coName,
+                    companyName,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: coColor == Colors.grey ? Theme.of(context).colorScheme.primary : coColor,
+                      color: badgeTextColor, // 最深色文字
                     ),
                   ),
                 ),
                 const SizedBox(width: 10),
+                
+                // 車站名稱
                 Expanded(
-                  child: Text(
-                    displayName.toTitleCase(),
+                  child: OptionalMarquee(
+                    text: displayName.toTitleCase(),
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 18,
                       color: Theme.of(context).colorScheme.onSurface,
+                      // 建議高度設為 1.2 至 1.4，配合 OptionalMarquee 內部邏輯
+                      height: 1.2, 
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    // 參數調整：
+                    velocity: 100.0, // Header 建議速度慢啲 (40 比較舒服)
+                    blankSpace: 50.0, // 滾動完之後留多啲位先再出
+                    pauseAfterRound: const Duration(seconds: 3), // 睇完一輪停 3 秒
                   ),
                 ),
+
               ],
             ),
           ),
 
+          // 關閉按鈕
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () {

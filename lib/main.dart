@@ -1868,7 +1868,8 @@ class ThemeProvider extends ChangeNotifier {
   static const String _showKmbInNavKey = 'show_kmb_in_nav';
   static const String _showSubNavKey = 'show_sub_nav';
   static const String _useFloatingRouteTogglesKey = 'use_floating_route_toggles';
-    
+    static const String _showRankBadgeKey = 'use_show_rank_badge';
+
     bool _hideStationId = false;
     bool _showGridDebug = false;
     bool _showCacheStatus = false; // Default to hidden
@@ -1877,6 +1878,7 @@ class ThemeProvider extends ChangeNotifier {
   bool _showKmbInNav = true; // Default to visible
   bool _showSubNav = true; // Default to visible
   bool _useFloatingRouteToggles = true; // Default to new floating UI
+  bool _showRankBadge = true;
     SharedPreferences? _prefs;
 
     bool get hideStationId => _hideStationId;
@@ -1888,6 +1890,8 @@ class ThemeProvider extends ChangeNotifier {
   bool get showSubNav => _showSubNav;
   bool get useFloatingRouteToggles => _useFloatingRouteToggles;
 
+  bool get showRankBadge => _showRankBadge;
+
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
       _hideStationId = _prefs!.getBool(_hideStationIdKey) ?? false;
@@ -1898,8 +1902,17 @@ class ThemeProvider extends ChangeNotifier {
       _showKmbInNav = _prefs!.getBool(_showKmbInNavKey) ?? true;
       _showSubNav = _prefs!.getBool(_showSubNavKey) ?? true;
       _useFloatingRouteToggles = _prefs!.getBool(_useFloatingRouteTogglesKey) ?? true;
+      _showRankBadge = _prefs!.getBool(_showRankBadgeKey) ?? true;
       notifyListeners();
     }
+
+    Future<void> setShowRankBadge(bool show) async {
+      _showRankBadge = show;
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool(_showRankBadgeKey, show);
+      notifyListeners();
+    }
+
 
     Future<void> setHideStationId(bool hide) async {
       _hideStationId = hide;
@@ -8784,7 +8797,7 @@ class _SettingsPage extends StatelessWidget {
         ),
         
         const SizedBox(height: UIConstants.spacingXS),
-        
+
         // Show Grid Debug Label setting
         Consumer<DeveloperSettingsProvider>(
           builder: (context, devSettings, _) => _buildCompactCard(
@@ -8798,6 +8811,26 @@ class _SettingsPage extends StatelessWidget {
               value: devSettings.showGridDebug,
               onChanged: (value) {
                 devSettings.setShowGridDebug(value);
+              },
+            ),
+          ),
+        ),
+
+        const SizedBox(height: UIConstants.spacingXS),
+
+        // Show Grid Debug Label setting
+        Consumer<DeveloperSettingsProvider>(
+          builder: (context, devSettings, _) => _buildCompactCard(
+            context,
+            icon: Icons.grid_3x3,
+            title: lang.isEnglish ? 'Show Index Info' : '顯示序列',
+            subtitle: devSettings.showRankBadge 
+                ? (lang.isEnglish ? 'Index info is visible' : '序列顯示')
+                : (lang.isEnglish ? 'Index info is hidden' : '序列隱藏'),
+            trailing: Switch(
+              value: devSettings.showRankBadge,
+              onChanged: (value) {
+                devSettings.setShowRankBadge(value);
               },
             ),
           ),

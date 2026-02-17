@@ -1566,13 +1566,14 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
       builder: (context, scrollController) => ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         child: FakeGlass(  // ✅ 使用 FakeGlass 而非 LiquidGlass
-          shape: LiquidRoundedSuperellipse(borderRadius: 20),
+          shape: const LiquidRoundedSuperellipse(borderRadius: 20),
           settings: LiquidGlassSettings(
-            blur: 10.0, 
-            thickness: 19,                                             // ✅ 提高模糊
+            blur: 2.0, 
+            thickness: 2.0,                                             // ✅ 提高模糊
             glassColor: theme.colorScheme.surface.withOpacity(0.15), // ✅ 降至 0.15
             lightIntensity: 1.2,
             saturation: 1.1,
+            lightAngle: 0.0,
             refractiveIndex: 1.3,
           ),
           child: Container(

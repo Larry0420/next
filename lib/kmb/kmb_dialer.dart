@@ -2,6 +2,7 @@ import 'dart:io'; // For SocketException
 import 'dart:async'; // For TimeoutException
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:lrt_next_train/kmb/company_name.dart';
 import 'package:provider/provider.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
@@ -616,24 +617,14 @@ class _KmbDialerState extends State<KmbDialer> {
         }
       }
 
-      // ✅ FIX: Use a helper for colors
-      Color badgeBgColor;
-      Color badgeBorderColor;
-      Color badgeTextColor;
+      // 獲取 Provider
+      final companyProv = context.watch<CompanyProvider>();
+      
+      // 直接取得三段色 (取代原本的 if-else 邏輯)
+      final badgeBgColor = companyProv.getBadgeBgColor(companyId, context);
+      final badgeBorderColor = companyProv.getBadgeBorderColor(companyId, context);
+      final badgeTextColor = companyProv.getBadgeTextColor(companyId, context);
 
-      if (companyId == 'ctb') {
-        badgeBgColor = Colors.amber.shade100;
-        badgeBorderColor = Colors.amber.shade700;
-        badgeTextColor = Colors.brown.shade800;
-      } else if (companyId == 'nlb') {
-        badgeBgColor = Colors.lightGreen.shade100;
-        badgeBorderColor = Colors.lightGreen.shade700;
-        badgeTextColor = Colors.green.shade900;
-      } else {
-        badgeBgColor = Colors.red.shade100;
-        badgeBorderColor = Colors.red.shade700;
-        badgeTextColor = Colors.red.shade900;
-      }
 
       tiles.add(
         ListTile(
