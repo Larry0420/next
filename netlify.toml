@@ -1,20 +1,16 @@
+# Netlify configuration for Flutter web deployment
 [build]
-  command = "bash -c 'if [ -d flutter ]; then cd flutter && git fetch && git checkout stable && git pull && cd ..; else git clone https://github.com -b stable; fi; ./flutter/bin/flutter config --enable-web; ./flutter/bin/flutter build web --wasm --no-tree-shake-icons --source-maps --release --web-renderer skwasm'"
+  command = "bash -c 'if [ -d flutter ]; then cd flutter; git fetch; git checkout stable; git pull; cd ..; else git clone https://github.com/flutter/flutter.git -b stable; fi; flutter/bin/flutter clean; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --wasm --no-tree-shake-icons --source-maps'"
   publish = "build/web"
 
-# 啟用 Cross-Origin 隔離以提升 WASM 與 Shader 渲染效能
-[[headers]]
-  for = "/*"
-  [headers.values]
-    Cross-Origin-Opener-Policy = "same-origin"
-    Cross-Origin-Embedder-Policy = "credentialless"
-
+# WASM MIME type 支援（重要！）
 [[headers]]
   for = "/*.wasm"
   [headers.values]
     Content-Type = "application/wasm"
     Cache-Control = "public, max-age=31536000, immutable"
 
+# Cache-busting headers for JavaScript and assets
 [[headers]]
   for = "/*.js"
   [headers.values]
@@ -35,11 +31,7 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
+# Force HTTPS
 [[redirects]]
   from = "http://*"
   to = "https://:splat"
