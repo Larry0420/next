@@ -281,7 +281,7 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
 
   Widget _buildBody(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(year2023: true,));
+      return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
       return Center(child: Text('Error: $_error'));
@@ -880,7 +880,7 @@ class _NlbStopCardState extends State<NlbStopCard> {
     if (_loading) {
       return const Padding(
         padding: EdgeInsets.all(16),
-        child: Center(child: CircularProgressIndicator(year2023: true,)),
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 

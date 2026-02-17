@@ -922,7 +922,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 valueColor: AlwaysStoppedAnimation<Color>(
                   Theme.of(context).colorScheme.primary,
                 ),
-                year2023: true,
+                
               ),
             ),
           )
@@ -1003,7 +1003,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
           margin: EdgeInsets.all(12),
           child: Padding(
             padding: EdgeInsets.all(24.0),
-            child: Center(child: CircularProgressIndicator(year2023: true,)),
+            child: Center(child: CircularProgressIndicator()),
           ),
         ),
       );
@@ -1035,7 +1035,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               margin: EdgeInsets.all(12),
               child: Padding(
                 padding: EdgeInsets.all(24.0),
-                child: Center(child: LinearProgressIndicator(year2023: true,)),
+                child: Center(child: LinearProgressIndicator()),
               ),
             ),
           );
@@ -1156,7 +1156,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                  child: Center(
                    child: LinearProgressIndicator(
                       valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
-                      year2023: true,
+                      
                    ),
                  ),
                ),
@@ -2734,7 +2734,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         
   
     if (_variantStopsLoading) {
-      return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: true,))));
+      return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
     }
     
     if (_variantStopsError != null) {
@@ -2746,7 +2746,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
     return FutureBuilder<List<dynamic>>(
       future: Future.wait([Citybus.buildRouteToStopsMap(), Citybus.buildStopMap()]),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: true,))));
+        if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
         if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))));
 
         // Process cached data - handle null data safely
@@ -3151,7 +3151,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               ),*/
               const SizedBox(height: 8),
               const Expanded(
-                child: Center(child: CircularProgressIndicator(year2023: true,)),
+                child: Center(child: CircularProgressIndicator()),
               ),
             ],
           );
@@ -4517,7 +4517,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator(year2023: true,)));
+    if (loading) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator()));
     if (error != null) return Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: $error', style: TextStyle(color: Theme.of(context).colorScheme.error)));
     if (etas == null || etas!.isEmpty) return const Padding(padding: EdgeInsets.all(8.0), child: Text('No ETA data'));
 

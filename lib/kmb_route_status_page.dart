@@ -780,7 +780,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 valueColor: AlwaysStoppedAnimation<Color>(
                   Theme.of(context).colorScheme.primary,
                 ),
-                year2023: true,
+                
               ),*/
             ),
           )
@@ -854,7 +854,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
           margin: EdgeInsets.all(12),
           child: Padding(
             padding: EdgeInsets.all(24.0),
-            child: Center(child: LinearProgressIndicator(year2023: true,)),
+            child: Center(child: LinearProgressIndicator()),
           ),
         ),
       );
@@ -886,7 +886,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               margin: EdgeInsets.all(12),
               child: Padding(
                 padding: EdgeInsets.all(24.0),
-                child: Center(child: LinearProgressIndicator(year2023: true,)),
+                child: Center(child: LinearProgressIndicator()),
               ),
             ),
           );
@@ -2286,7 +2286,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         
   
     if (_variantStopsLoading) {
-      return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: LinearProgressIndicator(year2023: true,))));
+      return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: LinearProgressIndicator())));
     }
     
     if (_variantStopsError != null) {
@@ -2298,7 +2298,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     return FutureBuilder<List<dynamic>>(
       future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator(year2023: true,))));
+        if (snap.connectionState == ConnectionState.waiting) return const Card(child: Padding(padding: EdgeInsets.all(12.0), child: Center(child: CircularProgressIndicator())));
         if (snap.hasError) return Card(child: Padding(padding: const EdgeInsets.all(12.0), child: Text('Error loading maps: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error))));
 
         final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
@@ -2655,7 +2655,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
               ),
               const SizedBox(height: 8),
               const Expanded(
-                child: Center(child: CircularProgressIndicator(year2023: true,)),
+                child: Center(child: CircularProgressIndicator()),
               ),
             ],
           );
@@ -3949,7 +3949,7 @@ class _StopEtaTileState extends State<StopEtaTile> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: LinearProgressIndicator(year2023: true,)));
+    if (loading) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: LinearProgressIndicator()));
     if (error != null) return Padding(padding: const EdgeInsets.all(8.0), child: Text('Error: $error', style: TextStyle(color: Theme.of(context).colorScheme.error)));
     if (etas == null || etas!.isEmpty) return const Padding(padding: EdgeInsets.all(8.0), child: Text('No ETA data'));
 

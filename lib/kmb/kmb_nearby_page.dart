@@ -499,7 +499,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               alignment: Alignment.bottomCenter, 
               child: Padding(
                 padding: EdgeInsets.only(bottom: 2.0), // Adds 16 pixels of space at the top
-                child: LinearProgressIndicator(year2023: true,),
+                child: LinearProgressIndicator(),
               ),
             )
           : (_error != null
@@ -1076,13 +1076,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               maxChildSize: 0.95,
               builder: (context, scrollController) => LiquidGlassLayer(
                 settings: LiquidGlassSettings(
-                    thickness: 5, 
-                    blur: 5, // Requested: no blur
-                    glassColor: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.3,), // Translucency fix
-                    lightIntensity: 1.4, // Highlights for surface presence
-                    saturation: 1.0,
-                    refractiveIndex: 1.6, // Higher index for clearer "thick glass" refraction
-                  ),
+                  thickness: 20, 
+                  blur: 0, // 設為 0 以獲得完全清晰的折射
+                  glassColor: Colors.white.withValues(alpha: 0.1), // 降低透明度讓底色更純淨
+                  lightIntensity: 1.6, // 稍微拉高，讓「清晰玻璃」邊緣更有光澤
+                  refractiveIndex: 1.45, // 接近真實玻璃 (1.52) 可減少過度扭曲帶來的雜亂感
+                  // 建議加上：
+                  // ambientStrength: 0.3, // 增加環境光，避免玻璃在暗處變黑
+                ),
                 useBackdropGroup: true,
                 fake: true,
                 child: LiquidGlass(

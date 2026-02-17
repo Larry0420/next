@@ -2185,7 +2185,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
               alignment: Alignment.bottomCenter, 
               child: Padding(
                 padding: EdgeInsets.only(bottom: 1.0), // Adds 16 pixels of space at the top
-                child: LinearProgressIndicator(year2023: true,),
+                child: LinearProgressIndicator(),
               ),
             );
     }

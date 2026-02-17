@@ -1,28 +1,25 @@
-# Netlify configuration for Flutter web deployment
 [build]
-  command = "bash -c 'if [ -d flutter ]; then cd flutter; git fetch; git checkout stable; git pull; cd ..; else git clone https://github.com/flutter/flutter.git -b stable; fi; flutter/bin/flutter clean; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --wasm --no-tree-shake-icons --source-maps'"
+  # 修正 Git 網址並確保環境變數生效
+  command = "bash -c 'if [ -d flutter ]; then cd flutter && git fetch && git checkout stable && git pull && cd ..; else git clone https://github.com -b stable; fi; export PATH=\"$PATH:$(pwd)/flutter/bin\"; flutter config --enable-web; flutter clean; flutter pub get; flutter build web --wasm --release --no-tree-shake-icons --source-maps --pwa-strategy offline-first --web-renderer skwasm'"
   publish = "build/web"
 
-# WASM MIME type 支援（重要！）
+# 1. 核心 WASM 支援與效能優化 (SkWasm 必備)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # 啟用瀏覽器多執行緒與共享記憶體以支援玻璃特效流暢度
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "credentialless"
+
 [[headers]]
   for = "/*.wasm"
   [headers.values]
     Content-Type = "application/wasm"
     Cache-Control = "public, max-age=31536000, immutable"
 
-# Cache-busting headers for JavaScript and assets
+# 2. 資源快取管理 (與原本配置相同)
 [[headers]]
   for = "/*.js"
-  [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
-
-[[headers]]
-  for = "/main.dart.js"
-  [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
-
-[[headers]]
-  for = "/flutter_service_worker.js"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
@@ -31,7 +28,13 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
-# Force HTTPS
+# 3. 處理 SPA 路由 (避免重新整理時 404)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# 4. 強制 HTTPS
 [[redirects]]
   from = "http://*"
   to = "https://:splat"

@@ -271,7 +271,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     // This prevents the app from trying to use _tabController before it exists.
     if (_isInitializing) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator(year2023: true,)),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
     

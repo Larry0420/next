@@ -4271,7 +4271,7 @@ class _ScheduleBody extends StatelessWidget {
 
     Widget content;
     if (loading) {
-      content = const Center(child: CircularProgressIndicator(year2023: true,));
+      content = const Center(child: CircularProgressIndicator());
     } else if (error != null) {
       content = _ErrorView(error: error!, onRetry: onRefresh, isOffline: connectivity.isOffline);
     } else if (data == null || data!.platforms.isEmpty) {
@@ -5536,7 +5536,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
             valueColor: AlwaysStoppedAnimation<Color>(
               Theme.of(context).colorScheme.primary,
             ),
-            year2023: true,
+            
           ),
         ),
         if (_unmatched.isNotEmpty)
@@ -12034,7 +12034,7 @@ class _KmbPageState extends State<KmbPage> with SingleTickerProviderStateMixin {
     
     if (_isLoading) {
        // Return a skeleton or loading state
-       return const Scaffold(body: Center(child: CircularProgressIndicator(year2023: true,)));
+       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
