@@ -32,12 +32,14 @@ class KmbPinnedPage extends StatefulWidget {
 class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProviderStateMixin {
   static const String _pinnedTabKey = 'kmb_pinned_tab_index';
 
-  late TabController _tabController;
+  TabController? _tabController;
   List<Map<String, dynamic>> _pinnedRoutes = [];
   List<Map<String, dynamic>> _pinnedStops = [];
   List<Map<String, dynamic>> _historyRoutes = [];
   bool _loading = true;
   bool _isInitializing = true; // 新增
+  // Add field
+  int _innerTabIndex = 0; 
   
   @override
   void initState() {
@@ -49,31 +51,34 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
   Future<void> _loadSavedTabIndex() async {
     final prefs = await SharedPreferences.getInstance();
     final savedIndex = (prefs.getInt(_pinnedTabKey) ?? 0).clamp(0, 2);
-    
+
     if (mounted) {
+      final controller = TabController(length: 3, vsync: this, initialIndex: savedIndex);
+      controller.addListener(_saveTabIndex);
       setState(() {
-        _tabController = TabController(length: 3, vsync: this, initialIndex: savedIndex);
-        _tabController.addListener(_saveTabIndex);
+        _tabController = controller;
         _isInitializing = false;
       });
       _loadData();
     }
+    
   }
 
-  // 新增方法
+
+
+  // _saveTabIndex uses _tabController! without null check
   Future<void> _saveTabIndex() async {
-    if (!_tabController.indexIsChanging) {
+    if (!_tabController!.indexIsChanging) { // add !
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_pinnedTabKey, _tabController.index);
+      await prefs.setInt(_pinnedTabKey, _tabController!.index); // add !
     }
   }
 
+  // dispose is fine but simplify:
   @override
   void dispose() {
-    if (!_isInitializing) {
-      _tabController.removeListener(_saveTabIndex);
-      _tabController.dispose();
-    }
+    _tabController?.removeListener(_saveTabIndex);
+    _tabController?.dispose();
     super.dispose();
   }
 
@@ -266,8 +271,12 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     }
   }
 
+  // Add to class fields
+  static const tabIcons = [Icons.push_pin, Icons.location_on, Icons.history];
+
   @override
   Widget build(BuildContext context) {
+    final lang = context.watch<LanguageProvider>();
     // 1. Add this check! 
     // If we are still initializing the controller, show a loading spinner.
     // This prevents the app from trying to use _tabController before it exists.
@@ -277,92 +286,128 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
       );
     }
     
+    final tabLabels = [lang.pinnedRoutes, lang.isEnglish ? 'Stops' : '站點', lang.history];
+
     
-    final lang = context.watch<LanguageProvider>();
     return Scaffold(
       body: Stack(
         children: [
-          // 1. 底層內容 (背景)
+          // In KmbPinnedPage build(), replace:
           Positioned.fill(
-            child: _loading
-                ? const Center(child: LinearProgressIndicator())
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildPinnedTab(lang),
-                      _buildPinnedStopsTab(lang),
-                      _buildHistoryTab(lang),
-                    ],
-                  ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: _loading
+                  ? const Center(
+                      key: ValueKey('loading'),
+                      child: CircularProgressIndicator.adaptive(),
+                    )
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: (n) => n.metrics.axis == Axis.horizontal,
+                      child: TabBarView(
+                        key: const ValueKey('content'),
+                        controller: _tabController,
+                        physics: const NeverScrollableScrollPhysics(), // tap-only inner tabs
+                        children: [
+                          _buildPinnedTab(lang),
+                          _buildPinnedStopsTab(lang),
+                          _buildHistoryTab(lang),
+                        ],
+                      ),
+                    ),
+            ),
           ),
 
-          // 2. 上層 Liquid Glass 效果
           Positioned(
             left: 0,
             right: 0,
             bottom: 0,
             child: SafeArea(
-              top: true,
+              top: false,
               bottom: false,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
-                  12, 
-                  8, 
-                  12, 
-                  MediaQuery.of(context).padding.bottom + 12
+                  12, 8, 12,
+                  MediaQuery.of(context).padding.bottom + 12,
                 ),
-                
-                // --- 替換開始 ---
-                // 使用 LiquidGlassLayer 包裹 LiquidGlass
                 child: LiquidGlassLayer(
                   settings: LiquidGlassSettings(
-                    thickness: 20, // 玻璃厚度/折射強度 (取代 blur 效果)
-                    blur: 10,      // 背景模糊程度
-                    glassColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                    // 你可以調整這些參數來匹配原本的邊框/光影
+                    thickness: 50,
+                    blur: 10,
+                    glassColor: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest
+                        .withValues(alpha: 0.5),
                     lightIntensity: 0.1,
+                    lightAngle: 45,
                   ),
                   child: LiquidGlass(
-                    // 使用 LiquidRoundedSuperellipse 取代 BorderRadius.circular(50)
-                    // 這會產生更滑順的 "Squircle" 形狀，更像 iOS 風格
                     shape: LiquidRoundedSuperellipse(borderRadius: 50),
-                    
-                    // 如果需要原本的邊框線，LiquidGlass 本身有 outlineIntensity
-                    // 但如果需要完全自定義邊框，可能需要疊加一個 Container
-                    // 2. 加入 Material 層來控制水波紋 (Splash) 的邊界
                     child: Material(
-                      color: Colors.transparent, // 保持透明，讓下方玻璃效果透出來
-                      
-                      // 關鍵：這裡必須設定與 LiquidGlass 相同的形狀
+                      color: Colors.transparent,
                       shape: LiquidRoundedSuperellipse(borderRadius: 50),
-                      
-                      // 關鍵：開啟裁切，這會把水波紋限制在形狀內
-                      clipBehavior: Clip.antiAlias, 
-
-                    child: TabBar(
-                      controller: _tabController,
-                       // 使用 ShapeDecoration 來支援非標準圓角 (Squircle)
-                      indicator: ShapeDecoration(
-                        // 關鍵：這裡必須使用與外層 LiquidGlass 完全相同的形狀和參數
-                        shape: LiquidRoundedSuperellipse(borderRadius: 50), 
-                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6),
+                      clipBehavior: Clip.antiAlias,
+                        child: _tabController == null
+                        ? const SizedBox.shrink()
+                        : AnimatedBuilder(
+                            animation: _tabController!.animation!,
+                            builder: (context, _) {
+                              final animValue = _tabController!.animation!.value;
+                              return Row(
+                                children: List.generate(tabIcons.length, (i) {
+                                  final selectedAmount = (1.0 - (animValue - i).abs()).clamp(0.0, 1.0);
+                                  return Expanded(
+                                    child: InkWell(
+                                      customBorder: LiquidRoundedSuperellipse(borderRadius: 50),
+                                      onTap: () => _tabController!.animateTo(i),
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      margin: const EdgeInsets.all(4),
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      decoration: ShapeDecoration(
+                                        shape: LiquidRoundedSuperellipse(borderRadius: 50),
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primaryContainer
+                                            .withValues(alpha: 0.6 * selectedAmount),
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            tabIcons[i],
+                                            size: 20,
+                                            color: Color.lerp(
+                                              Theme.of(context).colorScheme.onSurfaceVariant,
+                                              Theme.of(context).colorScheme.onPrimaryContainer,
+                                              selectedAmount,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            tabLabels[i],
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Color.lerp(
+                                                Theme.of(context).colorScheme.onSurfaceVariant,
+                                                Theme.of(context).colorScheme.onPrimaryContainer,
+                                                selectedAmount,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                            );
+                          },
+                        ),
                       ),
-                      indicatorSize: TabBarIndicatorSize.tab,
-                      indicatorPadding: const EdgeInsets.all(4),
-                      labelColor: Theme.of(context).colorScheme.onPrimaryContainer,
-                      unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                      dividerColor: Colors.transparent,
-                      tabs: [
-                        Tab(icon: const Icon(Icons.push_pin, size: 20), text: lang.pinnedRoutes, height: 52),
-                        Tab(icon: const Icon(Icons.location_on, size: 20), text: lang.isEnglish ? 'Stops' : '站點', height: 52),
-                        Tab(icon: const Icon(Icons.history, size: 20), text: lang.history, height: 52),
-                      ],
-                    ),
-                    ),
+
+                    
                   ),
                 ),
-                // --- 替換結束 ---
-                
               ),
             ),
           ),

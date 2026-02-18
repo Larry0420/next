@@ -47,8 +47,8 @@ const _stationGroups = [
 
   // Yuen Long (Zone 4 & 5)
   _StationGroupInfo('元朗', 'Yuen Long', {560, 570, 580, 590, 600}),
-  _StationGroupInfo('屏山', 'Ping Shan', {400, 425}),
-  _StationGroupInfo('洪水橋', 'Hung Shui Kiu', {370, 380, 390}),
+  _StationGroupInfo('屏山', 'Ping Shan', {400, 425, 390}),
+  _StationGroupInfo('洪水橋', 'Hung Shui Kiu', {370, 380}),
 
   // Tuen Mun (Zone 1, 2, & 3)
   _StationGroupInfo('屯門(碼頭/南)', 'Tuen Mun (S)', {1, 10, 15, 20, 30, 40, 50, 920}),
@@ -2214,7 +2214,7 @@ class LanguageProvider extends ChangeNotifier {
   String get pinRoute => _isEnglish ? 'Pin route' : '固定路線';
   String get routePinned => _isEnglish ? 'Route pinned' : '已固定路線';
   String get type => _isEnglish ? 'Special Service' : '特別班次';
-  String get kmb => _isEnglish ? 'KMB' : '巴士'; // KMB is a brand name, same in both languages
+  String get bus => _isEnglish ? 'Bus' : '巴士'; // KMB is a brand name, same in both languages
   
   // New additions for consistency
   String get showListOnly => isEnglish ? 'Show list only' : '僅顯示列表';
@@ -4056,8 +4056,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                       Consumer<AccessibilityProvider>(
                         builder: (context, accessibility, _) => NavigationDestination(
                           icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
-                          label: lang.kmb,
-                          tooltip: lang.kmb,
+                          label: lang.bus,
+                          tooltip: lang.bus,
                         ),
                       ),
                     Consumer<AccessibilityProvider>(
@@ -11905,8 +11905,8 @@ class SimpleStationSelector extends StatelessWidget {
     }
 
     // --- Yuen Long (智能分組) ---
-    const ylHungShuiKiu = {370, 380, 390}; // Chung Uk Tsuen, Hung Shui Kiu, Tong Fong Tsuen
-    const ylPingShan    = {400, 425};       // Ping Shan, Hang Mei Tsuen
+    const ylHungShuiKiu = {370, 380}; // Chung Uk Tsuen, Hung Shui Kiu
+    const ylPingShan    = {400, 425, 390};       // Ping Shan, Hang Mei Tsuen, Tong Fong Tsuen
     const ylCentral     = {560, 570, 580, 590, 600}; // Shui Pin Wai → Yuen Long
     if (ylCentral.contains(stationId))     return '元朗市中心';   // Central spine
     if (ylPingShan.contains(stationId))    return '屏山段';       // Ping Shan Section
@@ -11941,8 +11941,8 @@ class SimpleStationSelector extends StatelessWidget {
     }
 
     // --- Yuen Long (智能分組) ---
-    const ylHungShuiKiu = {370, 380, 390}; // Chung Uk Tsuen, Hung Shui Kiu, Tong Fong Tsuen
-    const ylPingShan    = {400, 425};       // Ping Shan, Hang Mei Tsuen
+    const ylHungShuiKiu = {370, 380}; // Chung Uk Tsuen, Hung Shui Kiu, Tong Fong Tsuen
+    const ylPingShan    = {400, 425, 390};       // Ping Shan, Hang Mei Tsuen, Tong Fong Tsuen
     const ylCentral     = {560, 570, 580, 590, 600}; // Shui Pin Wai → Yuen Long
     if (ylCentral.contains(stationId))     return 'Yuen Long Central';   // Central spine
     if (ylPingShan.contains(stationId))    return 'Ping Shan Section';   // Ping Shan Section
@@ -12030,9 +12030,8 @@ class KmbPage extends StatefulWidget {
 }
 
 class _KmbPageState extends State<KmbPage> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
   static const String _tabIndexKey = 'kmb_tab_index_pref';
-  bool _isLoading = true;
+  TabController? _tabController;
 
   @override
   void initState() {
@@ -12043,58 +12042,67 @@ class _KmbPageState extends State<KmbPage> with SingleTickerProviderStateMixin {
   Future<void> _loadSavedIndex() async {
     final prefs = await SharedPreferences.getInstance();
     final idx = (prefs.getInt(_tabIndexKey) ?? 0).clamp(0, 2);
-    
-    if (mounted) {
-      setState(() {
-        _tabController = TabController(length: 3, vsync: this, initialIndex: idx);
-        _tabController.addListener(_saveIndex);
-        _isLoading = false;
-      });
-    }
+    if (!mounted) return;
+    final controller = TabController(length: 3, vsync: this, initialIndex: idx);
+    controller.addListener(_saveIndex);
+    setState(() => _tabController = controller);
   }
 
-  void _saveIndex() async {
-    if (!_tabController.indexIsChanging) {
-       final prefs = await SharedPreferences.getInstance();
-       await prefs.setInt(_tabIndexKey, _tabController.index);
-    }
+  Future<void> _saveIndex() async {
+    if (_tabController == null || _tabController!.indexIsChanging) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_tabIndexKey, _tabController!.index);
   }
 
   @override
   void dispose() {
-    if (!_isLoading) {
-      _tabController.removeListener(_saveIndex);
-      _tabController.dispose();
-    }
+    _tabController?.removeListener(_saveIndex);
+    _tabController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
-    
-    if (_isLoading) {
-       // Return a skeleton or loading state
-       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    final cs = Theme.of(context).colorScheme;
+
+    if (_tabController == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator.adaptive()));
     }
 
     return Scaffold(
-      appBar: TabBar(
-        controller: _tabController,
-        tabs: [
-          Tab(icon: const Icon(Icons.route), text: lang.routes), //Navbar for KMB Search
-          Tab(icon: const Icon(Icons.location_on), text: lang.nearby), //Navbar for KMB Nearby
-          Tab(icon: const Icon(Icons.push_pin), text: lang.pinned), //Navbar for KMB Pinned
-        ],
-        labelColor: Theme.of(context).colorScheme.primary,
-        indicatorColor: Theme.of(context).colorScheme.primary,
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: const [
-          KmbDialer(),
-          KmbNearbyPage(),
-          KmbPinnedPage(),
+      body: Column(
+        children: [
+          // Flat header matching the screenshot style
+          SafeArea(
+            bottom: false,
+            child: TabBar(
+              controller: _tabController,
+              labelColor: cs.primary,
+              unselectedLabelColor: cs.onSurfaceVariant,
+              indicatorColor: cs.primary,
+              indicatorWeight: 3,
+              indicatorSize: TabBarIndicatorSize.label,
+              dividerColor: cs.outline.withValues(alpha: 0.15),
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
+              tabs: [
+                Tab(icon: const Icon(Icons.route_rounded), text: lang.routes),
+                Tab(icon: const Icon(Icons.near_me_rounded), text: lang.nearby),
+                Tab(icon: const Icon(Icons.push_pin_rounded), text: lang.pinned),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: const [
+                KmbDialer(),
+                KmbNearbyPage(),
+                KmbPinnedPage(),
+              ],
+            ),
+          ),
         ],
       ),
     );

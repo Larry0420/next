@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:lrt_next_train/backup/main.dart' hide LanguageProvider, AccessibilityProvider, DeveloperSettingsProvider;
 import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:lrt_next_train/optionalMarquee.dart';
 import 'dart:async';
@@ -13,6 +14,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../kmb_route_status_page.dart';
+// Keep only:
 import '../main.dart' show AccessibilityProvider, LanguageProvider, DeveloperSettingsProvider;
 import '../toTitleCase.dart';
 import 'company_name.dart';
@@ -76,6 +78,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
   @override
   void dispose() {
+    _rangeDebounce?.cancel();
     _refreshTimer?.cancel();
     _customRangeController.dispose();
     super.dispose();
@@ -160,199 +163,139 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     ) ?? false;
   }
 
-  Future<void> _init() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-      _nearby = [];
-    });
+  Future<bool?> _ensureLocationPermission(LanguageProvider? langProv) async {
+    final bool isEn = langProv?.isEnglish ?? true;
 
-    // Get language preference early
-    LanguageProvider? langProv;
-    if (mounted) {
-      langProv = context.read<LanguageProvider>();
-    }
-  
-    try {
-    var status = await Permission.location.status;
-    
-    // Show rationale dialog if permission denied but not permanently
-    if (status.isDenied) {
+    var preciseStatus = await Permission.location.status;
+    var approxStatus = await Permission.locationWhenInUse.status;
+
+    if (preciseStatus.isDenied && approxStatus.isDenied) {
       final shouldRequest = await _showLocationRationaleDialog();
       if (!shouldRequest) {
-        if (mounted) {
-          setState(() {
-            _error = langProv?.isEnglish ?? true 
-                ? 'Location permission denied' 
-                : '位置權限被拒絕';
-            _loading = false;
-          });
-        }
-        return;
+        _setError(isEn ? 'Location permission denied' : '位置權限被拒絕');
+        return null;
       }
-      
-      // Request permission - this shows system popup
-      status = await Permission.location.request();
+      preciseStatus = await Permission.location.request();
+      approxStatus = await Permission.locationWhenInUse.status;
     }
-    
 
-    // Handle permanently denied - direct to settings
-    if (status.isPermanentlyDenied) {
-      final shouldOpenSettings = await _showOpenSettingsDialog();
-      if (shouldOpenSettings) {
-        await openAppSettings();
-      }
-      if (mounted) {
-        setState(() {
-          _error = langProv?.isEnglish ?? true 
-              ? 'Location permission required' 
-              : '需要位置權限';
-          _loading = false;
-        });
-      }
-      return;
+    if (preciseStatus.isPermanentlyDenied && approxStatus.isPermanentlyDenied) {
+      if (await _showOpenSettingsDialog()) await openAppSettings();
+      _setError(isEn ? 'Location permission required' : '需要位置權限');
+      return null;
     }
-    
-    // Still not granted after request
-    if (!status.isGranted) {
-      if (mounted) {
-        setState(() {
-          _error = langProv?.isEnglish ?? true 
-              ? 'Location permission denied' 
-              : '位置權限被拒絕';
-          _loading = false;
-        });
-      }
-      return;
+
+    if (!preciseStatus.isGranted && !approxStatus.isGranted) {
+      _setError(isEn ? 'Location permission denied' : '位置權限被拒絕');
+      return null;
     }
-    
 
-    
-    
+    final useApprox = !preciseStatus.isGranted && approxStatus.isGranted;
+    if (useApprox && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(isEn
+            ? 'Using approximate location — nearby results may be less accurate'
+            : '使用大概位置，附近結果可能不夠精確'),
+        duration: const Duration(seconds: 4),
+      ));
+    }
 
-      // Use Geolocator to obtain a position
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
-      _position = pos;
+    return useApprox; // null = denied, false = precise, true = approximate
+  }
 
-      // O(1) optimization: Build stop map and coordinates list once globally
-      if (_globalStopMap == null || _allStopsWithCoords == null || _spatialGrid == null) {
-        // Fetch both stop maps in parallel
-        final stopResults = await Future.wait([
-          Kmb.buildStopMap(),
-          Citybus.buildStopMap(),
+  void _setError(String msg) {
+    if (mounted) setState(() { _error = msg; _loading = false; });
+  }
+
+  Future<void> _init() async {
+    if (!mounted) return;
+    setState(() { _loading = true; _error = null; _nearby = []; });
+
+    final langProv = mounted ? context.read<LanguageProvider>() : null;
+
+    final useApprox = await _ensureLocationPermission(langProv);
+    if (useApprox == null) return;
+
+    final accuracy = useApprox ? LocationAccuracy.low : LocationAccuracy.best;
+
+    try {
+      if (_globalStopMap == null) {
+        await Future.wait([
+          Geolocator.getCurrentPosition(desiredAccuracy: accuracy)
+              .then((pos) => _position = pos),
+          _buildUnifiedStopMap(langProv),
         ]);
-
-        final kmbStops = stopResults[0];
-        final ctbStopsRaw = stopResults[1];
-
-        if (kmbStops.isEmpty && ctbStopsRaw.isEmpty) {
-          setState(() {
-            _error = langProv?.isEnglish ?? true 
-              ? 'No stops data available. Please check your internet connection.' 
-              : '沒有站點資料。請檢查您的網路連線。';
-            _loading = false;
-          });
-          return;
-        }
-
-        // Initialize and merge both providers into the unified map
-        final Map<String, Map<String, dynamic>> unifiedMap = {};
-
-        // Process KMB
-        kmbStops.forEach((id, data) {
-          unifiedMap['kmb-$id'] = {
-            ...Map<String, dynamic>.from(data),
-            'co': 'KMB',
-          };
-        });
-
-        // Process Citybus with deep cast
-        ctbStopsRaw.forEach((id, data) {
-          unifiedMap['ctb-$id'] = {
-            ...Map<String, dynamic>.from(data as Map),
-            'co': 'CTB',
-          };
-        });
-
-        _globalStopMap = unifiedMap;
-
-        // Pre-compute all stop coordinates once and build spatial grid index
-        final List<_StopDistance> allStops = [];
-        final Map<String, List<_StopDistance>> grid = {};
-        
-        unifiedMap.forEach((stopId, meta) {
-          try {
-            final latRaw = meta['lat'] ?? meta['latitude'];
-            final lngRaw = meta['long'] ?? meta['lng'] ?? meta['longitude'];
-            if (latRaw == null || lngRaw == null) return;
-            final lat = double.tryParse(latRaw.toString());
-            final lng = double.tryParse(lngRaw.toString());
-            if (lat == null || lng == null) return;
-            
-            final stop = _StopDistance(stopId: stopId, lat: lat, lng: lng, distanceMeters: 0, meta: meta);
-            allStops.add(stop);
-            
-            // Add to spatial grid for O(1) lookup
-            final gridKey = _getGridKey(lat, lng);
-            grid.putIfAbsent(gridKey, () => []).add(stop);
-          } catch (_) {}
-        });
-        
-        _allStopsWithCoords = allStops;
-        _spatialGrid = grid;
-      }
-      
-      // O(1) spatial lookup: Only check stops in nearby grid cells
-      final nearbyCells = _getNearbyCells(pos.latitude, pos.longitude, _rangeMeters);
-      final List<_StopDistance> candidates = [];
-      
-      for (final cellKey in nearbyCells) {
-        final cellStops = _spatialGrid![cellKey];
-        if (cellStops != null) {
-          candidates.addAll(cellStops);
-        }
-      }
-      
-      // O(k) where k = stops in nearby cells (typically 10-50 instead of 5000+)
-      final List<_StopDistance> nearbyList = [];
-      for (final stop in candidates) {
-        final dist = Geolocator.distanceBetween(pos.latitude, pos.longitude, stop.lat, stop.lng);
-        
-        if (dist <= _rangeMeters) {
-          nearbyList.add(_StopDistance(
-            stopId: stop.stopId,
-            lat: stop.lat,
-            lng: stop.lng,
-            distanceMeters: dist,
-            meta: stop.meta,
-          ));
-        }
+      } else {
+        _position = await Geolocator.getCurrentPosition(desiredAccuracy: accuracy);
       }
 
-      // O(k log k) where k is typically 10-50 (constant time in practice)
-      nearbyList.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
-      
-      setState(() {
-        _nearby = nearbyList.take(50).toList();
-        _loading = false;
-      });
+      if (!mounted || _position == null) return;
 
-      // Fetch ETAs for nearby stops
+      _updateNearbyList(_position!);
       _fetchEtasForNearbyStops();
-      
-      // Set up auto-refresh every 30 seconds
+
       _refreshTimer?.cancel();
-      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        _fetchEtasForNearbyStops();
-      });
+      _refreshTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) => _fetchEtasForNearbyStops(),
+      );
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
+      _setError(e.toString());
+    }
+  }
+
+  Future<void> _buildUnifiedStopMap(LanguageProvider? langProv) async {
+    final stopResults = await Future.wait([Kmb.buildStopMap(), Citybus.buildStopMap()]);
+    final kmbStops = stopResults[0];
+    final ctbStopsRaw = stopResults[1];
+
+    if (kmbStops.isEmpty && ctbStopsRaw.isEmpty) {
+      throw Exception(langProv?.isEnglish ?? true
+          ? 'No stops data available. Please check your internet connection.'
+          : '沒有站點資料。請檢查您的網路連線。');
+    }
+
+    final Map<String, Map<String, dynamic>> unifiedMap = {};
+    kmbStops.forEach((id, data) => unifiedMap['kmb-$id'] = {...Map<String, dynamic>.from(data), 'co': 'KMB'});
+    ctbStopsRaw.forEach((id, data) => unifiedMap['ctb-$id'] = {...Map<String, dynamic>.from(data as Map), 'co': 'CTB'});
+
+    _globalStopMap = unifiedMap;
+
+    final List<_StopDistance> allStops = [];
+    final Map<String, List<_StopDistance>> grid = {};
+
+    unifiedMap.forEach((stopId, meta) {
+      try {
+        final lat = double.tryParse((meta['lat'] ?? meta['latitude']).toString());
+        final lng = double.tryParse((meta['long'] ?? meta['lng'] ?? meta['longitude']).toString());
+        if (lat == null || lng == null) return;
+        final stop = _StopDistance(stopId: stopId, lat: lat, lng: lng, distanceMeters: 0, meta: meta);
+        allStops.add(stop);
+        grid.putIfAbsent(_getGridKey(lat, lng), () => []).add(stop);
+      } catch (_) {}
+    });
+
+    _allStopsWithCoords = allStops;
+    _spatialGrid = grid;
+  }
+
+  void _updateNearbyList(Position pos) {
+    final nearbyCells = _getNearbyCells(pos.latitude, pos.longitude, _rangeMeters);
+    final nearbyList = <_StopDistance>[];
+
+    for (final cellKey in nearbyCells) {
+      final cellStops = _spatialGrid?[cellKey];
+      if (cellStops == null) continue;
+      for (final stop in cellStops) {
+        final dist = Geolocator.distanceBetween(pos.latitude, pos.longitude, stop.lat, stop.lng);
+        if (dist <= _rangeMeters) {
+          nearbyList.add(_StopDistance(stopId: stop.stopId, lat: stop.lat, lng: stop.lng, distanceMeters: dist, meta: stop.meta));
+        }
       }
     }
+
+    nearbyList.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+    if (mounted) setState(() { _nearby = nearbyList.take(50).toList(); _loading = false; });
   }
 
   Future<void> _fetchEtasForNearbyStops() async {
@@ -403,29 +346,28 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   }
 
   Widget _buildRangeChip(String label, double meters, LanguageProvider langProv, AccessibilityProvider accProv) {
-    // Fetch scale factor
-    final double textScale = accProv.textScale;
     final isSelected = _rangeMeters == meters;
-    return FilterChip(
+    return ChoiceChip(
       label: Text(
         label,
         style: TextStyle(
-          fontSize: 12 * textScale,
+          fontSize: 11 * accProv.textScale,
+          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
         ),
       ),
       selected: isSelected,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       onSelected: (selected) {
-        if (selected) {
-          setState(() {
-            _rangeMeters = meters;
-          });
-          _init(); // Re-fetch with new range
-        }
+        if (selected) _onRangeChanged(meters);
       },
-      selectedColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
+      selectedColor: Theme.of(context).colorScheme.primaryContainer,
       checkmarkColor: Theme.of(context).colorScheme.primary,
+      showCheckmark: false, // saves horizontal space
     );
   }
+
 
   Widget _buildCustomRangeChip(LanguageProvider langProv, AccessibilityProvider accProv) {
     final double textScale = accProv.textScale;
@@ -448,6 +390,15 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       selectedColor: Theme.of(context).colorScheme.primaryContainer,
       checkmarkColor: Theme.of(context).colorScheme.primary,
     );
+  }
+
+  Timer? _rangeDebounce;
+
+  void _onRangeChanged(double meters) {
+    if (_rangeMeters == meters) return; // no-op if same
+    setState(() => _rangeMeters = meters);
+    _rangeDebounce?.cancel();
+    _rangeDebounce = Timer(const Duration(milliseconds: 300), _init);
   }
 
   void _showCustomRangeDialog(LanguageProvider langProv) {
@@ -555,7 +506,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                         children: [
                           // 2. Smaller Icon
                           Icon(
-                            Icons.straighten, 
+                            Icons.straighten_rounded, 
                             size: 16, 
                             color: Theme.of(context).colorScheme.primary
                             ), // Reduced from 18
@@ -1073,6 +1024,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final langProv = context.read<LanguageProvider>();
     final companyProv = context.read<CompanyProvider>();
     final String? co = stop.meta['co'];
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     final companyName = companyProv.getName(co, langProv.isEnglish);
     
@@ -1109,42 +1061,37 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       backgroundColor: Colors.white.withValues(alpha: 0.0),
       barrierColor: Colors.black.withValues(alpha: 0.1),
       builder: (context) {
+        final sheetController = DraggableScrollableController(); // local
         return ValueListenableBuilder<int>(
           valueListenable: sortOptionNotifier,
           builder: (context, sortOption, _) {
-            // Sort function
             List<MapEntry<String, List<Map<String, dynamic>>>> getSortedEntries() {
               final entries = etasByRoute.entries.toList();
-              
+              int? extractNumber(String route) {
+                final match = RegExp(r'\d+').firstMatch(route);
+                return match != null ? int.tryParse(match.group(0)!) : null;
+              }
+
               entries.sort((a, b) {
                 final routeA = a.key;
                 final routeB = b.key;
                 final etasA = a.value;
                 final etasB = b.value;
-                
-                // Extract numeric part
-                int? extractNumber(String route) {
-                  final match = RegExp(r'\d+').firstMatch(route);
-                  return match != null ? int.tryParse(match.group(0)!) : null;
-                }
-                
+
                 if (sortOption == 1) {
-                  // ✅ Sort by route number ONLY
                   final numA = extractNumber(routeA);
                   final numB = extractNumber(routeB);
-                  
                   if (numA != null && numB != null) {
                     final numCompare = numA.compareTo(numB);
                     if (numCompare != 0) return numCompare;
                   }
                   return routeA.compareTo(routeB);
                 }
-                
-                // ✅ Sort by ETA priority (sortOption == 0)
+
                 final hasEtaA = etasA.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
                 final hasEtaB = etasB.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
                 if (hasEtaA != hasEtaB) return hasEtaB ? 1 : -1;
-                
+
                 if (hasEtaA && hasEtaB) {
                   try {
                     final earliestA = etasA
@@ -1159,58 +1106,54 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                     if (comparison != 0) return comparison;
                   } catch (_) {}
                 }
-                
-                // Fallback: route number
+
                 final numA = extractNumber(routeA);
                 final numB = extractNumber(routeB);
-                if (numA != null && numB != null) {
-                  return numA.compareTo(numB);
-                }
+                if (numA != null && numB != null) return numA.compareTo(numB);
                 return routeA.compareTo(routeB);
               });
-              
+
               return entries;
             }
-            
+
             final sortedEntries = getSortedEntries();
-            
+
             return DraggableScrollableSheet(
-              controller: _sheetController,
-              initialChildSize: 0.8,
-              minChildSize: 0.5,
-              maxChildSize: 0.95,
-              snap: true,
+              controller: sheetController,
+              initialChildSize: 0.4,
+              minChildSize: 0.4,
+              maxChildSize: 0.75,
+              expand: false,
               builder: (context, scrollController) {
-                return ExcludeSemantics(
-                  excluding: true,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: _buildSheetBody(
-                          context, 
-                          langProv, 
-                          sortOptionNotifier, 
-                          displayName, 
-                          sortOption, 
-                          distance, 
-                          sortedEntries, 
-                          scrollController, 
-                          stop,
-                          co,
-                        ),
+                return ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 1, sigmaY: 1),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDarkMode
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.black.withValues(alpha: 0.05),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      child: _buildSheetBody(
+                        context,
+                        langProv,
+                        sortOptionNotifier,
+                        displayName,
+                        sortOption,
+                        distance,
+                        sortedEntries,
+                        scrollController,
+                        stop,
+                        co,
                       ),
                     ),
                   ),
                 );
               },
             );
-          }
+          },
         );
       },
     );
@@ -1353,7 +1296,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         _buildDragHandle(context),
         _buildHeader(context, langProv, sortOptionNotifier, displayName, co),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1408,7 +1351,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final badgeTextColor = companyProv.getBadgeTextColor(co, context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
       child: Row(
         children: [
           Expanded(
