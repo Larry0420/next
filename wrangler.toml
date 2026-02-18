@@ -1,0 +1,23 @@
+name = "next"
+pages_build_output_dir = "build/web"
+
+[vars]
+# 如果你有環境變數可以放在這裡
+
+[build]
+# 使用與你 Netlify 相同的構建邏輯
+command = "bash -c 'if [ -d flutter ]; then cd flutter; git fetch; git checkout stable; git pull; cd ..; else git clone https://github.com -b stable; fi; flutter/bin/flutter clean; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --wasm --no-tree-shake-icons --source-maps'"
+
+# Cloudflare Pages 目前主要透過 _headers 檔案處理 Header，
+# 但你可以在 wrangler.toml 確保上傳規則。
+[site]
+bucket = "./build/web"
+
+# 重要：處理 Single Page Application (SPA) 路由
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200
+
+# 注意：Wrangler 目前對於直接在 .toml 設定 HTTP Headers 的支援有限
+# 建議你依然在 web/ 目錄下放置一個 `_headers` 檔案 (內容見下方)
