@@ -2,7 +2,6 @@ import 'dart:ui';
 
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
-import 'package:lrt_next_train/backup/main.dart' hide LanguageProvider, AccessibilityProvider, DeveloperSettingsProvider;
 import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:lrt_next_train/optionalMarquee.dart';
 import 'dart:async';
