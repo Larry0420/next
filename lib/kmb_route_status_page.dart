@@ -2645,16 +2645,17 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return Column(
+          return const Column(
             children: [
-              RouteDestinationWidget(
+              /*RouteDestinationWidget(
                 route: widget.route,
                 direction: _selectedDirection,
                 serviceType: _selectedServiceType,
                 cachedRouteData: _routeDetails,
               ),
-              const SizedBox(height: 8),
-              const Expanded(
+              */
+              SizedBox(height: 8),
+              Expanded(
                 child: Center(child: CircularProgressIndicator()),
               ),
             ],
@@ -2933,10 +2934,20 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                           urlTemplate: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
                           subdomains: const ['a', 'b', 'c'],
                           userAgentPackageName: 'com.example.lrtnexttrain',
+                          
+                          // 設置合理的縮放限制
                           maxZoom: 19,
-                          panBuffer: 1,
-                          tileSize: 256,
-                          retinaMode: false,
+                          minZoom: 3, 
+                          
+                          // ✅ 顯式指定 Provider (內含緩存機制)
+                          tileProvider: NetworkTileProvider(), 
+                          
+                          // ✅ 處理高動態像素比設備 (Retina)
+                          // 如果設備像素比高於 1.5，開啟 retinaMode 會讓地圖更清晰
+                          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+                          
+                          // 緩衝區設定 (預載入相鄰瓦片，讓滑動更順暢)
+                          keepBuffer: 3, 
                         ),
                         // Polyline showing route path
                         if (polylinePoints.length > 1)

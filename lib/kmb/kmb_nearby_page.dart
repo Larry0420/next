@@ -1180,7 +1180,6 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               minChildSize: 0.5,
               maxChildSize: 0.95,
               snap: true,
-              snapAnimationDuration: const Duration(milliseconds: 300),
               builder: (context, scrollController) {
                 return ExcludeSemantics(
                   excluding: true,

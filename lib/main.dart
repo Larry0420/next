@@ -784,6 +784,14 @@ class LrtApp extends StatelessWidget {
                   : (theme.isDarkMode ? ThemeMode.dark : ThemeMode.light),
               scrollBehavior: EnhancedScrollBehavior(),
               home: const HomePage(),
+              // ✅ 加入呢段 builder 邏輯
+              builder: (context, child) {
+                return MediaQuery(
+                  // 透過 copyWith 強制將 boldText 設為 false
+                  data: MediaQuery.of(context).copyWith(boldText: false),
+                  child: child!,
+                );
+              },
             ),
           );
         },

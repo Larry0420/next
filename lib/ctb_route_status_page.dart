@@ -704,7 +704,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         //Consumer<AccessibilityProvider>(
           //builder: (context, accessibility, _) => 
           IconButton(
-            icon: Icon(Icons.arrow_back, size: 24 /* *accessibility.iconScale*/),
+            icon: const Icon(Icons.arrow_back, size: 24 /* *accessibility.iconScale*/),
             tooltip: isEnglish ? 'Back' : '返回',
             onPressed: () => Navigator.of(context).pop(),
             splashRadius: 24,
@@ -3159,7 +3159,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
       future: Future.wait([Citybus.buildRouteToStopsMap(), Citybus.buildStopMap()]),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return Column(
+          return const Column(
             children: [
               /*RouteDestinationWidget(
                 route: widget.route,
@@ -3167,8 +3167,8 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                 serviceType: _selectedServiceType,
                 cachedRouteData: _routeDetails,
               ),*/
-              const SizedBox(height: 8),
-              const Expanded(
+              SizedBox(height: 8),
+              Expanded(
                 child: Center(child: CircularProgressIndicator()),
               ),
             ],
@@ -3478,24 +3478,22 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                           subdomains: const ['a', 'b', 'c'],
                           userAgentPackageName: 'com.example.lrtnexttrain',
                           
-                          // Performance optimizations
+                          // 設置合理的縮放限制
                           maxZoom: 19,
-                          minZoom: 10, // Prevent over-zooming out (saves bandwidth)
-                          maxNativeZoom: 18, // Tile server's actual max zoom
-                          panBuffer: 2, // Increased for smoother panning (was 1)
+                          minZoom: 3, 
                           
-                          tileSize: 256,
-                          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5, // Dynamic based on device
-
+                          // ✅ 顯式指定 Provider (內含緩存機制)
+                          tileProvider: NetworkTileProvider(), 
                           
-                          tileProvider: NetworkTileProvider(), // Explicit (has built-in caching)
+                          // ✅ 處理高動態像素比設備 (Retina)
+                          // 如果設備像素比高於 1.5，開啟 retinaMode 會讓地圖更清晰
+                          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
                           
-                          // Error handling
-                          errorImage: const AssetImage('assets/map_error_tile.png'), // Optional fallback
-                          
-                          // Keep alive for better scrolling performance
-                          keepBuffer: 5, // Keep 5 extra tiles in memory
+                          // 緩衝區設定 (預載入相鄰瓦片，讓滑動更順暢)
+                          keepBuffer: 3, 
                         ),
+
+                        
                         // Polyline showing route path
                         if (polylinePoints.length > 1)
                           PolylineLayer(
