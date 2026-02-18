@@ -500,8 +500,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final langProv = context.watch<LanguageProvider>();
     
     // ADD THESE TWO LINES to resolve "Undefined name" errors
-    final position = _position; 
-    final nearby = _nearby; 
+    final position = this._position; 
+    final nearby = this._nearby; 
 
     return Scaffold(
       body: _loading

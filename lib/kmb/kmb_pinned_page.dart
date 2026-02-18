@@ -18,6 +18,8 @@ import '../main.dart' show LanguageProvider;
 
 import '../toTitleCase.dart';
 
+import 'company_name.dart';
+
 
 
 class KmbPinnedPage extends StatefulWidget {
