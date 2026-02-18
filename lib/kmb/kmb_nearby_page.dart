@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:auto_size_text/auto_size_text.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:lrt_next_train/optionalMarquee.dart';
@@ -26,6 +27,7 @@ class KmbNearbyPage extends StatefulWidget {
 }
 
 class _KmbNearbyPageState extends State<KmbNearbyPage> {
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
   bool _loading = true;
   String? _error;
   Position? _position;
@@ -67,7 +69,6 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     return cells;
   }
 
-  final DraggableScrollableController _sheetController = DraggableScrollableController();
 
   @override
   void initState() {
@@ -131,7 +132,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     
     final langProv = context.read<LanguageProvider>();
     final isEnglish = langProv.isEnglish;
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final dark = isDark;
     
     return await showDialog<bool>(
       context: context,
@@ -140,7 +141,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         title: Text(
           isEnglish ? 'Location Permission Required' : '需要位置權限',
           style: TextStyle(
-            color: isDarkMode ? Theme.of(context).colorScheme.primaryContainer : Colors.black,
+            color: dark ? Theme.of(context).colorScheme.primaryContainer : Colors.black,
           ),
         ),
         content: Text(
@@ -164,6 +165,12 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
   Future<bool?> _ensureLocationPermission(LanguageProvider? langProv) async {
     final bool isEn = langProv?.isEnglish ?? true;
+
+    // Web: skip permission_handler, use browser geolocation directly
+    if (kIsWeb) {
+      return false; // treat as precise, browser will prompt natively
+    }
+
 
     var preciseStatus = await Permission.location.status;
     var approxStatus = await Permission.locationWhenInUse.status;
@@ -208,10 +215,40 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
   Future<void> _init() async {
     if (!mounted) return;
-    setState(() { _loading = true; _error = null; _nearby = []; });
+    // Only reset loading/error — keep _position and _nearby for header continuity
+    setState(() { _loading = true; _error = null; });
 
     final langProv = mounted ? context.read<LanguageProvider>() : null;
 
+    // Web: skip permission_handler entirely
+    if (kIsWeb) {
+      try {
+        if (_globalStopMap == null) {
+          await Future.wait([
+            Geolocator.getCurrentPosition(
+              desiredAccuracy: LocationAccuracy.low,
+              timeLimit: const Duration(seconds: 10),
+            ).then((pos) => _position = pos),
+            _buildUnifiedStopMap(langProv),
+          ]);
+        } else {
+          _position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.low,
+            timeLimit: const Duration(seconds: 10),
+          );
+        }
+        if (!mounted || _position == null) return;
+        _updateNearbyList(_position!);
+        _fetchEtasForNearbyStops();
+        _refreshTimer?.cancel();
+        _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchEtasForNearbyStops());
+      } catch (e) {
+        _setError(e.toString());
+      }
+      return; // ← exit early, skip permission_handler below
+    }
+
+    // Mobile: full permission flow
     final useApprox = await _ensureLocationPermission(langProv);
     if (useApprox == null) return;
 
@@ -220,24 +257,23 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     try {
       if (_globalStopMap == null) {
         await Future.wait([
-          Geolocator.getCurrentPosition(desiredAccuracy: accuracy)
-              .then((pos) => _position = pos),
+          Geolocator.getCurrentPosition(
+            desiredAccuracy: accuracy,
+            timeLimit: const Duration(seconds: 10),
+          ).then((pos) => _position = pos),
           _buildUnifiedStopMap(langProv),
         ]);
       } else {
-        _position = await Geolocator.getCurrentPosition(desiredAccuracy: accuracy);
+        _position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: accuracy,
+          timeLimit: const Duration(seconds: 10),
+        );
       }
-
       if (!mounted || _position == null) return;
-
       _updateNearbyList(_position!);
       _fetchEtasForNearbyStops();
-
       _refreshTimer?.cancel();
-      _refreshTimer = Timer.periodic(
-        const Duration(seconds: 30),
-        (_) => _fetchEtasForNearbyStops(),
-      );
+      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchEtasForNearbyStops());
     } catch (e) {
       _setError(e.toString());
     }
@@ -278,23 +314,24 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     _spatialGrid = grid;
   }
 
-  void _updateNearbyList(Position pos) {
-    final nearbyCells = _getNearbyCells(pos.latitude, pos.longitude, _rangeMeters);
-    final nearbyList = <_StopDistance>[];
+  Future<void> _updateNearbyList(Position pos) async {
+    final generation = ++_filterGeneration;
 
-    for (final cellKey in nearbyCells) {
-      final cellStops = _spatialGrid?[cellKey];
-      if (cellStops == null) continue;
-      for (final stop in cellStops) {
-        final dist = Geolocator.distanceBetween(pos.latitude, pos.longitude, stop.lat, stop.lng);
-        if (dist <= _rangeMeters) {
-          nearbyList.add(_StopDistance(stopId: stop.stopId, lat: stop.lat, lng: stop.lng, distanceMeters: dist, meta: stop.meta));
-        }
-      }
-    }
+    final nearbyList = await compute(_filterStops, _FilterParams(
+      spatialGrid: _spatialGrid!,
+      nearbyCells: _getNearbyCells(pos.latitude, pos.longitude, _rangeMeters),
+      lat: pos.latitude,
+      lng: pos.longitude,
+      rangeMeters: _rangeMeters,
+    ));
 
-    nearbyList.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
-    if (mounted) setState(() { _nearby = nearbyList.take(50).toList(); _loading = false; });
+    if (generation != _filterGeneration) return;
+
+    // Atomic swap — old list stays visible until new one is ready
+    if (mounted) setState(() {
+      _nearby = nearbyList.take(50).toList();
+      _loading = false;
+    });
   }
 
   Future<void> _fetchEtasForNearbyStops() async {
@@ -344,74 +381,67 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
   }
 
-  Widget _buildRangeChip(String label, double meters, LanguageProvider langProv, AccessibilityProvider accProv) {
-    final isSelected = _rangeMeters == meters;
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11 * accProv.textScale,
-          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-        ),
-      ),
-      selected: isSelected,
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      onSelected: (selected) {
-        if (selected) _onRangeChanged(meters);
-      },
-      selectedColor: Theme.of(context).colorScheme.primaryContainer,
-      checkmarkColor: Theme.of(context).colorScheme.primary,
-      showCheckmark: false, // saves horizontal space
-    );
-  }
-
-
-  Widget _buildCustomRangeChip(LanguageProvider langProv, AccessibilityProvider accProv) {
-    final double textScale = accProv.textScale;
-    final isCustom = ![100.0, 150.0, 200.0, 400.0].contains(_rangeMeters);
-    return FilterChip(
-      label: Text(
-        isCustom 
-          ? '${_rangeMeters.toInt()}'
-          : (langProv.isEnglish ? 'Custom' : '自訂')
-      ),
-      labelStyle: TextStyle(
-        fontSize: 12 * textScale,
-      ),
-      selected: isCustom,
-      onSelected: (selected) {
-        if (selected) {
-          _showCustomRangeDialog(langProv);
-        }
-      },
-      selectedColor: Theme.of(context).colorScheme.primaryContainer,
-      checkmarkColor: Theme.of(context).colorScheme.primary,
-    );
-  }
-
+  static const _presetRanges = [100.0, 150.0, 200.0, 400.0];
   Timer? _rangeDebounce;
 
+  // Add field
+  int _filterGeneration = 0;
+
   void _onRangeChanged(double meters) {
-    if (_rangeMeters == meters) return; // no-op if same
+    if (_rangeMeters == meters) return;
     setState(() => _rangeMeters = meters);
     _rangeDebounce?.cancel();
     _rangeDebounce = Timer(const Duration(milliseconds: 300), _init);
   }
 
+  Widget _buildRangeChip(String label, double meters, double textScale) {
+    final isSelected = _rangeMeters == meters;
+    final cs = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      label: Text(label,
+          style: TextStyle(
+            fontSize: 11 * textScale,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+          )),
+      selected: isSelected,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      selectedColor: cs.primaryContainer,
+      checkmarkColor: cs.primary,
+      showCheckmark: false,
+      onSelected: (selected) { if (selected) _onRangeChanged(meters); },
+    );
+  }
+
+  Widget _buildCustomRangeChip(LanguageProvider langProv, double textScale) {
+    final isCustom = !_presetRanges.contains(_rangeMeters);
+    final cs = Theme.of(context).colorScheme;
+    return FilterChip(
+      label: Text(
+        isCustom ? '${_rangeMeters.toInt()}' : (langProv.isEnglish ? 'Custom' : '自訂'),
+        style: TextStyle(fontSize: 11 * textScale),
+      ),
+      selected: isCustom,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      selectedColor: cs.primaryContainer,
+      checkmarkColor: cs.primary,
+      showCheckmark: false,
+      onSelected: (selected) { if (selected) _showCustomRangeDialog(langProv); },
+    );
+  }
+
   void _showCustomRangeDialog(LanguageProvider langProv) {
     _customRangeController.text = _rangeMeters.toInt().toString();
-    
+    final cs = Theme.of(context).colorScheme;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
           langProv.isEnglish ? 'Custom Range' : '自訂範圍',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, color: cs.primary),
         ),
         content: TextField(
           controller: _customRangeController,
@@ -431,11 +461,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
             onPressed: () {
               final value = double.tryParse(_customRangeController.text);
               if (value != null && value > 0) {
-                setState(() {
-                  _rangeMeters = value;
-                });
                 Navigator.pop(context);
-                _init(); // Re-fetch with custom range
+                _onRangeChanged(value); // reuse debounced handler
               }
             },
             child: Text(langProv.isEnglish ? 'OK' : '確定'),
@@ -448,191 +475,194 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   @override
   Widget build(BuildContext context) {
     final langProv = context.watch<LanguageProvider>();
-    
-    // ADD THESE TWO LINES to resolve "Undefined name" errors
-    final position = this._position; 
-    final nearby = this._nearby; 
+    final cs = Theme.of(context).colorScheme;
+    final textScale = context.read<AccessibilityProvider>().textScale;
+    final position = _position;
+    final nearby = _nearby;
 
     return Scaffold(
-      body: _loading
-          ? const Align(
-              alignment: Alignment.bottomCenter, 
-              child: Padding(
-                padding: EdgeInsets.only(bottom: 10.0), // Adds 16 pixels of space at the top
-                child: LinearProgressIndicator(),
+      body: Column(
+        children: [
+          // Range selector — always visible
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: cs.primaryContainer.withValues(alpha: 0.2),
+              border: Border(
+                bottom: BorderSide(color: cs.outline.withValues(alpha: 0.2)),
               ),
-            )
-          : (_error != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.straighten_rounded, size: 16, color: cs.primary),
+                const SizedBox(width: 6),
+                Text(
+                  langProv.isEnglish ? 'Range(m)' : '範圍(米)',
+                  style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildRangeChip('100', 100, textScale),
+                        const SizedBox(width: 4),
+                        _buildRangeChip('150', 150, textScale),
+                        const SizedBox(width: 4),
+                        _buildRangeChip('200', 200, textScale),
+                        const SizedBox(width: 4),
+                        _buildRangeChip('400', 400, textScale),
+                        const SizedBox(width: 4),
+                        _buildCustomRangeChip(langProv, textScale),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Location header — always visible
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: cs.surface.withValues(alpha: 0.5),
+              border: Border(
+                bottom: BorderSide(color: cs.outline.withValues(alpha: 0.2)),
+              ),
+            ),
+            child: Row(
+              children: [
+                // Animated icon ↔ spinner swap
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: _loading
+                      ? SizedBox(
+                          key: const ValueKey('spinner'),
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator.adaptive(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation(cs.primary),
+                          ),
+                        )
+                      : Icon(
+                          key: const ValueKey('icon'),
+                          Icons.near_me_rounded,
+                          size: 16,
+                          color: cs.primary,
+                        ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
                     children: [
-                      Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                      const SizedBox(height: 16),
-                      Text(
-                        langProv.isEnglish ? "Error" : "錯誤",
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      // Animated stop name ↔ placeholder swap
+                      Expanded(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          switchInCurve: Curves.easeOut,
+                          switchOutCurve: Curves.easeIn,
+                          transitionBuilder: (child, animation) => FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.2),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
+                            ),
+                          ),
+                          child: Text(
+                            key: ValueKey(nearby.isNotEmpty ? nearby.first.stopId : 'placeholder'),
+                            nearby.isNotEmpty
+                                ? _resolveStopName(nearby.first, langProv)
+                                : (langProv.isEnglish ? 'Current Location' : '目前位置'),
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 8),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                      const SizedBox(width: 8),
+                      // Animated coordinates swap
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
                         child: Text(
-                          _error!,
-                          style: TextStyle(color: Colors.red[700]),
-                          textAlign: TextAlign.center,
+                          key: ValueKey(position?.latitude),
+                          position != null
+                              ? '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}'
+                              : (langProv.isEnglish ? 'Locating...' : '定位中...'),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                                fontSize: 10,
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
                         ),
                       ),
                     ],
                   ),
-                )
-              : Column(
-                  children: [
-                    // Range selector
-                    Container(
-                      width: double.infinity,
-                      // 1. Reduce Padding for the container
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Reduced from 16/8
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.2),
-                        border: Border(
-                          bottom: BorderSide(
-                            color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-                            width: 1,
-                          ),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          // 2. Smaller Icon
-                          Icon(
-                            Icons.straighten_rounded, 
-                            size: 16, 
-                            color: Theme.of(context).colorScheme.primary
-                            ), // Reduced from 18
-                          const SizedBox(width: 6), // Reduced from 8
-                          
-                          // 3. Smaller Label Text
-                          Text(
-                            langProv.isEnglish ? 'Range(m)' : '範圍(米)',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w500,
-                              fontSize: 11, // Explicitly set smaller font size
+                ),
+              ],
+            ),
+          ),
+
+          // Body — loading / error / list
+          Expanded(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.03),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            ),
+            child: _loading
+                ? const Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: 10.0),
+                      child: LinearProgressIndicator(),
+                    ),
+                  )
+                : _error != null
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                            const SizedBox(height: 16),
+                            Text(
+                              langProv.isEnglish ? 'Error' : '錯誤',
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                             ),
-                          ),
-                          const SizedBox(width: 8), // Reduced from 12
-                          
-                          Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: [
-                                  // 4. Chips (Your existing methods already use small font size '8')
-                                  // Ensure the chips themselves are compact:
-                                  Theme(
-                                    data: Theme.of(context).copyWith(
-                                      // Force material chips to be denser/smaller
-                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, 
-                                      visualDensity: VisualDensity.compact, 
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        _buildRangeChip('100', 100, langProv, context.read<AccessibilityProvider>()),
-                                        const SizedBox(width: 4), // Reduced spacing between chips
-                                        _buildRangeChip('150', 150, langProv, context.read<AccessibilityProvider>()),
-                                        const SizedBox(width: 4),
-                                        _buildRangeChip('200', 200, langProv, context.read<AccessibilityProvider>()),
-                                        const SizedBox(width: 4),
-                                        _buildRangeChip('400', 400, langProv, context.read<AccessibilityProvider>()),
-                                        const SizedBox(width: 4),
-                                        _buildCustomRangeChip(langProv, context.read<AccessibilityProvider>()),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                              child: Text(
+                                _error!,
+                                style: TextStyle(color: Colors.red[700]),
+                                textAlign: TextAlign.center,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Location header
-                    // Location header
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
-                        border: Border(
-                          bottom: BorderSide(
-                            color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
-                            width: 1,
-                          ),
+                          ],
                         ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.near_me_rounded,
-                            size: 16, 
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8), 
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                                  textBaseline: TextBaseline.alphabetic,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        nearby.isNotEmpty 
-                                          ? (() {
-                                              final s = nearby.first; // Use 1st nearby stop
-                                              final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
-                                              final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
-                                              
-                                              // Your specific display logic from _buildStopCard
-                                              final String displayName = langProv.isEnglish
-                                                  ? ((nameEn.toString().isNotEmpty) ? nameEn.toString() : (nameTc.toString().isNotEmpty ? nameTc.toString() : s.stopId))
-                                                  : ((nameTc.toString().isNotEmpty) ? nameTc.toString() : (nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : s.stopId));
-                                              
-                                              return displayName.toTitleCase();
-                                            })()
-                                          : (langProv.isEnglish ? 'Current Location' : '目前位置'),
-                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 11,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      '${position?.latitude.toStringAsFixed(6) ?? '-'}, ${position?.longitude.toStringAsFixed(6) ?? '-'}',
-                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                                        fontSize: 10,
-                                        fontFeatures: [const FontFeature.tabularFigures()],
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-
-                    // Stops list
-                    Expanded(
-                      child: ListView.builder(
+                      )
+                    : ListView.builder(
                         padding: EdgeInsets.only(
                           top: 6,
                           bottom: MediaQuery.of(context).viewInsets.bottom +
@@ -640,15 +670,25 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                               kBottomNavigationBarHeight +
                               80,
                         ),
-
-                        itemCount: _nearby.length,
+                        itemCount: nearby.length,
                         itemBuilder: (context, idx) => _buildStopCard(context, idx, langProv),
                       ),
-                    ),
-                  ],
-                )),
+          ),
+          ),
+        ],
+      ),
     );
   }
+
+// Extracted helper to clean up build
+String _resolveStopName(_StopDistance s, LanguageProvider langProv) {
+  final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
+  final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
+  final name = langProv.isEnglish
+      ? (nameEn.toString().isNotEmpty ? nameEn.toString() : nameTc.toString().isNotEmpty ? nameTc.toString() : s.stopId)
+      : (nameTc.toString().isNotEmpty ? nameTc.toString() : nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : s.stopId);
+  return name.toTitleCase();
+}
 
   Widget _buildStopCard(BuildContext context, int idx, LanguageProvider langProv) {
     final s = _nearby[idx];
@@ -656,7 +696,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final devSettings = context.watch<DeveloperSettingsProvider>();
     final showRank = devSettings.showRankBadge; // 假設欄位名稱為 showRankBadge
     // 獲取主題狀態 (假設你用 Provider)
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dark = isDark;
 
     // 1. Get Company Information
     final companyProv = context.watch<CompanyProvider>();
@@ -796,7 +836,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                 duration: const Duration(milliseconds: 300),
                 switchInCurve: Curves.bounceIn,
                 switchOutCurve: Curves.bounceOut,
-                child: _buildFooterSection(s, etasByRoute, langProv, isDark, badgeTextColor),
+                child: _buildFooterSection(s, etasByRoute, langProv, dark, badgeTextColor),
               ),
 
             ],
@@ -835,7 +875,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         padding: const EdgeInsets.symmetric(vertical: 4.0),
         child: Row(
           children: [
-            Icon(Icons.info_outline, size: 12, color: isDark ? Colors.grey[500] : Colors.grey[400]),
+            Icon(Icons.info_outline, size: 12, color: isDark ? Colors.grey[500] : Colors.grey[800]),
             const SizedBox(width: 6),
             Text(
               langProv.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
@@ -1023,7 +1063,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final langProv = context.read<LanguageProvider>();
     final companyProv = context.read<CompanyProvider>();
     final String? co = stop.meta['co'];
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final dark = isDark;
     
     final companyName = companyProv.getName(co, langProv.isEnglish);
     
@@ -1121,18 +1161,18 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               controller: sheetController,
               initialChildSize: 0.4,
               minChildSize: 0.4,
-              maxChildSize: 0.75,
+              maxChildSize: 0.9,
               expand: false,
               builder: (context, scrollController) {
                 return ClipRRect(
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                   child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 1, sigmaY: 1),
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: isDarkMode
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.05),
+                        color: dark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.black.withValues(alpha: 0.08),
                         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                       ),
                       child: _buildSheetBody(
@@ -1497,18 +1537,20 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     List<MapEntry<String, List<Map<String, dynamic>>>> sortedEntries,
     ScrollController scrollController,
     _StopDistance stop,
+
   ) {
+    final dark = isDark; // call the getter
     return Expanded(
       child: sortedEntries.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.access_time_filled_rounded, size: 48, color: Colors.grey[400]),
+                  Icon(Icons.access_time_filled_rounded, size: 48, color: dark ? Colors.grey[500] : Colors.grey[800]),
                   const SizedBox(height: 12),
                   Text(
-                    langProv.isEnglish ? 'No upcoming ETAs' : '沒有即將到站的班次',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 15),
+                    langProv.isEnglish ? 'No upcoming services' : '沒有即將到站的班次',
+                    style: TextStyle(color: dark ? Colors.grey[500] : Colors.grey[800], fontSize: 15),
                   ),
                 ],
               ),
@@ -1732,4 +1774,37 @@ class _StopDistance {
   final double distanceMeters;
   final Map<String, dynamic> meta;
   _StopDistance({required this.stopId, required this.lat, required this.lng, required this.distanceMeters, required this.meta});
+}
+
+class _FilterParams {
+  final Map<String, List<_StopDistance>> spatialGrid;
+  final List<String> nearbyCells;
+  final double lat, lng, rangeMeters;
+  const _FilterParams({
+    required this.spatialGrid,
+    required this.nearbyCells,
+    required this.lat,
+    required this.lng,
+    required this.rangeMeters,
+  });
+}
+
+// Must be top-level for compute()
+List<_StopDistance> _filterStops(_FilterParams p) {
+  final result = <_StopDistance>[];
+  for (final cellKey in p.nearbyCells) {
+    final cellStops = p.spatialGrid[cellKey];
+    if (cellStops == null) continue;
+    for (final stop in cellStops) {
+      final dist = Geolocator.distanceBetween(p.lat, p.lng, stop.lat, stop.lng);
+      if (dist <= p.rangeMeters) {
+        result.add(_StopDistance(
+          stopId: stop.stopId, lat: stop.lat, lng: stop.lng,
+          distanceMeters: dist, meta: stop.meta,
+        ));
+      }
+    }
+  }
+  result.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+  return result;
 }

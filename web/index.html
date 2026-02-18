@@ -86,29 +86,19 @@
 
 </head>
 <body>
-  <script>
-    window.addEventListener('load', function(ev) {
-      // 1. 自動偵測最佳渲染器
-      const useCanvasKit = (function() {
-        const canvas = document.createElement('canvas');
-        const supportsWebGL = !!window.WebGLRenderingContext && 
-          (canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
-        // 額外判斷：如果是舊款行動裝置，通常 html 渲染器較流暢，此處可視需求調整
-        return supportsWebGL;
-      })();
+  <script src="flutter_bootstrap.js" async>
+    {{flutter_js}}
+    {{flutter_build_config}}
 
-      // 2. 執行 Flutter 加載器
-      _flutter.loader.load({
-        config: {
-          // 支援 WebGL 就用 canvaskit，否則回退到 html 以保證相容性
-          renderer: useCanvasKit ? "canvaskit" : "html",
-        },
-        onEntrypointLoaded: function(engineInitializer) {
-          engineInitializer.runApp();
-        }
-      });
+    // TODO: Replace this with your own code to determine which renderer to use.
+    const useCanvasKit = false;
+
+    const config = {
+      renderer: useCanvasKit ? "canvaskit" : "skwasm",
+    };
+    _flutter.loader.load({
+      config: config,
     });
   </script>
-  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
