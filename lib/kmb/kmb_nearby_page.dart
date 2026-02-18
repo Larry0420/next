@@ -745,6 +745,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       ),
       child: InkWell(
         onTap: () => _showStopDetails(context, s, etas),
+        // 2. 處理視覺反饋的圓角（確保水波紋不會超出邊框）
+        borderRadius: BorderRadius.circular(12), 
         child: Padding(
           padding: const EdgeInsets.all(14.0),
           child: Column(
@@ -817,7 +819,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                         const SizedBox(height: 3),
                         Row(
                           children: [
-                            Icon(Icons.location_on, size: 11, color: badgeTextColor),
+                            Icon(Icons.near_me_rounded, size: 11, color: badgeTextColor),
                             const SizedBox(width: 3),
                             Text(
                               _fmtDistance(s.distanceMeters, langProv: langProv),
@@ -836,40 +838,84 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                 ],
               ),
               
-              // Routes Section - Routes 部分
-              if (etasByRoute.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: etasByRoute.entries.take(8).map((entry) {
-                    // 確保 _buildRouteChip 內部也處理了與 coColor 相關的邏輯 (如有需要)
-                    return _buildRouteChip(context, entry.key, entry.value, langProv);
-                  }).toList(),
-                ),
-              ] else if (_stopEtaCache.containsKey(s.stopId))
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text(
-                    langProv.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-                    style: TextStyle(
-                      fontSize: 10,
-                      // 修正：深色模式使用較亮的灰色
-                      color: isDark ? Colors.grey[400] : Colors.grey[600],
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                )
-              else
-                const Padding(
-                  padding: EdgeInsets.only(top: 8.0),
-                  child: SizedBox(
-                    height: 2.5,
-                    width: 100,
-                    child: LinearProgressIndicator(),
-                  ),
-                ),
+              // 1. 統一間距處理 (放在 Column 內)
+              const SizedBox(height: 12),
+
+              // 2. 使用 AnimatedSwitcher 處理狀態切換動畫
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                switchInCurve: Curves.bounceIn,
+                switchOutCurve: Curves.bounceOut,
+                child: _buildFooterSection(s, etasByRoute, langProv, isDark, badgeTextColor),
+              ),
+
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFooterSection(
+    _StopDistance s, 
+    Map<String, List<Map<String, dynamic>>> etasByRoute, 
+    LanguageProvider langProv, 
+    bool isDark,
+    Color coColor,
+  ) {
+    // 情況 A: 有路線資料
+    if (etasByRoute.isNotEmpty) {
+      return SizedBox(
+        key: const ValueKey('routes'),
+        width: double.infinity,
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: etasByRoute.entries.take(8).map((entry) {
+            return _buildRouteChip(context, entry.key, entry.value, langProv);
+          }).toList(),
+        ),
+      );
+    }
+
+    // 情況 B: 已加載但無班次 (Empty State)
+    if (_stopEtaCache.containsKey(s.stopId)) {
+      return Padding(
+        key: const ValueKey('empty'),
+        padding: const EdgeInsets.symmetric(vertical: 4.0),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, size: 12, color: isDark ? Colors.grey[500] : Colors.grey[400]),
+            const SizedBox(width: 6),
+            Text(
+              langProv.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 情況 C: 加載中 (Loading State)
+    return Padding(
+      key: const ValueKey('loading'),
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SizedBox(
+          height: 3,
+          width: 120, // 稍微縮短寬度，視覺上更精緻
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              // 使用品牌主色 (coColor) 作為進度條顏色，強化公司辨識度
+              backgroundColor: coColor.withValues(alpha: 0.1),
+              color: coColor.withValues(alpha: 0.5),
+            ),
           ),
         ),
       ),

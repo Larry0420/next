@@ -68,21 +68,47 @@
 
   <title>輕鐵到站時間 | LRT Next Train</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- 如果您使用 DATA.GOV.HK 的主 API -->
+  <link rel="preconnect" href="https://data.gov.hk">
+
+  <!-- 如果您使用其後端數據查詢接口 (常見於應用數據集) -->
+  <link rel="preconnect" href="https://app.data.gov.hk">
+
+  <!-- 如果您使用地理位置或地圖相關 API (注意：2026年起將全面改為 www.map.gov.hk) -->
+  <link rel="preconnect" href="https://www.map.gov.hk">
+  <link rel="preconnect" href="https://geodata.gov.hk"> 
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+
+
+  <!-- 建議同時加入 dns-prefetch 作為備援 -->
+  <link rel="dns-prefetch" href="https://data.gov.hk">
+
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async>
-    {{flutter_js}}
-    {{flutter_build_config}}
+  <script>
+    window.addEventListener('load', function(ev) {
+      // 1. 自動偵測最佳渲染器
+      const useCanvasKit = (function() {
+        const canvas = document.createElement('canvas');
+        const supportsWebGL = !!window.WebGLRenderingContext && 
+          (canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+        // 額外判斷：如果是舊款行動裝置，通常 html 渲染器較流暢，此處可視需求調整
+        return supportsWebGL;
+      })();
 
-    // TODO: Replace this with your own code to determine which renderer to use.
-    const useCanvasKit = true;
-
-    const config = {
-      renderer: useCanvasKit ? "canvaskit" : "skwasm",
-    };
-    _flutter.loader.load({
-      config: config,
+      // 2. 執行 Flutter 加載器
+      _flutter.loader.load({
+        config: {
+          // 支援 WebGL 就用 canvaskit，否則回退到 html 以保證相容性
+          renderer: useCanvasKit ? "canvaskit" : "html",
+        },
+        onEntrypointLoaded: function(engineInitializer) {
+          engineInitializer.runApp();
+        }
+      });
     });
   </script>
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
