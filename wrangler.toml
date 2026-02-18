@@ -6,7 +6,7 @@ pages_build_output_dir = "build/web"
 
 [build]
 # 使用與你 Netlify 相同的構建邏輯
-command = "bash -c 'if [ -d flutter ]; then cd flutter; git fetch; git checkout stable; git pull; cd ..; else git clone https://github.com -b stable; fi; flutter/bin/flutter clean; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --wasm --no-tree-shake-icons --source-maps'"
+command = "bash -c 'if [ -d flutter ]; then cd flutter; git fetch; git checkout stable; git pull; cd ..; else git clone https://github.com -b stable; fi; flutter/bin/flutter clean; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --wasm --source-maps'"
 
 # Cloudflare Pages 目前主要透過 _headers 檔案處理 Header，
 # 但你可以在 wrangler.toml 確保上傳規則。
