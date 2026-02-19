@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:marquee/marquee.dart';
 
@@ -24,40 +23,37 @@ class OptionalMarquee extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) {
-      return Text(
-        text,
-        style: style,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      );
-    }
-
     return LayoutBuilder(
       builder: (context, constraints) {
         final double maxWidth = width ?? constraints.maxWidth;
+
+        // Ensure proper height for descenders
         final TextStyle effectiveStyle = style.copyWith(
-          height: style.height ?? 1.4,
+          height: style.height ?? 1.4, // Use 1.4 if not specified
           leadingDistribution: TextLeadingDistribution.even,
         );
+
+        // Define consistent StrutStyle for both Marquee and Text
         final strutStyle = StrutStyle(
           fontSize: effectiveStyle.fontSize,
           height: effectiveStyle.height,
           forceStrutHeight: true,
           leading: 0.0,
         );
+
         final textPainter = TextPainter(
           text: TextSpan(text: text, style: effectiveStyle),
           textDirection: TextDirection.ltr,
           maxLines: 1,
           strutStyle: strutStyle,
         )..layout(maxWidth: double.infinity);
-        final bool overflows = textPainter.width > maxWidth;
-        textPainter.dispose();
 
+        final bool overflows = textPainter.width > maxWidth;
+
+        // Use exact measured height (no multiplication)
         return SizedBox(
           width: maxWidth,
-          height: textPainter.height,
+          height: textPainter.height, // No extra padding
           child: overflows
               ? Marquee(
                   text: text,
@@ -78,7 +74,7 @@ class OptionalMarquee extends StatelessWidget {
                   style: effectiveStyle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  strutStyle: strutStyle,
+                  strutStyle: strutStyle, // Same strut as Marquee
                 ),
         );
       },

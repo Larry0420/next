@@ -1907,7 +1907,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
           : '列車運行受到延誤';
     } else if (isRefreshing) {
       statusColor = colorScheme.primary;
-      bgColor = colorScheme.primaryContainer.withOpacity(0.3);
+      bgColor = colorScheme.primaryContainer.withValues(alpha: 0.3);
       statusIcon = Icons.refresh_rounded;
       statusText = lang.isEnglish ? 'Updating Schedule...' : '正在更新班次';
       statusDetail = lang.isEnglish 
@@ -1969,7 +1969,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
         color: bgColor,
         border: Border(
           bottom: BorderSide(
-            color: statusColor.withOpacity(0.3),
+            color: statusColor.withValues(alpha: 0.3),
             width: 1.5,
           ),
         ),
@@ -1980,10 +1980,10 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
           Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.15),
+              color: statusColor.withValues(alpha: 0.15),
               shape: BoxShape.circle,
               border: Border.all(
-                color: statusColor.withOpacity(0.3),
+                color: statusColor.withValues(alpha: 0.3),
                 width: 1.5,
               ),
             ),
@@ -2019,7 +2019,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w500,
-                    color: statusColor.withOpacity(0.75),
+                    color: statusColor.withValues(alpha: 0.75),
                     letterSpacing: 0.1,
                     height: 1.1,
                   ),
@@ -2047,10 +2047,10 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.12),
+                  color: statusColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: statusColor.withOpacity(0.25),
+                    color: statusColor.withValues(alpha: 0.25),
                     width: 1,
                   ),
                 ),
@@ -2061,7 +2061,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                     Icon(
                       isSystemTime ? Icons.cloud_sync_rounded : Icons.schedule_rounded,
                       size: 13,
-                      color: statusColor.withOpacity(0.9),
+                      color: statusColor.withValues(alpha: 0.9),
                     ),
                     const SizedBox(width: 5),
                     Text(
@@ -2119,13 +2119,13 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: schedule.isAutoRefreshActive
-                      ? statusColor.withOpacity(0.18)
-                      : statusColor.withOpacity(0.08),
+                      ? statusColor.withValues(alpha: 0.18)
+                      : statusColor.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: schedule.isAutoRefreshActive
-                        ? statusColor.withOpacity(0.5)
-                        : statusColor.withOpacity(0.25),
+                        ? statusColor.withValues(alpha: 0.5)
+                        : statusColor.withValues(alpha: 0.25),
                     width: 1.5,
                   ),
                 ),
@@ -2140,7 +2140,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                         size: 15,
                         color: schedule.isAutoRefreshActive
                             ? statusColor
-                            : statusColor.withOpacity(0.5),
+                            : statusColor.withValues(alpha: 0.5),
                       ),
                     ),
                     const SizedBox(width: 5),
@@ -2154,7 +2154,7 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
                         fontWeight: FontWeight.w700,
                         color: schedule.isAutoRefreshActive
                             ? statusColor
-                            : statusColor.withOpacity(0.5),
+                            : statusColor.withValues(alpha: 0.5),
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -2427,7 +2427,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         color: colorScheme.surfaceContainerHighest,
         border: Border(
           bottom: BorderSide(
-            color: colorScheme.outline.withOpacity(0.2),
+            color: colorScheme.outline.withValues(alpha: 0.2),
           ),
         ),
       ),
@@ -2600,12 +2600,12 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         color: colorScheme.surface,
         borderRadius: BorderRadius.circular(UIConstants.cardRadius),
         border: Border.all(
-          color: widget.selectedLine!.lineColor.withOpacity(UIConstants.cardBorderOpacity),
+          color: widget.selectedLine!.lineColor.withValues(alpha: UIConstants.cardBorderOpacity),
           width: UIConstants.cardBorderWidth,
         ),
         boxShadow: [
           BoxShadow(
-            color: colorScheme.shadow.withOpacity(0.05),
+            color: colorScheme.shadow.withValues(alpha: 0.05),
             blurRadius: UIConstants.cardElevation,
             offset: const Offset(0, 2),
           ),
@@ -2689,9 +2689,9 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-      splashColor: color.withOpacity(0.15),
-      highlightColor: color.withOpacity(0.08),
-      hoverColor: color.withOpacity(0.05),
+      splashColor: color.withValues(alpha: 0.15),
+      highlightColor: color.withValues(alpha: 0.08),
+      hoverColor: color.withValues(alpha: 0.05),
       child: AnimatedContainer(
         duration: _kSelectorAnimDuration,
         curve: Curves.easeInOut,
@@ -2701,19 +2701,19 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           vertical: UIConstants.chipPaddingV,
         ),
         decoration: BoxDecoration(
-          color: isSelected ? color.withOpacity(0.2) : colorScheme.surfaceContainerHighest,
+          color: isSelected ? color.withValues(alpha: 0.2) : colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(UIConstants.chipRadius),
           border: Border.all(
             color: isSelected
-                ? color.withOpacity(UIConstants.selectedChipBorderOpacity)
-                : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
+                ? color.withValues(alpha: UIConstants.selectedChipBorderOpacity)
+                : colorScheme.outline.withValues(alpha: UIConstants.chipBorderOpacity),
             width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
           ),
           // Subtle shadow for selected state
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: color.withOpacity(0.15),
+                    color: color.withValues(alpha: 0.15),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -2781,12 +2781,12 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         color: colorScheme.surface,
         borderRadius: BorderRadius.circular(UIConstants.cardRadius),
         border: Border.all(
-          color: color.withOpacity(UIConstants.cardBorderOpacity),
+          color: color.withValues(alpha: UIConstants.cardBorderOpacity),
           width: UIConstants.cardBorderWidth,
         ),
         boxShadow: [
           BoxShadow(
-            color: colorScheme.shadow.withOpacity(0.05),
+            color: colorScheme.shadow.withValues(alpha: 0.05),
             blurRadius: UIConstants.cardElevation,
             offset: const Offset(0, 2),
           ),
@@ -2877,7 +2877,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     final colorScheme = Theme.of(context).colorScheme;
     
     // For semi-transparent colors, blend with the actual surface background
-    // This is critical for selected chips with color.withOpacity(0.2)
+    // This is critical for selected chips with color.withValues(alpha: 0.2)
     final effectiveColor = backgroundColor.opacity < 1.0
         ? Color.alphaBlend(backgroundColor, colorScheme.surface)
         : backgroundColor;
@@ -2890,15 +2890,15 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     if (isLightBackground) {
       // Light background - use dark text
       // Use theme's onSurface color for consistency with app design
-      return colorScheme.onSurface.withOpacity(0.87);
+      return colorScheme.onSurface.withValues(alpha: 0.87);
     } else {
       // Dark background - use light text
       if (brightness == Brightness.dark) {
         // Dark theme: Use onSurface which is already light
-        return colorScheme.onSurface.withOpacity(0.95);
+        return colorScheme.onSurface.withValues(alpha: 0.95);
       } else {
         // Light theme: Use inverted color (light text on dark background)
-        return Colors.white.withOpacity(0.95);
+        return Colors.white.withValues(alpha: 0.95);
       }
     }
   }
@@ -2917,7 +2917,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
     
   // Calculate proper text color with good contrast against the chip background
   final textColor = isSelected
-    ? _getContrastTextColor(color.withOpacity(0.2), context)
+    ? _getContrastTextColor(color.withValues(alpha: 0.2), context)
     : colorScheme.onSurface;
 
   // Respect reduced-motion / accessible navigation settings
@@ -2929,9 +2929,9 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(UIConstants.chipRadius),
-        splashColor: color.withOpacity(0.15),
-        highlightColor: color.withOpacity(0.08),
-        hoverColor: color.withOpacity(0.05),
+        splashColor: color.withValues(alpha: 0.15),
+        highlightColor: color.withValues(alpha: 0.08),
+        hoverColor: color.withValues(alpha: 0.05),
         child: AnimatedContainer(
           duration: _kSelectorAnimDuration,
           curve: Curves.easeInOut,
@@ -2941,20 +2941,20 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
           ),
           decoration: BoxDecoration(
             color: isSelected
-                ? color.withOpacity(0.2)
+                ? color.withValues(alpha: 0.2)
                 : colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(UIConstants.chipRadius),
             border: Border.all(
               color: isSelected
-                  ? color.withOpacity(UIConstants.selectedChipBorderOpacity)
-                  : colorScheme.outline.withOpacity(UIConstants.chipBorderOpacity),
+                  ? color.withValues(alpha: UIConstants.selectedChipBorderOpacity)
+                  : colorScheme.outline.withValues(alpha: UIConstants.chipBorderOpacity),
               width: isSelected ? UIConstants.selectedChipBorderWidth : UIConstants.chipBorderWidth,
             ),
             // Subtle shadow for selected chips
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: color.withOpacity(0.15),
+                      color: color.withValues(alpha: 0.15),
                       blurRadius: 4,
                       offset: const Offset(0, 2),
                     ),
@@ -3019,7 +3019,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                         subtitle,
                         style: TextStyle(
                           fontSize: UIConstants.chipSubtitleFontSize,
-                          color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -3068,10 +3068,10 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         // Use minimal padding to fit within chip's vertical padding
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: colorScheme.outline.withOpacity(0.2),
+            color: colorScheme.outline.withValues(alpha: 0.2),
             width: 0.5,
           ),
         ),
@@ -3081,7 +3081,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
             Icon(
               Icons.compare_arrows, 
               size: UIConstants.compareIconSize,
-              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
             ),
             const SizedBox(width: 3),
             ...lineColors.take(3).map((color) => Container(
@@ -3092,12 +3092,12 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                 color: color,
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: Colors.white.withOpacity(0.3),
+                  color: Colors.white.withValues(alpha: 0.3),
                   width: 0.5,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: color.withOpacity(0.3),
+                    color: color.withValues(alpha: 0.3),
                     blurRadius: 2,
                     offset: const Offset(0, 1),
                   ),
@@ -3112,7 +3112,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                   style: TextStyle(
                     fontSize: UIConstants.chipSubtitleFontSize,
                     fontWeight: FontWeight.w600,
-                    color: colorScheme.onSurfaceVariant.withOpacity(0.8),
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
                   ),
                 ),
               ),
@@ -3143,7 +3143,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
         curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
         decoration: BoxDecoration(
-          color: colorScheme.primary.withOpacity(0.13),
+          color: colorScheme.primary.withValues(alpha: 0.13),
           borderRadius: BorderRadius.circular(7),
           border: Border.all(
             color: colorScheme.primary,
@@ -3192,8 +3192,8 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                     widget.onStationChanged(stationOnNewLine);
                   },
                   borderRadius: BorderRadius.circular(4),
-                  splashColor: lineColor.withOpacity(0.25),
-                  highlightColor: lineColor.withOpacity(0.08),
+                  splashColor: lineColor.withValues(alpha: 0.25),
+                  highlightColor: lineColor.withValues(alpha: 0.08),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 120),
                     width: 22,
@@ -3203,7 +3203,7 @@ class _MtrSelectorState extends State<_MtrSelector> with TickerProviderStateMixi
                       color: lineColor,
                       borderRadius: BorderRadius.circular(5),
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withValues(alpha: 0.6),
                         width: 1.2,
                       ),
                     ),
@@ -3392,24 +3392,24 @@ class _MtrScheduleBody extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Theme.of(context).colorScheme.surface.withOpacity(0.96),
-                  Theme.of(context).colorScheme.surface.withOpacity(0.82),
+                  Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
+                  Theme.of(context).colorScheme.surface.withValues(alpha: 0.82),
                 ],
               ),
               borderRadius: BorderRadius.circular(UIConstants.cardRadius),
               border: Border.all(
-                color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
                 width: 0.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
                   blurRadius: 14,
                   offset: const Offset(0, 6),
                   spreadRadius: 0,
                 ),
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.shadow.withOpacity(0.035),
+                  color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.035),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -3425,8 +3425,8 @@ class _MtrScheduleBody extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Theme.of(context).colorScheme.surface.withOpacity(0.45),
-                        Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.32),
+                        Theme.of(context).colorScheme.surface.withValues(alpha: 0.45),
+                        Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.32),
                       ],
                     ),
                   ),
@@ -3439,10 +3439,10 @@ class _MtrScheduleBody extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: UIConstants.chipPaddingH, vertical: UIConstants.chipPaddingV),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                            color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
                             borderRadius: BorderRadius.circular(UIConstants.chipRadius),
                             border: Border.all(
-                              color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
                               width: 0.5,
                             ),
                           ),
@@ -3451,7 +3451,7 @@ class _MtrScheduleBody extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.all(4),
                                 decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
@@ -3501,7 +3501,7 @@ class _MtrScheduleBody extends StatelessWidget {
                               child: Text(
                                 lang.isEnglish ? 'No trains scheduled' : '暫無班次',
                                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: AppColors.getSecondaryTextColor(context).withOpacity(0.9),
+                                  color: AppColors.getSecondaryTextColor(context).withValues(alpha: 0.9),
                                 ),
                               ),
                             ),
@@ -3557,10 +3557,10 @@ class _MtrScheduleBody extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: colorScheme.surface.withOpacity(0.5),
+          color: colorScheme.surface.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: colorScheme.outline.withOpacity(0.15),
+            color: colorScheme.outline.withValues(alpha: 0.15),
             width: 0.5,
           ),
         ),
@@ -3673,9 +3673,9 @@ class _ShimmerBoxState extends State<_ShimmerBox> with SingleTickerProviderState
                 _shimmerAnimation.value + 0.3,
               ].map((e) => e.clamp(0.0, 1.0)).toList(),
               colors: [
-                colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                colorScheme.surfaceContainerHighest.withOpacity(0.6),
-                colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
               ],
             ),
           ),
@@ -3708,10 +3708,10 @@ class _TrainListItem extends StatelessWidget {
       margin: EdgeInsets.only(bottom: isLast ? 0 : 6),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: colorScheme.surface.withOpacity(0.5),
+        color: colorScheme.surface.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: colorScheme.outline.withOpacity(0.08),
+          color: colorScheme.outline.withValues(alpha: 0.08),
           width: 0.5,
         ),
       ),
@@ -3752,7 +3752,7 @@ class _TrainListItem extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: colorScheme.primaryContainer.withOpacity(0.3),
+              color: colorScheme.primaryContainer.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
@@ -3785,7 +3785,7 @@ class _TrainListItem extends StatelessWidget {
           color: Colors.green,
           shadow: [
             BoxShadow(
-              color: Colors.green.withOpacity(0.4),
+              color: Colors.green.withValues(alpha: 0.4),
               blurRadius: 6,
               spreadRadius: 1,
             ),
@@ -3797,7 +3797,7 @@ class _TrainListItem extends StatelessWidget {
         color: Colors.deepOrange,
         shadow: [
           BoxShadow(
-            color: Colors.deepOrange.withOpacity(0.5),
+            color: Colors.deepOrange.withValues(alpha: 0.5),
             blurRadius: 8,
             spreadRadius: 1,
           ),
@@ -3811,7 +3811,7 @@ class _TrainListItem extends StatelessWidget {
         color: Colors.green,
         shadow: [
           BoxShadow(
-            color: Colors.green.withOpacity(0.4),
+            color: Colors.green.withValues(alpha: 0.4),
             blurRadius: 6,
             spreadRadius: 1,
           ),
@@ -3825,7 +3825,7 @@ class _TrainListItem extends StatelessWidget {
         color: Colors.amber,
         shadow: [
           BoxShadow(
-            color: Colors.amber.withOpacity(0.3),
+            color: Colors.amber.withValues(alpha: 0.3),
             blurRadius: 5,
             spreadRadius: 1,
           ),
@@ -3895,10 +3895,10 @@ class _TrainListItem extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: colorScheme.primary.withOpacity(0.1),
+              color: colorScheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(5),
               border: Border.all(
-                color: colorScheme.primary.withOpacity(0.3),
+                color: colorScheme.primary.withValues(alpha: 0.3),
                 width: 0.5,
               ),
             ),
@@ -3923,7 +3923,7 @@ class _TrainListItem extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: colorScheme.secondaryContainer.withOpacity(0.3),
+              color: colorScheme.secondaryContainer.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(5),
             ),
             child: Row(
@@ -3946,15 +3946,15 @@ class _TrainListItem extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: statusColor?.withOpacity(0.15),
+              color: statusColor?.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(5),
               border: Border.all(
-                color: statusColor?.withOpacity(0.4) ?? Colors.transparent,
+                color: statusColor?.withValues(alpha: 0.4) ?? Colors.transparent,
                 width: 0.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: statusColor?.withOpacity(0.2) ?? Colors.transparent,
+                  color: statusColor?.withValues(alpha: 0.2) ?? Colors.transparent,
                   blurRadius: 3,
                   spreadRadius: 0,
                 ),

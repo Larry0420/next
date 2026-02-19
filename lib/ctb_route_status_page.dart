@@ -1568,12 +1568,12 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         child: FakeGlass(  // ✅ 使用 FakeGlass 而非 LiquidGlass
           shape: const LiquidRoundedSuperellipse(borderRadius: 20),
           settings: LiquidGlassSettings(
-            blur: 2.0, 
-            thickness: 2.0,                                             // ✅ 提高模糊
-            glassColor: theme.colorScheme.surface.withOpacity(0.15), // ✅ 降至 0.15
+            blur: 1.0, 
+            thickness: 10.0,                                             // ✅ 提高模糊
+            glassColor: theme.colorScheme.surfaceContainer.withValues(alpha: 0.5), // ✅ 降至 0.15
             lightIntensity: 1.2,
             saturation: 1.1,
-            lightAngle: 0.0,
+            lightAngle: 45.0,
             refractiveIndex: 1.3,
           ),
           child: Container(
@@ -1581,7 +1581,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               // ✅ 移除 color 屬性，避免雙重不透明
               border: Border(
                 top: BorderSide(
-                  color: theme.colorScheme.outline.withOpacity(0.2),
+                  color: theme.colorScheme.outline.withValues(alpha: 0.2),
                   width: 0.5,
                 ),
               ),
@@ -1597,7 +1597,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.onSurfaceVariant.withOpacity(0.9),
+                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -1685,15 +1685,15 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                                         ),
                                         selected: isSelected,
                                         selectedColor: isSpecial
-                                          ? theme.colorScheme.secondary.withOpacity(0.9)
+                                          ? theme.colorScheme.secondary.withValues(alpha: 0.9)
                                           : isOutbound 
-                                              ? theme.colorScheme.primary.withOpacity(0.9)
-                                              : theme.colorScheme.tertiary.withOpacity(0.9),
+                                              ? theme.colorScheme.primary.withValues(alpha: 0.9)
+                                              : theme.colorScheme.tertiary.withValues(alpha: 0.9),
                                         backgroundColor: isSpecial
-                                          ? theme.colorScheme.secondary.withOpacity(0.1)
+                                          ? theme.colorScheme.secondary.withValues(alpha: 0.1)
                                           : isOutbound
-                                              ? theme.colorScheme.primary.withOpacity(0.1)
-                                              : theme.colorScheme.tertiary.withOpacity(0.1),
+                                              ? theme.colorScheme.primary.withValues(alpha: 0.1)
+                                              : theme.colorScheme.tertiary.withValues(alpha: 0.1),
                                         checkmarkColor: theme.colorScheme.onPrimary,
                                         labelStyle: TextStyle(
                                           color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
@@ -1952,14 +1952,14 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                       }
                     },
                     selectedColor: isOutbound 
-                      ? Theme.of(context).colorScheme.primary.withOpacity(0.2) 
-                      : Theme.of(context).colorScheme.tertiary.withOpacity(0.2),
-                    checkmarkColor: isOutbound ? Theme.of(context).colorScheme.primary.withOpacity(0.85) : Theme.of(context).colorScheme.tertiary.withOpacity(0.85),
+                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.2) 
+                      : Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.2),
+                    checkmarkColor: isOutbound ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.85) : Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.85),
                     avatar: isSelected 
                       ? Icon(
                           isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
                           size: 18,
-                          color: isOutbound ? Theme.of(context).colorScheme.primary.withOpacity(0.85) : Theme.of(context).colorScheme.tertiary.withOpacity(0.85),
+                          color: isOutbound ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.85) : Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.85),
                         )
                       : null,
                   );
@@ -3053,7 +3053,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       elevation: 3,
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.05),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
@@ -3077,12 +3077,12 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: cs.secondary.withOpacity(0.1),
+                  color: cs.secondary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '${lang.type} $serviceType',
-                  style: TextStyle(fontSize: 11, color: cs.secondary.withOpacity(0.85)),
+                  style: TextStyle(fontSize: 11, color: cs.secondary.withValues(alpha: 0.85)),
                 ),
               ),
           ],
@@ -3390,8 +3390,8 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                         boxShadow: [
                           BoxShadow(
                             color: isHighlighted
-                              ? Theme.of(context).colorScheme.tertiary.withOpacity(0.5)
-                              : Theme.of(context).colorScheme.shadow.withOpacity(0.3),
+                              ? Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.5)
+                              : Theme.of(context).colorScheme.shadow.withValues(alpha: 0.3),
                             blurRadius: isHighlighted ? 8 : 4,
                             offset: const Offset(0, 2),
                           ),
@@ -3501,9 +3501,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                               Polyline(
                                 points: polylinePoints,
                                 strokeWidth: 6.0,
-                                color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
+                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.6),
                                 borderStrokeWidth: 1.0,
-                                borderColor: Theme.of(context).colorScheme.surface.withOpacity(0.1),
+                                borderColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.1),
                               ),
                             ],
                           ),
@@ -3524,9 +3524,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                             ),
                             markerSize: const Size(18, 18),
                             markerDirection: MarkerDirection.heading,
-                            headingSectorColor: Theme.of(context).colorScheme.error.withOpacity(0.2),
+                            headingSectorColor: Theme.of(context).colorScheme.error.withValues(alpha: 0.2),
                             headingSectorRadius: 60,
-                            accuracyCircleColor: Theme.of(context).colorScheme.error.withOpacity(0.1),
+                            accuracyCircleColor: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
                             showAccuracyCircle: true,
                             showHeadingSector: true,
                           ),
@@ -3560,11 +3560,11 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
             //   margin: const EdgeInsets.only(top: 8),
             //   padding: const EdgeInsets.all(12),
             //   decoration: BoxDecoration(
-            //     color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+            //     color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
             //     borderRadius: BorderRadius.circular(20),
             //     boxShadow: [
             //       BoxShadow(
-            //         color: Theme.of(context).colorScheme.shadow.withOpacity(0.1),
+            //         color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.1),
             //         blurRadius: 6,
             //         offset: const Offset(0, 2),
             //       ),
@@ -4043,7 +4043,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: isDeparted 
-                    ? colorScheme.onSurface.withOpacity(0.6)
+                    ? colorScheme.onSurface.withValues(alpha: 0.6)
                     : (isNearlyArrived ? colorScheme.secondary : colorScheme.primary),
                 fontSize: 24,
               ),
@@ -4079,7 +4079,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
           Text(
             '($abs)',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
               fontSize: 10,
               height: 1.2,
             ),
@@ -4091,7 +4091,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     : Text(
         abs,
         style: theme.textTheme.labelSmall?.copyWith(
-          color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
           fontSize: 10,
           height: 1.2,
         ),
@@ -4211,11 +4211,11 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         : colorScheme.tertiaryContainer.withAlpha(150); // 淺色模式下更飽和
 
     // 邊框使用主題色 Tertiary 且透明度更高，使其更顯眼
-    final nearbyBorderColor = colorScheme.tertiary.withOpacity(isDark ? 0.8 : 0.6);
+    final nearbyBorderColor = colorScheme.tertiary.withValues(alpha: isDark ? 0.8 : 0.6);
 
     // 文字顏色使用 onTertiaryContainer 確保高對比度
     final nearbyTextPrimary = colorScheme.onTertiaryContainer;
-    final nearbyTextSecondary = colorScheme.onTertiaryContainer.withOpacity(0.85); // 副標題顏色較淡，但依然清晰
+    final nearbyTextSecondary = colorScheme.onTertiaryContainer.withValues(alpha: 0.85); // 副標題顏色較淡，但依然清晰
 
     // Active state base colors
     final activeSurface = widget.isNearby ? nearbyBgColor : colorScheme.surfaceContainerHigh;
@@ -4225,8 +4225,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
     // Dynamic Border Color
     final currentBorderColor = isActive
-        ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary.withOpacity(0.3))
-        : colorScheme.outlineVariant.withOpacity(0.3);
+        ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary.withValues(alpha: 0.3))
+        : colorScheme.outlineVariant.withValues(alpha: 0.3);
 
     final now = DateTime.now();
     final hasDeparted = _displayEtas.any((e) {
@@ -4274,7 +4274,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                   width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                   decoration: BoxDecoration(
-                    color: nearbyTextSecondary.withOpacity(0.1),
+                    color: nearbyTextSecondary.withValues(alpha: 0.1),
                     border: Border(
                       bottom: BorderSide(color: nearbyBorderColor, width: 1.5),
                     ),
@@ -4312,6 +4312,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                       ),
                     ),
                     const SizedBox(width: 12),
+                    /*
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4319,7 +4320,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                           _buildStatusSection(theme, colorScheme, nearbyTextSecondary),
                           //const SizedBox(height: 6),
                           OptionalMarquee(
-                            text: widget.displayName.toTitleCase(),
+                            text: widget.displayName,//.toTitleCase(),
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                               color: widget.isNearby ? nearbyTextPrimary : colorScheme.onSurface,
@@ -4329,6 +4330,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         ],
                       ),
                     ),
+                    */
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       onPressed: _toggleExpanded,
@@ -4353,7 +4355,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         decoration: BoxDecoration(
                           color: colorScheme.surfaceContainer,
                           border: Border(
-                            top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.2)),
+                            top: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.2)),
                           ),
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -4697,10 +4699,10 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
             child: Container(
               height: 60,
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                  color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                  color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
                   width: 1.0,
                 ),
               ),
@@ -4778,10 +4780,10 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
             filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
             child: Container(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                  color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                  color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
                   width: 1.0,
                 ),
               ),
@@ -4815,7 +4817,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w500,
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                                           ),
                                         ),
                                     ],
@@ -4827,7 +4829,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                 width: 36,
                                 height: 36,
                                 decoration: BoxDecoration(
-                                  color: dirColor.withOpacity(0.15),
+                                  color: dirColor.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Icon(
@@ -4846,7 +4848,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                       child: displayFrom.isEmpty && displayTo.isEmpty 
                       ? Text(
                           isEnglish ? 'Details unavailable' : '暫無路線資料',
-                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5)),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
                         )
                       : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4866,7 +4868,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
                                     height: 1,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
                                   ),
                                 ),
                                 Expanded(
@@ -4877,7 +4879,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                       fontSize: 10,
                                       height: 1,
                                       fontWeight: FontWeight.w400,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
                                     ),
                                   ),
                                 ),
@@ -4973,7 +4975,7 @@ class _PulsingRingState extends State<_PulsingRing> with SingleTickerProviderSta
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-              color: widget.color.withOpacity(1.0 - _animation.value),
+              color: widget.color.withValues(alpha: 1.0 - _animation.value),
               width: 3,
             ),
           ),

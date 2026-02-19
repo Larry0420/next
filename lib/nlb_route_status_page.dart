@@ -376,7 +376,7 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
                 margin: const EdgeInsets.only(top: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.amber.withOpacity(0.2),
+                  color: Colors.amber.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -412,7 +412,7 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
             settings: LiquidGlassSettings(
               blur: 0.0, 
               thickness: 19,
-              glassColor: theme.colorScheme.surface.withOpacity(0.15), // ✅ 降至 0.15
+              glassColor: theme.colorScheme.surface.withValues(alpha: 0.15), // ✅ 降至 0.15
               lightIntensity: 1.2,
               saturation: 1.1,
               refractiveIndex: 1.3,
@@ -426,7 +426,7 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
                     width: 40, height: 4,
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.onSurfaceVariant.withOpacity(0.4),
+                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -589,8 +589,8 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
                   boxShadow: [
                     BoxShadow(
                       color: isHighlighted
-                        ? Theme.of(context).colorScheme.tertiary.withOpacity(0.5)
-                        : Theme.of(context).colorScheme.shadow.withOpacity(0.3),
+                        ? Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.5)
+                        : Theme.of(context).colorScheme.shadow.withValues(alpha: 0.3),
                       blurRadius: isHighlighted ? 8 : 4,
                       offset: const Offset(0, 2),
                     ),
@@ -691,7 +691,7 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
           ),
           if (points.length > 1)
             PolylineLayer(polylines: [
-              Polyline(points: points, strokeWidth: 4.0, color: Colors.blue.withOpacity(0.7)),
+              Polyline(points: points, strokeWidth: 4.0, color: Colors.blue.withValues(alpha: 0.7)),
             ]),
           MarkerLayer(markers: markers),
           CurrentLocationLayer(
@@ -708,9 +708,9 @@ class _NlbRouteStatusPageState extends State<NlbRouteStatusPage> {
               ),
               markerSize: const Size(18, 18),
               markerDirection: MarkerDirection.heading,
-              headingSectorColor: Theme.of(context).colorScheme.error.withOpacity(0.2),
+              headingSectorColor: Theme.of(context).colorScheme.error.withValues(alpha: 0.2),
               headingSectorRadius: 60,
-              accuracyCircleColor: Theme.of(context).colorScheme.error.withOpacity(0.1),
+              accuracyCircleColor: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
               showAccuracyCircle: true,
               showHeadingSector: true,
             ),
@@ -804,7 +804,7 @@ class _NlbStopCardState extends State<NlbStopCard> {
       elevation: isActive ? 2 : 0,
       margin: const EdgeInsets.symmetric(vertical: 4),
       color: widget.isNearby 
-          ? colorScheme.tertiaryContainer.withOpacity(0.3)
+          ? colorScheme.tertiaryContainer.withValues(alpha: 0.3)
           : (isActive ? colorScheme.surfaceContainerHigh : colorScheme.surfaceContainerLow),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -985,7 +985,7 @@ class _PulsingRingState extends State<_PulsingRing> with SingleTickerProviderSta
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-              color: widget.color.withOpacity(1.0 - _animation.value),
+              color: widget.color.withValues(alpha: 1.0 - _animation.value),
               width: 3,
             ),
           ),

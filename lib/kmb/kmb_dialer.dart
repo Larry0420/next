@@ -263,7 +263,7 @@ class _KmbDialerState extends State<KmbDialer> {
                           style: TextStyle(
                             fontSize: 32, 
                             fontWeight: FontWeight.bold,
-                            color: input.isEmpty ? theme.colorScheme.outline.withOpacity(0.5) : theme.colorScheme.onSurface
+                            color: input.isEmpty ? theme.colorScheme.outline.withValues(alpha: 0.5) : theme.colorScheme.onSurface
                           )
                         ),
                       ],
@@ -471,7 +471,7 @@ class _KmbDialerState extends State<KmbDialer> {
                 if (key == '<') {
                   enabled = canBackspace;
                   action = _onBackspace;
-                  bgColor = theme.colorScheme.secondaryContainer.withOpacity(0.5);
+                  bgColor = theme.colorScheme.secondaryContainer.withValues(alpha: 0.5);
                 } else if (key == 'OK') {
                   enabled = canSubmit;
                   action = () {
@@ -499,8 +499,8 @@ class _KmbDialerState extends State<KmbDialer> {
                       elevation: 0,
                       backgroundColor: bgColor,
                       foregroundColor: fgColor,
-                      disabledBackgroundColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                      disabledForegroundColor: theme.colorScheme.onSurface.withOpacity(0.3),
+                      disabledBackgroundColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                      disabledForegroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.3),
                     ),
                     onPressed: enabled ? action : null,
                     child: key == '<' 
@@ -808,7 +808,7 @@ class _OneHandDialerContainerState extends State<_OneHandDialerContainer> with S
     return LiquidGlassLayer(
       settings: LiquidGlassSettings(
         blur: 1, 
-        glassColor: Theme.of(context).colorScheme.surface.withOpacity(0.1), 
+        glassColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.1), 
         thickness: 20
       ),
       child: ScaleTransition(

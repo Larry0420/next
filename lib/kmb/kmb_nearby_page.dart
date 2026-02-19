@@ -20,6 +20,7 @@ import '../main.dart' show AccessibilityProvider, LanguageProvider, DeveloperSet
 import '../toTitleCase.dart';
 import 'company_name.dart';
 
+
 class KmbNearbyPage extends StatefulWidget {
   const KmbNearbyPage({super.key});
 
@@ -169,45 +170,64 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
     final bool isEn = langProv?.isEnglish ?? true;
 
+    // 1. 檢查當前狀態
+    // 在 Android 12+，如果只授權了大致位置：
+    // location (Fine) -> denied
+    // locationWhenInUse (Coarse) -> granted
     var preciseStatus = await Permission.location.status;
     var approxStatus = await Permission.locationWhenInUse.status;
 
-    // Already granted — fast path
+    // 情況 A: 已有精確位置 -> 完美
     if (preciseStatus.isGranted) return false;
+
+    // 情況 B: 只有大致位置 -> 視為成功，但在背景提示使用者（可選：升級請求）
+    // 注意：這裡直接返回 true，表示"已有足夠權限進行定位"
     if (approxStatus.isGranted) {
       _showApproxSnackbar(isEn);
-      return true;
+      return true; 
     }
 
-    // Both permanently denied — direct to settings
+    // 情況 C: 兩者都被永久拒絕 -> 引導去設定
     if (preciseStatus.isPermanentlyDenied && approxStatus.isPermanentlyDenied) {
       if (await _showOpenSettingsDialog()) await openAppSettings();
       _setError(isEn ? 'Location permission required' : '需要位置權限');
       return null;
     }
 
-    // Show rationale before requesting
+    // 情況 D: 全新請求或曾被拒絕但未永久拒絕 -> 顯示 Rationale
+    // 這是您卡住的地方。如果使用者之前選了"拒絕"，下次進來這裡會顯示 Rationale。
+    // 如果使用者點了 Rationale 的"取消"，則返回 null。
     final shouldRequest = await _showLocationRationaleDialog();
     if (!shouldRequest) {
       _setError(isEn ? 'Location permission denied' : '位置權限被拒絕');
       return null;
     }
 
-    // Request precise — on Android 12+ user may choose "approximate" here
-    preciseStatus = await Permission.location.request();
-    if (preciseStatus.isGranted) return false;
+    // 2. 發起請求
+    // Android 12 關鍵：必須同時請求 Fine 和 Coarse，否則系統會忽略請求
+    // Permission.location.request() 在 permission_handler 內部會同時請求兩者
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.location,
+      Permission.locationWhenInUse
+    ].request();
+    
+    // 重新獲取狀態
+    preciseStatus = statuses[Permission.location] ?? PermissionStatus.denied;
+    approxStatus = statuses[Permission.locationWhenInUse] ?? PermissionStatus.denied;
 
-    // Precise denied — try approx explicitly
-    approxStatus = await Permission.locationWhenInUse.request();
-    if (approxStatus.isGranted) {
+    // 3. 處理請求結果
+    if (preciseStatus.isGranted) {
+      return false; // 成功獲得精確位置
+    } else if (approxStatus.isGranted) {
       _showApproxSnackbar(isEn);
-      return true;
+      return true; // 成功獲得大致位置
     }
 
-    // Still denied after both requests
+    // 4. 如果請求後仍被拒絕
     if (preciseStatus.isPermanentlyDenied || approxStatus.isPermanentlyDenied) {
       if (await _showOpenSettingsDialog()) await openAppSettings();
     }
+    
     _setError(isEn ? 'Location permission denied' : '位置權限被拒絕');
     return null;
   }
@@ -817,11 +837,12 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                             // buildStopCard 入面
                             Expanded(
                               child: kIsWeb
-                                ? Text(
+                                ? AutoSizeText(
+                                    maxFontSize: 12,
                                     displayName.toTitleCase(),
                                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: badgeTextColor, height: 1.2),
                                     maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                    overflow: TextOverflow.fade,
                                   )
                                 : OptionalMarquee(
                                     text: displayName.toTitleCase(),
@@ -997,10 +1018,10 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
       decoration: BoxDecoration(
-        color: dirColor.withOpacity(0.08),
+        color: dirColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: dirColor.withOpacity(0.25),
+          color: dirColor.withValues(alpha: 0.25),
           width: 1,
         ),
       ),
@@ -1043,7 +1064,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     final activeColor = colorScheme.primaryContainer;
-    final inactiveColor = colorScheme.surfaceContainerHighest.withOpacity(0.5);
+    final inactiveColor = colorScheme.surfaceContainerHighest.withValues(alpha: 0.5);
     final activeContentColor = colorScheme.onPrimaryContainer;
     final inactiveContentColor = colorScheme.onSurfaceVariant;
 
@@ -1553,7 +1574,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+            color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(

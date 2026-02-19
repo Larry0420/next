@@ -1,24 +1,22 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:lrt_next_train/optionalMarquee.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:ui';
-import 'dart:async';
-import 'dart:math' as math;
-import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
-import 'package:intl/intl.dart';
 
-import 'api/kmb.dart';
-import 'api/citybus.dart';
 import '../kmb_route_status_page.dart';
 import '../ctb_route_status_page.dart';
 import '../main.dart' show LanguageProvider;
-
 import '../toTitleCase.dart';
-
-import 'company_name.dart';
+import 'api/citybus.dart';
+import 'api/kmb.dart';
+import 'company_name.dart';   // ← 只保留一個
 
 
 
@@ -38,8 +36,6 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
   List<Map<String, dynamic>> _historyRoutes = [];
   bool _loading = true;
   bool _isInitializing = true; // 新增
-  // Add field
-  int _innerTabIndex = 0; 
   
   @override
   void initState() {
@@ -600,9 +596,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.15), width: 1.0),
+          border: Border.all(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15), width: 1.0),
         ),
         child: Material(
           color: Colors.transparent,
@@ -636,7 +632,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                   Container(
                     width: 36,
                     height: 36,
-                    decoration: BoxDecoration(color: dirColor.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+                    decoration: BoxDecoration(color: dirColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
                     child: Icon(dirIcon, color: dirColor, size: 20),
                   ),
                   const SizedBox(width: 12),
@@ -649,7 +645,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8),
+                                color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.8),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: AutoSizeText(
@@ -662,7 +658,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                               const SizedBox(width: 6),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                decoration: BoxDecoration(color: Colors.blue.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
+                                decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
                                 child: AutoSizeText('${lang.type}($serviceType)', style: TextStyle(fontSize: 10, color: Colors.blue[800], fontWeight: FontWeight.w600)),
                               ),
                             ],
@@ -678,12 +674,14 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                         
                         if (timeText != null) ...[
                           const SizedBox(height: 2),
-                          Text(timeText, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6))),
+                          Text(timeText, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.6))),
                         ],
                       ],
                     ),
                   ),
                   AnimatedSwitcher(
+                    switchInCurve: Curves.bounceIn,
+                    switchOutCurve: Curves.bounceOut,
                     duration: const Duration(milliseconds: 300),
                     transitionBuilder: (child, animation) {
                       return ScaleTransition(
@@ -700,7 +698,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                             onPressed: onUnpin,
                             icon: const Icon(Icons.push_pin, size: 20),
                             style: IconButton.styleFrom(
-                              backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                              backgroundColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
                               foregroundColor: Theme.of(context).colorScheme.primary,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
@@ -713,7 +711,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                         : Icon(
                             key: const ValueKey('unpinned'),
                             Icons.chevron_right,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
                             size: 20,
                           ),
                   )
@@ -957,260 +955,93 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
 
   @override
   Widget build(BuildContext context) {
-    final route = widget.stop['route'] ?? '';
+    final cs = Theme.of(context).colorScheme;
+    final isEn = widget.lang.isEnglish;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Stop metadata
+    final route = widget.stop['route']?.toString() ?? '';
+    final companyId = widget.stop['co']?.toString() ?? 'KMB';
     final nameEn = widget.stop['stopNameEn'] ?? widget.stop['stopName'] ?? '';
     final nameTc = widget.stop['stopNameTc'] ?? widget.stop['stopName'] ?? '';
-    final stopName = widget.lang.isEnglish ? (nameEn.isNotEmpty ? nameEn.toString().toTitleCase()  : nameTc) : (nameTc.isNotEmpty ? nameTc : nameEn.toString().toTitleCase());
-    final latitude = widget.stop['latitude'];
-    final longitude = widget.stop['longitude'];
-    final destEn = widget.stop['destEn'];
-    final destTc = widget.stop['destTc'];
+    final stopName = isEn
+        ? (nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : nameTc.toString())
+        : (nameTc.toString().isNotEmpty ? nameTc.toString() : nameEn.toString().toTitleCase());
 
-    // ✅ FIX: Check null BEFORE toString()
-    final destEnStr = destEn?.toString() ?? '';
-    final destTcStr = destTc?.toString() ?? '';
-
-    final dest = widget.lang.isEnglish 
+    final destEnStr = widget.stop['destEn']?.toString() ?? '';
+    final destTcStr = widget.stop['destTc']?.toString() ?? '';
+    final dest = isEn
         ? (destEnStr.isNotEmpty ? destEnStr : destTcStr).toTitleCase()
         : (destTcStr.isNotEmpty ? destTcStr : destEnStr).toTitleCase();
 
     final direction = widget.stop['direction']?.toString() ?? 'O';
+    final directionUpper = direction.toUpperCase();
+    final isInbound = directionUpper.startsWith('I');
+    final directionColor = isInbound ? cs.tertiary : cs.primary;
+    final directionIcon = isInbound ? Icons.arrow_circle_left : Icons.arrow_circle_right;
 
-    final cs = Theme.of(context).colorScheme;
-    Color directionColor = cs.secondary;
-    IconData directionIcon = Icons.arrow_forward;
-    if (direction.toUpperCase().startsWith('O')) {
-      directionColor = cs.primary;
-      directionIcon = Icons.arrow_circle_right;
-    } else if (direction.toUpperCase().startsWith('I')) {
-      directionColor = cs.tertiary;
-      directionIcon = Icons.arrow_circle_left;
-    }
-
+    // ✅ CompanyProvider
+    final companyProv = context.watch<CompanyProvider>();
+    final badgeBgColor = companyProv.getBadgeBgColor(companyId, context);
+    final badgeBorderColor = companyProv.getBadgeBorderColor(companyId, context);
+    final badgeTextColor = companyProv.getBadgeTextColor(companyId, context);
+    final companyName = companyProv.getName(companyId, isEn);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.15), width: 1.0),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {
-                  // ✅ Extract values from widget.stop
-                  final route = widget.stop['route']?.toString() ?? '';
-                  final companyId = widget.stop['co']?.toString().toLowerCase() ?? 'kmb';
-                  final direction = widget.stop['direction']?.toString() ?? 'O';
-                  final serviceType = widget.stop['serviceType']?.toString() ?? '1';
-                  final seq = widget.stop['seq']?.toString();
-                  final stopId = widget.stop['stopId']?.toString();
-                  
-                  if (companyId == 'ctb' || companyId == 'nwfb') {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => CtbRouteStatusPage(
-                          route: route,              // ✅ Now defined
-                          bound: direction,           // ✅ Use extracted variable
-                          serviceType: null,          // CTB doesn't use service type
-                          companyId: companyId,
-                          autoExpandSeq: seq,
-                          autoExpandStopId: stopId,
-                        ),
-                      ),
-                    );
-                  } else {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => KmbRouteStatusPage(
-                          route: route,              // ✅ Now defined
-                          bound: direction,           // ✅ Use extracted variable
-                          serviceType: serviceType,   // ✅ Use extracted variable
-                          companyId: null,            // KMB uses null, not 'kmb'
-                          autoExpandSeq: seq,
-                          autoExpandStopId: stopId,
-                        ),
-                      ),
-                    );
-                  }
-                },
-
-                borderRadius: BorderRadius.circular(14),
-                child: Padding(
-                  padding: const EdgeInsets.all(14.0),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: directionColor.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: directionColor.withOpacity(0.3), width: 1.5),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(route, style: TextStyle(fontWeight: FontWeight.bold, color: directionColor, fontSize: 14)),
-                            const SizedBox(height: 2),
-                            Icon(directionIcon, color: directionColor, size: 16),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            OptionalMarquee(
-                              text: stopName,
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface),
-                            ),
-
-                            //AutoSizeText(stopName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface), maxLines: 2, overflow: TextOverflow.ellipsis),
-                            if (dest.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Row(
-                                children: [
-                                  Icon(directionIcon, size: 11, color: directionColor.withOpacity(0.8)),
-                                  const SizedBox(width: 4),
-                                  Expanded(child: AutoSizeText(dest, style: TextStyle(fontSize: 11, color: directionColor.withOpacity(0.9), fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                                ],
-                              ),
-                            ],
-                            const SizedBox(height: 6),
-                            if (_loading)
-                              const SizedBox(height: 2, width: 100, child: LinearProgressIndicator(stopIndicatorRadius: 20, trackGap: 60,))
-                            else if (_etas.isEmpty)
-                              Text(
-                                _hasNoScheduledBuses 
-                                    ? (widget.lang.isEnglish 
-                                        ? 'No scheduled buses' 
-                                        : '暫無班次')
-                                    : (widget.lang.isEnglish 
-                                        ? 'Service not available' 
-                                        : '服務暫停'),
-                                style: TextStyle(
-                                  color: _hasNoScheduledBuses 
-                                      ? Colors.grey.shade600 
-                                      : Colors.orange.shade700,
-                                  fontSize: 11,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              )
-                            else
-                              // ✅ Update the Wrap widget in build() method:
-                              Wrap(
-                                spacing: 12,
-                                runSpacing: 4,
-                                children: _etas.take(3).map((e) {
-                                  final etaRaw = e['eta'] ?? e['eta_time'];
-                                  final rmk = widget.lang.isEnglish 
-                                      ? (e['rmk_en'] ?? e['rmktc'] ?? '') 
-                                      : (e['rmk_tc'] ?? e['rmktc'] ?? e['rmk_en'] ?? '');
-                                  
-                                  String etaText = widget.lang.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士';
-                                  String etaTime = '';  // ✅ Will be populated below
-                                  bool isDeparted = false;
-                                  bool isNearlyArrived = false;
-                                  
-                                  if (etaRaw != null) {
-                                    try {
-                                      final dt = DateTime.parse(etaRaw.toString()).toLocal();
-                                      final diff = dt.difference(DateTime.now());
-                                      final mins = diff.inMinutes;
-                                      
-                                      // ✅ Format the actual time
-                                      etaTime = _formatEtaTime(dt);
-                                      
-                                      if (mins <= 0 && diff.inSeconds > -60) {
-                                        etaText = widget.lang.isEnglish ? 'Arriving' : '到達中';
-                                        isNearlyArrived = true;
-                                      } else if (diff.isNegative) {
-                                        etaText = widget.lang.isEnglish ? '- min' : '- 分鐘';
-                                        isDeparted = true;
-                                      } else if (mins < 1) {
-                                        etaText = widget.lang.isEnglish ? 'Due' : '即將抵達';
-                                        isNearlyArrived = true;
-                                      } else {
-                                        etaText = widget.lang.isEnglish ? '$mins min' : '$mins分鐘';
-                                      }
-                                    } catch (_) {}
-                                  }
-                                  
-                                  return Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        etaText, 
-                                        style: TextStyle(
-                                          fontSize: 14, 
-                                          fontWeight: FontWeight.bold, 
-                                          color: isDeparted 
-                                              ? Colors.grey[400] 
-                                              : (isNearlyArrived 
-                                                  ? Colors.green 
-                                                  : _getEtaColor(etaRaw)),
-                                        ),
-                                      ),
-                                      if (etaTime.isNotEmpty) 
-                                        Text(
-                                          etaTime, 
-                                          style: TextStyle(
-                                            fontSize: 9, 
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
-                                          ),
-                                        ),
-                                      if (rmk.isNotEmpty) 
-                                        Text(
-                                          rmk, 
-                                          style: TextStyle(
-                                            fontSize: 9, 
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
-                                          ),
-                                        ),
-                                    ],
-                                  );
-                                }).toList(),
-                              ),
-                            /*
-                            if (latitude != null && longitude != null) ...[
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Icon(Icons.location_on, size: 11, color: Theme.of(context).colorScheme.primary.withOpacity(0.7)),
-                                  const SizedBox(width: 4),
-                                  Text('$latitude, $longitude', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant, fontFamily: 'monospace')),
-                                ],
-                              ),
-                            ],
-                            */
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: widget.onUnpin,
-                        icon: const Icon(Icons.push_pin, size: 20),
-                        style: IconButton.styleFrom(
-                          backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
-                          foregroundColor: Theme.of(context).colorScheme.primary,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.all(10),
-                        ),
-                      ),
-                    ],
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: badgeBorderColor.withValues(alpha: 0.3),
+            width: 1.0,
+          ),
+          boxShadow: isDark
+              ? [
+                  BoxShadow(
+                    color: Colors.white.withValues(alpha: 0.04),
+                    blurRadius: 0,
+                    spreadRadius: 0.5,
                   ),
-                ),
+                ]
+              : [
+                  BoxShadow(
+                    color: badgeBorderColor.withValues(alpha: 0.12),
+                    blurRadius: 8,
+                    spreadRadius: 0,
+                    offset: const Offset(0, 2),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 2,
+                    spreadRadius: 0,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _handleTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(14.0),
+              child: Row(
+                children: [
+                  _buildRouteBadge(
+                    badgeBgColor, badgeBorderColor, badgeTextColor,
+                    directionIcon, route, companyName,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildStopInfo(cs, stopName, dest, directionColor, directionIcon),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildUnpinButton(cs),
+                ],
               ),
             ),
           ),
@@ -1218,4 +1049,220 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       ),
     );
   }
+
+  void _handleTap() {
+    final route = widget.stop['route']?.toString() ?? '';
+    final companyId = widget.stop['co']?.toString().toLowerCase() ?? 'kmb';
+    final direction = widget.stop['direction']?.toString() ?? 'O';
+    final serviceType = widget.stop['serviceType']?.toString() ?? '1';
+    final seq = widget.stop['seq']?.toString();
+    final stopId = widget.stop['stopId']?.toString();
+
+    final page = (companyId == 'ctb' || companyId == 'nwfb')
+        ? CtbRouteStatusPage(
+            route: route,
+            bound: direction,
+            serviceType: null,
+            companyId: companyId,
+            autoExpandSeq: seq,
+            autoExpandStopId: stopId,
+          )
+        : KmbRouteStatusPage(
+            route: route,
+            bound: direction,
+            serviceType: serviceType,
+            companyId: null,
+            autoExpandSeq: seq,
+            autoExpandStopId: stopId,
+          );
+
+    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+  }
+
+  Widget _buildRouteBadge(
+    Color bgColor,
+    Color borderColor,
+    Color textColor,
+    IconData icon,
+    String route,
+    String companyName,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor, width: 1.5),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(route, style: TextStyle(fontWeight: FontWeight.bold, color: textColor, fontSize: 14)),
+          const SizedBox(height: 2),
+          Icon(icon, color: textColor, size: 16),
+          const SizedBox(height: 2),
+          Text(companyName, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: textColor.withValues(alpha: 0.8))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStopInfo(
+    ColorScheme cs,
+    String stopName,
+    String dest,
+    Color directionColor,
+    IconData directionIcon,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        OptionalMarquee(
+          text: stopName,
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: cs.onSurface),
+        ),
+        if (dest.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Row(
+            children: [
+              Icon(directionIcon, size: 11, color: directionColor.withValues(alpha: 0.8)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: AutoSizeText(
+                  dest,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: directionColor.withValues(alpha: 0.9),
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 6),
+        _buildEtaSection(cs),
+      ],
+    );
+  }
+
+  Widget _buildEtaSection(ColorScheme cs) {
+    final bool noSchedule = _hasNoScheduledBuses;
+    final isEn = widget.lang.isEnglish;
+
+    Widget content;
+    if (_loading) {
+      content = const SizedBox(
+        key: ValueKey('loading'),
+        height: 2,
+        width: 100,
+        child: LinearProgressIndicator(stopIndicatorRadius: 20, trackGap: 60),
+      );
+    } else if (_etas.isEmpty) {
+      content = Text(
+        key: const ValueKey('empty'),
+        noSchedule
+            ? (isEn ? 'No scheduled buses' : '暫無班次')
+            : (isEn ? 'Service not available' : '服務暫停'),
+        style: TextStyle(
+          color: noSchedule ? Colors.grey.shade600 : Colors.orange.shade700,
+          fontSize: 11,
+          fontStyle: FontStyle.italic,
+        ),
+      );
+    } else {
+      content = Wrap(
+        key: const ValueKey('etas'),
+        spacing: 12,
+        runSpacing: 4,
+        children: _etas.take(3).map(_buildEtaItem).toList(),
+      );
+    }
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.1),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        ),
+      ),
+      child: content,
+    );
+  }
+
+  Widget _buildEtaItem(Map<String, dynamic> e) {
+    final cs = Theme.of(context).colorScheme;
+    final isEn = widget.lang.isEnglish;
+    final etaRaw = e['eta'] ?? e['eta_time'];
+    final rmk = isEn
+        ? (e['rmk_en'] ?? e['rmktc'] ?? '').toString()
+        : (e['rmk_tc'] ?? e['rmktc'] ?? e['rmk_en'] ?? '').toString();
+
+    String etaText = isEn ? 'No upcoming buses' : '沒有即將到站的巴士';
+    String etaTime = '';
+    bool isDeparted = false;
+    bool isNearlyArrived = false;
+
+    if (etaRaw != null) {
+      try {
+        final dt = DateTime.parse(etaRaw.toString()).toLocal();
+        final diff = dt.difference(DateTime.now());
+        final mins = diff.inMinutes;
+        etaTime = _formatEtaTime(dt);
+
+        if (mins <= 0 && diff.inSeconds > -60) {
+          etaText = isEn ? 'Arriving' : '到達中';
+          isNearlyArrived = true;
+        } else if (diff.isNegative) {
+          etaText = isEn ? '- min' : '- 分鐘';
+          isDeparted = true;
+        } else if (mins < 1) {
+          etaText = isEn ? 'Due' : '即將抵達';
+          isNearlyArrived = true;
+        } else {
+          etaText = isEn ? '$mins min' : '$mins分鐘';
+        }
+      } catch (_) {}
+    }
+
+    final textColor = isDeparted
+        ? Colors.grey[400]
+        : (isNearlyArrived ? Colors.green : _getEtaColor(etaRaw));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(etaText, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textColor)),
+        if (etaTime.isNotEmpty)
+          Text(etaTime, style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant.withValues(alpha: 0.7))),
+        if (rmk.isNotEmpty)
+          Text(rmk, style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant.withValues(alpha: 0.7))),
+      ],
+    );
+  }
+
+  Widget _buildUnpinButton(ColorScheme cs) {
+    return IconButton(
+      onPressed: widget.onUnpin,
+      icon: const Icon(Icons.push_pin, size: 16),
+      style: IconButton.styleFrom(
+        backgroundColor: cs.primaryContainer.withValues(alpha: 0.5),
+        foregroundColor: cs.primary,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.all(1),
+      ),
+    );
+  }
+
+
 }

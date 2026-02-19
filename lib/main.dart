@@ -22,6 +22,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:flex_color_picker/flex_color_picker.dart';
 
 //Tailor Made .dart imported
 import 'mtr/mtr_schedule_page.dart';
@@ -104,92 +105,92 @@ class AppColors {
   
   // 主要文字顏色
   static Color getPrimaryTextColor(BuildContext context) {
-    return Theme.of(context).colorScheme.onSurface.withOpacity(_primaryOpacity);
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: _primaryOpacity);
   }
   
   // 次要文字顏色
   static Color getSecondaryTextColor(BuildContext context) {
-    return Theme.of(context).colorScheme.onSurface.withOpacity(_secondaryOpacity);
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: _secondaryOpacity);
   }
   
   // 提示文字顏色
   static Color getHintTextColor(BuildContext context) {
-    return Theme.of(context).colorScheme.onSurface.withOpacity(_hintOpacity);
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: _hintOpacity);
   }
   
   // 禁用文字顏色
   static Color getDisabledTextColor(BuildContext context) {
-    return Theme.of(context).colorScheme.onSurface.withOpacity(_disabledOpacity);
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: _disabledOpacity);
   }
   
   // 微妙文字顏色
   static Color getSubtleTextColor(BuildContext context) {
-    return Theme.of(context).colorScheme.onSurface.withOpacity(_subtleOpacity);
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: _subtleOpacity);
   }
   
   // 非常微妙的文字顏色
   static Color getVerySubtleTextColor(BuildContext context) {
-    return Theme.of(context).colorScheme.onSurface.withOpacity(_verySubtleOpacity);
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: _verySubtleOpacity);
   }
   
   // 邊框顏色 - 微妙
   static Color getSubtleBorderColor(BuildContext context) {
-    return Theme.of(context).colorScheme.outline.withOpacity(_borderSubtleOpacity);
+    return Theme.of(context).colorScheme.outline.withValues(alpha: _borderSubtleOpacity);
   }
   
   // 邊框顏色 - 輕微
   static Color getLightBorderColor(BuildContext context) {
-    return Theme.of(context).colorScheme.outline.withOpacity(_borderLightOpacity);
+    return Theme.of(context).colorScheme.outline.withValues(alpha: _borderLightOpacity);
   }
   
   // 邊框顏色 - 中等
   static Color getMediumBorderColor(BuildContext context) {
-    return Theme.of(context).colorScheme.outline.withOpacity(_borderMediumOpacity);
+    return Theme.of(context).colorScheme.outline.withValues(alpha: _borderMediumOpacity);
   }
   
   // 邊框顏色 - 強烈
   static Color getStrongBorderColor(BuildContext context) {
-    return Theme.of(context).colorScheme.outline.withOpacity(_borderStrongOpacity);
+    return Theme.of(context).colorScheme.outline.withValues(alpha: _borderStrongOpacity);
   }
   
   // 邊框顏色 - 非常強烈
   static Color getVeryStrongBorderColor(BuildContext context) {
-    return Theme.of(context).colorScheme.outline.withOpacity(_borderVeryStrongOpacity);
+    return Theme.of(context).colorScheme.outline.withValues(alpha: _borderVeryStrongOpacity);
   }
   
   // 陰影顏色 - 輕微
   static Color getLightShadowColor(BuildContext context) {
-    return Theme.of(context).colorScheme.shadow.withOpacity(_shadowLightOpacity);
+    return Theme.of(context).colorScheme.shadow.withValues(alpha: _shadowLightOpacity);
   }
   
   // 陰影顏色 - 中等
   static Color getMediumShadowColor(BuildContext context) {
-    return Theme.of(context).colorScheme.shadow.withOpacity(_shadowMediumOpacity);
+    return Theme.of(context).colorScheme.shadow.withValues(alpha: _shadowMediumOpacity);
   }
   
   // 主要顏色 - 輕微透明度
   static Color getPrimaryLightColor(BuildContext context) {
-    return Theme.of(context).colorScheme.primary.withOpacity(_containerLightOpacity);
+    return Theme.of(context).colorScheme.primary.withValues(alpha: _containerLightOpacity);
   }
   
   // 主要顏色 - 中等透明度
   static Color getPrimaryMediumColor(BuildContext context) {
-    return Theme.of(context).colorScheme.primary.withOpacity(_containerMediumOpacity);
+    return Theme.of(context).colorScheme.primary.withValues(alpha: _containerMediumOpacity);
   }
   
   // 次要顏色 - 中等透明度
   static Color getSecondaryMediumColor(BuildContext context) {
-    return Theme.of(context).colorScheme.secondary.withOpacity(_containerMediumOpacity);
+    return Theme.of(context).colorScheme.secondary.withValues(alpha: _containerMediumOpacity);
   }
   
   // 主要容器顏色 - 中等透明度
   static Color getPrimaryContainerMediumColor(BuildContext context) {
-    return Theme.of(context).colorScheme.primaryContainer.withOpacity(_containerMediumOpacity);
+    return Theme.of(context).colorScheme.primaryContainer.withValues(alpha: _containerMediumOpacity);
   }
   
   // 次要容器顏色 - 中等透明度
   static Color getSecondaryContainerMediumColor(BuildContext context) {
-    return Theme.of(context).colorScheme.secondaryContainer.withOpacity(_containerMediumOpacity);
+    return Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: _containerMediumOpacity);
   }
   
   // 表面顏色
@@ -821,31 +822,31 @@ class LrtApp extends StatelessWidget {
       ),
       textTheme: baseTheme.textTheme.apply(fontSizeFactor: accessibility.textScale).copyWith(
         bodyLarge: baseTheme.textTheme.bodyLarge?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.90) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.90) : null,
         ),
         bodyMedium: baseTheme.textTheme.bodyMedium?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.90) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.90) : null,
         ),
         bodySmall: baseTheme.textTheme.bodySmall?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.65) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.65) : null,
         ),
         titleLarge: baseTheme.textTheme.titleLarge?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.97) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.97) : null,
           fontWeight: FontWeight.w600,
         ),
         titleMedium: baseTheme.textTheme.titleMedium?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.92) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.92) : null,
           fontWeight: FontWeight.w600,
         ),
         titleSmall: baseTheme.textTheme.titleSmall?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.88) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.88) : null,
         ),
         headlineMedium: baseTheme.textTheme.headlineMedium?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.97) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.97) : null,
           fontWeight: FontWeight.w600,
         ),
         labelLarge: baseTheme.textTheme.labelLarge?.copyWith(
-          color: isDark ? Colors.white.withOpacity(0.90) : null,
+          color: isDark ? Colors.white.withValues(alpha: 0.90) : null,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -1080,7 +1081,7 @@ class UIConstants {
     return TextStyle(
       fontSize: fontSizeS * accessibility.textScale,
       // Slightly stronger caption contrast
-      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
     );
   }
   
@@ -1155,7 +1156,7 @@ class UIConstants {
   static List<BoxShadow> scheduleCardShadow(BuildContext context) {
     return [
       BoxShadow(
-        color: Theme.of(context).colorScheme.shadow.withOpacity(0.4),
+        color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.4),
         blurRadius: 4,
         offset: const Offset(0, 1),
         spreadRadius: 1.5,
@@ -1174,7 +1175,7 @@ class UIConstants {
   static Border scheduleListTileBorder(BuildContext context) {
     return Border(
       bottom: BorderSide(
-        color: Theme.of(context).colorScheme.outline.withOpacity(0.08),
+        color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.08),
         width: UIConstants.borderWidth,
       ),
     );
@@ -1189,16 +1190,16 @@ class UIConstants {
   static Color scheduleErrorBackground(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark 
-        ? Colors.red.shade900.withOpacity(0.25)  // 深色模式：深紅背景，對比度更佳
-        : Colors.red.shade50.withOpacity(0.85);   // 淺色模式：淡紅背景，柔和警示
+        ? Colors.red.shade900.withValues(alpha: 0.25)  // 深色模式：深紅背景，對比度更佳
+        : Colors.red.shade50.withValues(alpha: 0.85);   // 淺色模式：淡紅背景，柔和警示
   }
   
   // 錯誤邊框 - 增強視覺引導
   static Color scheduleErrorBorder(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark 
-        ? Colors.red.shade400.withOpacity(0.6)   // 深色模式：明亮紅邊框
-        : Colors.red.shade700.withOpacity(0.5);   // 淺色模式：深紅邊框
+        ? Colors.red.shade400.withValues(alpha: 0.6)   // 深色模式：明亮紅邊框
+        : Colors.red.shade700.withValues(alpha: 0.5);   // 淺色模式：深紅邊框
   }
   
   // 統一圖標大小
@@ -1286,8 +1287,8 @@ class UIConstants {
   static Color routesWarningBackground(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark 
-        ? Colors.orange.shade900.withOpacity(0.22)  // 深色模式：深橙背景
-        : Colors.orange.shade50.withOpacity(0.80);   // 淺色模式：淡橙背景
+        ? Colors.orange.shade900.withValues(alpha: 0.22)  // 深色模式：深橙背景
+        : Colors.orange.shade50.withValues(alpha: 0.80);   // 淺色模式：淡橙背景
   }
   
   // Routes 頁面樣式方法
@@ -1711,6 +1712,7 @@ class ThemeProvider extends ChangeNotifier {
   Color get seedColor => colorOptions[_colorCategoryIndex].colors[_colorIndex];
   bool get isDarkMode => _isDarkMode;
   bool get useSystemTheme => _useSystemTheme;
+  
 
   // 視覺舒適度優化的主題顏色選項 - WCAG 2.1 標準對比度，提升可讀性與美觀度
   static const List<ThemeColorOption> colorOptions = [
@@ -1750,6 +1752,20 @@ class ThemeProvider extends ChangeNotifier {
         Color(0xFFE65100), // 鮮橙 - 高可見度 5.2:1 (AA+)
         Color(0xFFC62828), // 櫻桃紅 - 警示醒目 5.8:1 (AA+)
         Color(0xFF00695C), // 深青 - 深度對比 7.5:1 (AAA)
+      ],
+    ),
+     // 色板 - 鮮明飽和，適合個性化顯示
+    ThemeColorOption(
+      name: 'Vivid',
+      colors: [
+        Color(0xFFE53935), // 鮮紅
+        Color(0xFFE91E63), // 桃紅
+        Color(0xFF8E24AA), // 亮紫
+        Color(0xFF1E88E5), // 亮藍
+        Color(0xFF00ACC1), // 青藍
+        Color(0xFF43A047), // 亮綠
+        Color(0xFFFB8C00), // 亮橙
+        Color(0xFF6D4C41), // 深棕
       ],
     ),
   ];
@@ -1835,34 +1851,38 @@ class ThemeProvider extends ChangeNotifier {
   
   String getCategoryDisplayName(String categoryName, bool isEnglish) {
     switch (categoryName) {
-      case 'Standard':
-        return isEnglish ? 'Standard' : '標準舒適';
-      case 'Comfort':
-        return isEnglish ? 'Eye Comfort' : '護眼舒適';
-      case 'Accessible':
-        return isEnglish ? 'High Contrast' : '高對比度';
-      default:
-        return categoryName;
+      case 'Standard':   return isEnglish ? 'Standard'      : '標準舒適';
+      case 'Comfort':    return isEnglish ? 'Eye Comfort'   : '護眼舒適';
+      case 'Accessible': return isEnglish ? 'High Contrast' : '高對比度';
+      case 'Vivid':      return isEnglish ? 'Vivid'         : '鮮明色板';
+      default:           return categoryName;
     }
   }
-  
+
   String getColorDisplayName(int categoryIndex, int colorIndex, bool isEnglish) {
     final standardNames = [
-      isEnglish ? ['Sage Green', 'Ocean Blue', 'Lavender', 'Warm Amber', 'Rose', 'Teal'] 
-                : ['清雅綠', '海洋藍', '薰衣草', '暖琥珀', '玫瑰', '青綠'],
-      isEnglish ? ['Forest Green', 'Sky Blue', 'Soft Purple', 'Earth Brown', 'Blush Pink', 'Sea Green'] 
-                : ['森林綠', '天空藍', '柔紫', '大地棕', '淡粉', '海綠'],
-      isEnglish ? ['Emerald', 'Royal Blue', 'Violet', 'Vivid Orange', 'Cherry Red', 'Deep Teal'] 
-                : ['翡翠綠', '皇室藍', '紫羅蘭', '鮮橙', '櫻桃紅', '深青']
+      isEnglish
+          ? ['Sage Green', 'Ocean Blue', 'Lavender', 'Warm Amber', 'Rose', 'Teal']
+          : ['清雅綠', '海洋藍', '薰衣草', '暖琥珀', '玫瑰', '青綠'],
+      isEnglish
+          ? ['Forest Green', 'Sky Blue', 'Soft Purple', 'Earth Brown', 'Blush Pink', 'Sea Green']
+          : ['森林綠', '天空藍', '柔紫', '大地棕', '淡粉', '海綠'],
+      isEnglish
+          ? ['Emerald', 'Royal Blue', 'Violet', 'Vivid Orange', 'Cherry Red', 'Deep Teal']
+          : ['翡翠綠', '皇室藍', '紫羅蘭', '鮮橙', '櫻桃紅', '深青'],
+      isEnglish
+          ? ['Red', 'Pink', 'Purple', 'Blue', 'Cyan', 'Green', 'Orange', 'Brown']
+          : ['鮮紅', '桃紅', '亮紫', '亮藍', '青藍', '亮綠', '亮橙', '深棕'],
     ];
-    
-    if (categoryIndex >= 0 && categoryIndex < standardNames.length && 
+
+    if (categoryIndex >= 0 && categoryIndex < standardNames.length &&
         colorIndex >= 0 && colorIndex < standardNames[categoryIndex].length) {
       return standardNames[categoryIndex][colorIndex];
     }
-    
+
     return isEnglish ? 'Color ${colorIndex + 1}' : '顏色 ${colorIndex + 1}';
   }
+
 }
 
   /* ========================= Developer Settings Provider ========================= */
@@ -3615,13 +3635,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Theme.of(context).colorScheme.surface.withOpacity(0.95),
-                Theme.of(context).colorScheme.surface.withOpacity(0.88),
+                Theme.of(context).colorScheme.surface.withValues(alpha: 0.95),
+                Theme.of(context).colorScheme.surface.withValues(alpha: 0.88),
               ],
             ),
             border: Border(
               bottom: BorderSide(
-                color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.2),
+                color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.2),
                 width: 1.0,
               ),
             ),
@@ -3731,13 +3751,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: active
-                        ? Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.14)
-                        : Theme.of(context).colorScheme.onSurface.withOpacity(0.06),
+                        ? Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.14)
+                        : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: active
-                          ? Theme.of(context).colorScheme.outline.withOpacity(0.28)
-                          : Theme.of(context).colorScheme.onSurface.withOpacity(0.20),
+                          ? Theme.of(context).colorScheme.outline.withValues(alpha: 0.28)
+                          : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.20),
                       width: 1.5,
                     ),
                   ),
@@ -3749,7 +3769,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                         child: Icon(
                           Icons.autorenew_rounded,
                           size: 15 * accessibility.iconScale,
-                          color: Theme.of(context).colorScheme.secondary.withOpacity(active ? 0.9 : 0.6),
+                          color: Theme.of(context).colorScheme.secondary.withValues(alpha: active ? 0.9 : 0.6),
                         ),
                       ),
                       const SizedBox(width: 5),
@@ -3762,7 +3782,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: Theme.of(context).colorScheme.onSurface.withOpacity(active ? 0.9 : 0.6),
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: active ? 0.9 : 0.6),
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -3786,7 +3806,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                                         shape: BoxShape.circle,
                                         boxShadow: [
                                           BoxShadow(
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.18),
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.18),
                                             blurRadius: 6,
                                             spreadRadius: 0.6,
                                           ),
@@ -3888,7 +3908,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
             decoration: BoxDecoration(
               border: Border(
                 top: BorderSide(
-                  color: colorScheme.outlineVariant.withOpacity(0.2),
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.2),
                   width: 1.0,
                 ),
               ),
@@ -4200,10 +4220,10 @@ class _StatusBar extends StatelessWidget {
     final Color statusColor = ok
         ? (isDark ? Colors.greenAccent.shade200 : Colors.green.shade600)
         : (isDark ? Colors.orangeAccent.shade200 : Colors.orange.shade700);
-    final Color borderColor = statusColor.withOpacity(0.35);
-    final Color bgColor = statusColor.withOpacity(isDark ? 0.18 : 0.12);
+    final Color borderColor = statusColor.withValues(alpha: 0.35);
+    final Color bgColor = statusColor.withValues(alpha: isDark ? 0.18 : 0.12);
     final Color iconColor = statusColor;
-    final Color textColor = isDark ? Colors.white : Colors.black.withOpacity(0.85);
+    final Color textColor = isDark ? Colors.white : Colors.black.withValues(alpha: 0.85);
     final Color subTextColor = isDark ? Colors.white70 : Colors.black54;
 
     return AnimatedContainer(
@@ -4217,7 +4237,7 @@ class _StatusBar extends StatelessWidget {
         border: Border.all(color: borderColor, width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: statusColor.withOpacity(0.10),
+            color: statusColor.withValues(alpha: 0.10),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -4237,7 +4257,7 @@ class _StatusBar extends StatelessWidget {
                 key: ValueKey(ok),
                 shadows: [
                   Shadow(
-                    color: statusColor.withOpacity(0.25),
+                    color: statusColor.withValues(alpha: 0.25),
                     blurRadius: 6,
                   ),
                 ],
@@ -4731,8 +4751,8 @@ class _TrainTileState extends State<_TrainTile> {
                   circleSize: math.max(40, 40 * math.min(accessibility.textScale, 1.3)), // Scale circle with text but limit growth
                   baseFontSize: math.min(14 * accessibility.textScale, 18), // Cap font size to prevent overflow
                   textColor: color,
-                  backgroundColor: color.withOpacity(_isPressed ? 0.25 : 0.15),
-                  borderColor: color.withOpacity(_isPressed ? 0.7 : 0.5),
+                  backgroundColor: color.withValues(alpha: _isPressed ? 0.25 : 0.15),
+                  borderColor: color.withValues(alpha: _isPressed ? 0.7 : 0.5),
                   borderWidth: _isPressed ? 2.0 : 1.5,
                 ),
               ),
@@ -4742,7 +4762,7 @@ class _TrainTileState extends State<_TrainTile> {
               style: TextStyle(
                 fontWeight: _isPressed ? FontWeight.w600 : FontWeight.w500,
                 color: Theme.of(context).brightness == Brightness.dark 
-                    ? Colors.white.withOpacity(0.87)
+                    ? Colors.white.withValues(alpha: 0.87)
                     : Theme.of(context).colorScheme.onSurface,
               ),
               child: Text(
@@ -4755,7 +4775,7 @@ class _TrainTileState extends State<_TrainTile> {
               '$ad: ${widget.train.time(lang.isEnglish)} • ${widget.train.trainLength ?? '?'} ${lang.cars}',
               style: TextStyle(
                 color: Theme.of(context).brightness == Brightness.dark 
-                    ? Colors.white.withOpacity(0.70)
+                    ? Colors.white.withValues(alpha: 0.70)
                     : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
               overflow: TextOverflow.ellipsis,
@@ -7056,7 +7076,7 @@ class _RouteSchedulesListState extends State<_RouteSchedulesList> {
                       scale: scale,
                       child: Material(
                         elevation: 4.0 * animValue, // Add a shadow that grows with animation
-                        color: Colors.blue.withOpacity(0.8 + animValue * 0.2), // Change background color
+                        color: Colors.blue.withValues(alpha: 0.8 + animValue * 0.2), // Change background color
                         borderRadius: BorderRadius.circular(10.0),
                         child: child,
                       ),
@@ -7798,16 +7818,14 @@ class _SettingsPage extends StatelessWidget {
   // 獲取類別的本地化顯示名稱
   String _getCategoryDisplayName(String categoryName, bool isEnglish) {
     switch (categoryName) {
-      case 'Standard':
-        return isEnglish ? 'Standard' : '標準舒適';
-      case 'Comfort':
-        return isEnglish ? 'Eye Comfort' : '護眼舒適';
-      case 'Accessible':
-        return isEnglish ? 'High Contrast' : '高對比度';
-      default:
-        return categoryName;
+      case 'Standard':   return isEnglish ? 'Standard'      : '標準舒適';
+      case 'Comfort':    return isEnglish ? 'Eye Comfort'   : '護眼舒適';
+      case 'Accessible': return isEnglish ? 'High Contrast' : '高對比度';
+      case 'Vivid':      return isEnglish ? 'Vivid'         : '鮮明色板';
+      default:           return categoryName;
     }
   }
+
   
   // 構建緊湊的卡片
   Widget _buildCompactCard(
@@ -9924,7 +9942,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
         curve: MotionConstants.emphasizedEasing,
         decoration: BoxDecoration(
           color: isSelected
-              ? colorScheme.primaryContainer.withOpacity(0.5)
+              ? colorScheme.primaryContainer.withValues(alpha: 0.5)
               : colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
@@ -9936,14 +9954,14 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: colorScheme.primary.withOpacity(0.15),
+                    color: colorScheme.primary.withValues(alpha: 0.15),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
                 ]
               : [
                   BoxShadow(
-                    color: colorScheme.shadow.withOpacity(0.05),
+                    color: colorScheme.shadow.withValues(alpha: 0.05),
                     blurRadius: 2,
                     offset: const Offset(0, 1),
                   ),
@@ -9971,7 +9989,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                               end: Alignment.bottomRight,
                               colors: [
                                 colorScheme.primary,
-                                colorScheme.primary.withOpacity(0.8),
+                                colorScheme.primary.withValues(alpha: 0.8),
                               ],
                             )
                           : null,
@@ -9980,7 +9998,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                       boxShadow: isSelected
                           ? [
                               BoxShadow(
-                                color: colorScheme.primary.withOpacity(0.3),
+                                color: colorScheme.primary.withValues(alpha: 0.3),
                                 blurRadius: 6,
                                 offset: const Offset(0, 2),
                               ),
@@ -11532,7 +11550,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                     return Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
+                        color: Colors.black.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
