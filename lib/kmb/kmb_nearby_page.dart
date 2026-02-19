@@ -164,49 +164,61 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   }
 
   Future<bool?> _ensureLocationPermission(LanguageProvider? langProv) async {
+    if (kIsWeb) return false;
+
     final bool isEn = langProv?.isEnglish ?? true;
-
-    // Web: skip permission_handler, use browser geolocation directly
-    if (kIsWeb) {
-      return false; // treat as precise, browser will prompt natively
-    }
-
 
     var preciseStatus = await Permission.location.status;
     var approxStatus = await Permission.locationWhenInUse.status;
 
-    if (preciseStatus.isDenied && approxStatus.isDenied) {
-      final shouldRequest = await _showLocationRationaleDialog();
-      if (!shouldRequest) {
-        _setError(isEn ? 'Location permission denied' : '位置權限被拒絕');
-        return null;
-      }
-      preciseStatus = await Permission.location.request();
-      approxStatus = await Permission.locationWhenInUse.status;
+    // Already granted — fast path
+    if (preciseStatus.isGranted) return false;
+    if (approxStatus.isGranted) {
+      _showApproxSnackbar(isEn);
+      return true;
     }
 
+    // Both permanently denied — direct to settings
     if (preciseStatus.isPermanentlyDenied && approxStatus.isPermanentlyDenied) {
       if (await _showOpenSettingsDialog()) await openAppSettings();
       _setError(isEn ? 'Location permission required' : '需要位置權限');
       return null;
     }
 
-    if (!preciseStatus.isGranted && !approxStatus.isGranted) {
+    // Show rationale before requesting
+    final shouldRequest = await _showLocationRationaleDialog();
+    if (!shouldRequest) {
       _setError(isEn ? 'Location permission denied' : '位置權限被拒絕');
       return null;
     }
 
-    final useApprox = !preciseStatus.isGranted && approxStatus.isGranted;
-    if (useApprox && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(isEn
-            ? 'Using approximate location — nearby results may be less accurate'
-            : '使用大概位置，附近結果可能不夠精確'),
-        duration: const Duration(seconds: 4),
-      ));
+    // Request precise — on Android 12+ user may choose "approximate" here
+    preciseStatus = await Permission.location.request();
+    if (preciseStatus.isGranted) return false;
+
+    // Precise denied — try approx explicitly
+    approxStatus = await Permission.locationWhenInUse.request();
+    if (approxStatus.isGranted) {
+      _showApproxSnackbar(isEn);
+      return true;
     }
 
-    return useApprox; // null = denied, false = precise, true = approximate
+    // Still denied after both requests
+    if (preciseStatus.isPermanentlyDenied || approxStatus.isPermanentlyDenied) {
+      if (await _showOpenSettingsDialog()) await openAppSettings();
+    }
+    _setError(isEn ? 'Location permission denied' : '位置權限被拒絕');
+    return null;
+  }
+
+  void _showApproxSnackbar(bool isEn) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(isEn
+          ? 'Using approximate location — nearby results may be less accurate'
+          : '使用大概位置，附近結果可能不夠精確'),
+      duration: const Duration(seconds: 4),
+    ));
   }
 
   void _setError(String msg) {
@@ -241,7 +253,9 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         _updateNearbyList(_position!);
         _fetchEtasForNearbyStops();
         _refreshTimer?.cancel();
-        _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchEtasForNearbyStops());
+        _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+          if (!_isFetching) _fetchEtasForNearbyStops();
+        });
       } catch (e) {
         _setError(e.toString());
       }
@@ -328,70 +342,90 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     if (generation != _filterGeneration) return;
 
     // Atomic swap — old list stays visible until new one is ready
-    if (mounted) setState(() {
-      _nearby = nearbyList.take(50).toList();
-      _loading = false;
-    });
-  }
-
-  Future<void> _fetchEtasForNearbyStops() async {
-    final futures = _nearby.map((stop) async {
-      try {
-        final co = stop.meta['co'];
-        final rawId = stop.stopId.split('-').last; // Remove 'kmb-' or 'ctb-' prefix
-
-        List<Map<String, dynamic>> etas = [];
-        
-        if (co == 'CTB') {
-          // 1. Fetch the list of all routes for this stop from the JSON mapping
-          final routes = await Citybus.getRoutesForStop(rawId);
-          
-          if (routes.isNotEmpty) {
-            // 2. Fetch ETAs for every route in parallel to save time
-            final etaResults = await Future.wait(
-              routes.map((r) => Citybus.fetchEta(rawId, r,))
-            );
-            
-            // 3. Flatten the list of lists into a single unified ETA list
-            etas = etaResults
-                .expand((list) => list)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList();
-          }
-        } else {
-          // KMB supports fetching all routes for a stop in a single call
-          etas = await Kmb.fetchStopEta(rawId);
-        }
-        
-        return MapEntry(stop.stopId, etas);
-      } catch (e) {
-        debugPrint('Error fetching ETAs for ${stop.stopId}: $e');
-        return MapEntry(stop.stopId, <Map<String, dynamic>>[]);
-      }
-    }).toList();
-
-    final results = await Future.wait(futures);
-    
     if (mounted) {
       setState(() {
-        for (final entry in results) {
-          _stopEtaCache[entry.key] = entry.value;
-        }
+      _nearby = nearbyList.take(50).toList();
+      _loading = false;
       });
     }
   }
+  
+  bool _isFetching = false;
+
+  Future<void> _fetchEtasForNearbyStops() async {
+    if (_isFetching) return;
+    _isFetching = true;
+
+    try {
+      // 1. Process all 50 stops simultaneously but limit concurrency at the network level
+      // using a simple List of futures.
+      final List<Future<void>> tasks = _nearby.map((stop) async {
+        try {
+          final co = stop.meta['co'];
+          final rawId = stop.stopId.split('-').last;
+          List<Map<String, dynamic>> etas;
+          
+          if (co == 'CTB') {
+            final routes = await Citybus.getRoutesForStop(rawId);
+            // Only CTB needs a nested Future.wait for routes
+            final etaResults = await Future.wait(routes.map((r) => Citybus.fetchEta(rawId, r)));
+            etas = etaResults.expand((i) => i).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          } else {
+            etas = await Kmb.fetchStopEta(rawId);
+          }
+
+          if (mounted) {
+            setState(() => _stopEtaCache[stop.stopId] = etas);
+          }
+        } catch (e) {
+          debugPrint('Error: $e');
+        }
+      }).toList();
+
+      // 2. This starts all requests but doesn't block the UI thread 
+      // because it's I/O bound.
+      await Future.wait(tasks);
+      
+    } finally {
+      _isFetching = false;
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+// Extract logic to a single helper
+Future<MapEntry<String, List<Map<String, dynamic>>>> _fetchSingleStop(_StopDistance stop) async {
+  try {
+    final co = stop.meta['co'];
+    final rawId = stop.stopId.split('-').last;
+    if (co == 'CTB') {
+      final routes = await Citybus.getRoutesForStop(rawId);
+      final results = await Future.wait(routes.map((r) => Citybus.fetchEta(rawId, r)));
+      return MapEntry(stop.stopId, results.expand((i) => i).map((e) => Map<String, dynamic>.from(e as Map)).toList());
+    }
+    return MapEntry(stop.stopId, await Kmb.fetchStopEta(rawId));
+  } catch (e) {
+    return MapEntry(stop.stopId, []);
+  }
+}
+
 
   static const _presetRanges = [100.0, 150.0, 200.0, 400.0];
   Timer? _rangeDebounce;
 
   // Add field
   int _filterGeneration = 0;
+  
+  DeveloperSettingsProvider get devSettings => context.watch<DeveloperSettingsProvider>();
+
 
   void _onRangeChanged(double meters) {
     if (_rangeMeters == meters) return;
     setState(() => _rangeMeters = meters);
     _rangeDebounce?.cancel();
-    _rangeDebounce = Timer(const Duration(milliseconds: 300), _init);
+    _rangeDebounce = Timer(const Duration(milliseconds: 300), () async {
+      _isFetching = false; // reset so refresh after range change isn't blocked
+      await _init();
+    });
   }
 
   Widget _buildRangeChip(String label, double meters, double textScale) {
@@ -480,6 +514,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final position = _position;
     final nearby = _nearby;
 
+    final devOn = devSettings;
+    final companyProv = context.watch<CompanyProvider>();
     return Scaffold(
       body: Column(
         children: [
@@ -671,7 +707,9 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                               80,
                         ),
                         itemCount: nearby.length,
-                        itemBuilder: (context, idx) => _buildStopCard(context, idx, langProv),
+                        itemBuilder: (context, idx) => _buildStopCard(
+                          context, idx, langProv, devOn, companyProv,
+                        ),
                       ),
           ),
           ),
@@ -690,39 +728,40 @@ String _resolveStopName(_StopDistance s, LanguageProvider langProv) {
   return name.toTitleCase();
 }
 
-  Widget _buildStopCard(BuildContext context, int idx, LanguageProvider langProv) {
+  Widget _buildStopCard(
+    BuildContext context,
+    int idx,
+    LanguageProvider langProv,
+    DeveloperSettingsProvider devSettings,
+    CompanyProvider companyProv, // ← use this, remove context.watch below
+  ) {
     final s = _nearby[idx];
-    
-    final devSettings = context.watch<DeveloperSettingsProvider>();
-    final showRank = devSettings.showRankBadge; // 假設欄位名稱為 showRankBadge
-    // 獲取主題狀態 (假設你用 Provider)
+    final showRank = devSettings.showRankBadge;
     final dark = isDark;
 
     // 1. Get Company Information
-    final companyProv = context.watch<CompanyProvider>();
-    final String? companyId = s.meta['co'] ?? s.meta['company']; // Extract company code
+    // ← removed: final companyProv = context.watch<CompanyProvider>();
+    final String? companyId = s.meta['co'] ?? s.meta['company'];
     final badgeBgColor = companyProv.getBadgeBgColor(companyId, context);
     final badgeBorderColor = companyProv.getBadgeBorderColor(companyId, context);
     final badgeTextColor = companyProv.getBadgeTextColor(companyId, context);
     final companyName = companyProv.getName(companyId, langProv.isEnglish);
-      // Extract stop names from metadata
+
     final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
     final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
     final displayName = langProv.isEnglish
         ? ((nameEn.toString().isNotEmpty) ? nameEn.toString() : (nameTc.toString().isNotEmpty ? nameTc.toString() : s.stopId))
         : ((nameTc.toString().isNotEmpty) ? nameTc.toString() : (nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : s.stopId));
-    
-    // Get ETAs for this stop
+
     final etas = _stopEtaCache[s.stopId] ?? [];
-    
-    // Group ETAs by route
+
     final Map<String, List<Map<String, dynamic>>> etasByRoute = {};
     for (final eta in etas) {
       final route = eta['route']?.toString() ?? '';
       if (route.isEmpty) continue;
       etasByRoute.putIfAbsent(route, () => []).add(eta);
     }
-    
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       // 使用三段色風格優化 Card 邊框
@@ -1195,7 +1234,7 @@ String _resolveStopName(_StopDistance s, LanguageProvider langProv) {
           },
         );
       },
-    );
+    ).whenComplete(() => sortOptionNotifier.dispose());
 
     /*showDialog(
       fullscreenDialog: false,
@@ -1444,7 +1483,7 @@ String _resolveStopName(_StopDistance s, LanguageProvider langProv) {
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () {
-              sortOptionNotifier.dispose();
+              //sortOptionNotifier.dispose();
               Navigator.of(context).pop();
             },
             style: IconButton.styleFrom(
@@ -1571,7 +1610,6 @@ String _resolveStopName(_StopDistance s, LanguageProvider langProv) {
     LanguageProvider langProv,
     _StopDistance stop,
   ) {
-    final routeKey = entry.key;
     final routeEtas = entry.value;
     final route = routeEtas.first['route']?.toString() ?? '';
 
