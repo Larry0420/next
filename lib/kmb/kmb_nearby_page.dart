@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:auto_size_text/auto_size_text.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:lrt_next_train/optionalMarquee.dart';
 import 'dart:async';
+import 'dart:math';
 import 'api/kmb.dart';
 import 'api/citybus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -250,10 +252,10 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           );
         }
         if (!mounted || _position == null) return;
-        _updateNearbyList(_position!);
-        _fetchEtasForNearbyStops();
+        await _updateNearbyList(_position!);
+        await _fetchEtasForNearbyStops();
         _refreshTimer?.cancel();
-        _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
           if (!_isFetching) _fetchEtasForNearbyStops();
         });
       } catch (e) {
@@ -284,8 +286,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         );
       }
       if (!mounted || _position == null) return;
-      _updateNearbyList(_position!);
-      _fetchEtasForNearbyStops();
+      await _updateNearbyList(_position!);
+      await _fetchEtasForNearbyStops();
       _refreshTimer?.cancel();
       _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchEtasForNearbyStops());
     } catch (e) {
@@ -344,7 +346,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     // Atomic swap — old list stays visible until new one is ready
     if (mounted) {
       setState(() {
-      _nearby = nearbyList.take(50).toList();
+      _nearby = nearbyList.take(10).toList();
       _loading = false;
       });
     }
@@ -392,22 +394,6 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     }
   }
 
-// Extract logic to a single helper
-Future<MapEntry<String, List<Map<String, dynamic>>>> _fetchSingleStop(_StopDistance stop) async {
-  try {
-    final co = stop.meta['co'];
-    final rawId = stop.stopId.split('-').last;
-    if (co == 'CTB') {
-      final routes = await Citybus.getRoutesForStop(rawId);
-      final results = await Future.wait(routes.map((r) => Citybus.fetchEta(rawId, r)));
-      return MapEntry(stop.stopId, results.expand((i) => i).map((e) => Map<String, dynamic>.from(e as Map)).toList());
-    }
-    return MapEntry(stop.stopId, await Kmb.fetchStopEta(rawId));
-  } catch (e) {
-    return MapEntry(stop.stopId, []);
-  }
-}
-
 
   static const _presetRanges = [100.0, 150.0, 200.0, 400.0];
   Timer? _rangeDebounce;
@@ -423,7 +409,7 @@ Future<MapEntry<String, List<Map<String, dynamic>>>> _fetchSingleStop(_StopDista
     setState(() => _rangeMeters = meters);
     _rangeDebounce?.cancel();
     _rangeDebounce = Timer(const Duration(milliseconds: 300), () async {
-      _isFetching = false; // reset so refresh after range change isn't blocked
+      //_isFetching = false; // reset so refresh after range change isn't blocked
       await _init();
     });
   }
@@ -718,15 +704,15 @@ Future<MapEntry<String, List<Map<String, dynamic>>>> _fetchSingleStop(_StopDista
     );
   }
 
-// Extracted helper to clean up build
-String _resolveStopName(_StopDistance s, LanguageProvider langProv) {
-  final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
-  final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
-  final name = langProv.isEnglish
-      ? (nameEn.toString().isNotEmpty ? nameEn.toString() : nameTc.toString().isNotEmpty ? nameTc.toString() : s.stopId)
-      : (nameTc.toString().isNotEmpty ? nameTc.toString() : nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : s.stopId);
-  return name.toTitleCase();
-}
+  // Extracted helper to clean up build
+  String _resolveStopName(_StopDistance s, LanguageProvider langProv) {
+    final nameEn = s.meta['name_en'] ?? s.meta['nameen'] ?? '';
+    final nameTc = s.meta['name_tc'] ?? s.meta['nametc'] ?? '';
+    final name = langProv.isEnglish
+        ? (nameEn.toString().isNotEmpty ? nameEn.toString() : nameTc.toString().isNotEmpty ? nameTc.toString() : s.stopId)
+        : (nameTc.toString().isNotEmpty ? nameTc.toString() : nameEn.toString().isNotEmpty ? nameEn.toString().toTitleCase() : s.stopId);
+    return name.toTitleCase();
+  }
 
   Widget _buildStopCard(
     BuildContext context,
@@ -1827,6 +1813,38 @@ class _FilterParams {
   });
 }
 
+// Add this top-level function (works in any isolate/worker)
+double _haversine(double lat1, double lon1, double lat2, double lon2) {
+  const r = 6371000.0;
+  final dLat = (lat2 - lat1) * math.pi / 180;
+  final dLon = (lon2 - lon1) * math.pi / 180;
+  final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) *
+      math.sin(dLon / 2) * math.sin(dLon / 2);
+  return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+}
+
+// In filterStops — replace Geolocator.distanceBetween:
+List<_StopDistance> _filterStops(_FilterParams p) {
+  final result = <_StopDistance>[];
+  for (final cellKey in p.nearbyCells) {
+    final cellStops = p.spatialGrid[cellKey];
+    if (cellStops == null) continue;
+    for (final stop in cellStops) {
+      final dist = _haversine(p.lat, p.lng, stop.lat, stop.lng); // ← fixed
+      if (dist <= p.rangeMeters) {
+        result.add(_StopDistance(
+          stopId: stop.stopId, lat: stop.lat, lng: stop.lng,
+          distanceMeters: dist, meta: stop.meta,
+        ));
+      }
+    }
+  }
+  result.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+  return result;
+}
+
+/*
 // Must be top-level for compute()
 List<_StopDistance> _filterStops(_FilterParams p) {
   final result = <_StopDistance>[];
@@ -1846,3 +1864,4 @@ List<_StopDistance> _filterStops(_FilterParams p) {
   result.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
   return result;
 }
+*/
