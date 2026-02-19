@@ -1197,7 +1197,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                   child: kIsWeb
                   ? Container(
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
+                        color: Theme.of(context).colorScheme.surfaceContainerHigh,
                         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                       ),
                       child: _buildSheetBody(
