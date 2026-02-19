@@ -1,7 +1,0 @@
-name = "next"
-pages_build_output_dir = "build/web"
-
-[build]
-command = "bash -c 'if [ -d flutter ]; then cd flutter; git fetch; git checkout stable; git pull; cd ..; else git clone https://github.com -b stable; fi; flutter/bin/flutter config --enable-web; flutter/bin/flutter build web --wasm --source-maps'"
-
-# 注意：Pages 不支援在 toml 裡寫 [[redirects]]
