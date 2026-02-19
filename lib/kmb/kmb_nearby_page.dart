@@ -1,12 +1,12 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:lrt_next_train/optionalMarquee.dart';
 import 'dart:async';
-import 'dart:math';
 import 'api/kmb.dart';
 import 'api/citybus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -814,20 +814,24 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                               ),
                             ),
                             const SizedBox(width: 6),
+                            // buildStopCard 入面
                             Expanded(
-                              child: OptionalMarquee(
-                                text: displayName.toTitleCase(),
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: badgeTextColor, // 站名顏色跟隨公司主色
-                                  height: 1.2, // 配合你的 OptionalMarquee 高度檢測
-                                ),
-                                velocity: 50.0, // 列表中建議速度中等
-                                blankSpace: 30.0,
-                                pauseAfterRound: const Duration(seconds: 2),
-                              ),
+                              child: kIsWeb
+                                ? Text(
+                                    displayName.toTitleCase(),
+                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: badgeTextColor, height: 1.2),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  )
+                                : OptionalMarquee(
+                                    text: displayName.toTitleCase(),
+                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: badgeTextColor, height: 1.2),
+                                    velocity: 50.0,
+                                    blankSpace: 30.0,
+                                    pauseAfterRound: const Duration(seconds: 2),
+                                  ),
                             ),
+
                           ],
                         ),
                         const SizedBox(height: 3),
@@ -1190,7 +1194,26 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               builder: (context, scrollController) {
                 return ClipRRect(
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                  child: BackdropFilter(
+                  child: kIsWeb
+                  ? Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      child: _buildSheetBody(
+                        context,
+                        langProv,
+                        sortOptionNotifier,
+                        displayName,
+                        sortOption,
+                        distance,
+                        sortedEntries,
+                        scrollController,
+                        stop,
+                        co,
+                      ),
+                    )
+                  : BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Container(
                       decoration: BoxDecoration(
@@ -1412,7 +1435,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     final badgeBgColor = companyProv.getBadgeBgColor(co, context);
     final badgeBorderColor = companyProv.getBadgeBorderColor(co, context);
     final badgeTextColor = companyProv.getBadgeTextColor(co, context);
-
+    final stopName = displayName.toTitleCase();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
       child: Row(
@@ -1443,22 +1466,24 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                 const SizedBox(width: 10),
                 
                 // 車站名稱
+                // buildHeader 入面
                 Expanded(
-                  child: OptionalMarquee(
-                    text: displayName.toTitleCase(),
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Theme.of(context).colorScheme.onSurface,
-                      // 建議高度設為 1.2 至 1.4，配合 OptionalMarquee 內部邏輯
-                      height: 1.2, 
-                    ),
-                    // 參數調整：
-                    velocity: 100.0, // Header 建議速度慢啲 (40 比較舒服)
-                    blankSpace: 50.0, // 滾動完之後留多啲位先再出
-                    pauseAfterRound: const Duration(seconds: 3), // 睇完一輪停 3 秒
-                  ),
+                  child: kIsWeb
+                    ? AutoSizeText(
+                        stopName,
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Theme.of(context).colorScheme.onSurface, height: 1.2),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      )
+                    : OptionalMarquee(
+                        text: stopName,
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Theme.of(context).colorScheme.onSurface, height: 1.2),
+                        velocity: 100.0,
+                        blankSpace: 50.0,
+                        pauseAfterRound: const Duration(seconds: 3),
+                      ),
                 ),
+
 
               ],
             ),
