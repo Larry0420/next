@@ -22,7 +22,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
-import 'package:flex_color_picker/flex_color_picker.dart';
+
 
 //Tailor Made .dart imported
 import 'mtr/mtr_schedule_page.dart';
