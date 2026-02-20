@@ -1150,14 +1150,14 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         Expanded(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 400),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
+            switchInCurve: Easing.emphasizedDecelerate,
+            switchOutCurve: Easing.emphasizedAccelerate,
             transitionBuilder: (child, animation) {
               return FadeTransition(
                 opacity: animation,
                 child: ScaleTransition(
                   scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                    CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+                    CurvedAnimation(parent: animation, curve: Easing.emphasizedDecelerate),
                   ),
                   child: child,
                 ),
@@ -2153,7 +2153,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             await Scrollable.ensureVisible(
               ctx,
               duration: const Duration(milliseconds: 500),
-              curve: Curves.easeOutCubic,
+              curve: Easing.emphasizedDecelerate,
               alignment: 0.2,
             );
           } else if (_scrollController.hasClients) {
@@ -2162,7 +2162,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             _scrollController.animateTo(
               position,
               duration: const Duration(milliseconds: 500),
-              curve: Curves.easeOutCubic,
+              curve: Easing.emphasizedDecelerate,
             );
           }
         } catch (_) {}
@@ -2382,14 +2382,14 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         if (_routeEtaLoading) {
           return AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
+            switchInCurve: Easing.emphasizedDecelerate,
+            switchOutCurve: Easing.emphasizedAccelerate,
             transitionBuilder: (child, animation) {
               return FadeTransition(
                 opacity: animation,
                 child: ScaleTransition(
                   scale: Tween<double>(begin: 0.9, end: 1.0).animate(
-                    CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+                    CurvedAnimation(parent: animation, curve: Easing.emphasizedDecelerate),
                   ),
                   child: child,
                 ),
@@ -2816,7 +2816,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                                   await Scrollable.ensureVisible(
                                     ctx,
                                     duration: const Duration(milliseconds: 500),
-                                    curve: Curves.easeOutCubic,
+                                    curve: Easing.emphasizedDecelerate,
                                     alignment: 0.2,
                                   );
                                 }
@@ -3249,7 +3249,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
       await Scrollable.ensureVisible(
         context,
         duration: const Duration(milliseconds: 500),
-        curve: Curves.easeOutCubic,
+        curve: Easing.emphasizedDecelerate,
       );
     } catch (_) {}
   }
@@ -3586,7 +3586,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
-      switchInCurve: Curves.easeOutCubic,
+      switchInCurve: Easing.emphasizedDecelerate,
       transitionBuilder: (child, animation) => FadeTransition(
         opacity: animation,
         child: SizeTransition(sizeFactor: animation, axisAlignment: -1.0, child: child),
@@ -3766,7 +3766,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                       icon: AnimatedRotation(
                         turns: _isExpanded ? 0.5 : 0,
                         duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeInOutBack,
+                        curve: Curves.easeInOutCubicEmphasized,
                         child: Icon(
                           Icons.keyboard_arrow_down,
                           color: colorScheme.onSurfaceVariant,
@@ -3778,7 +3778,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
               ),
               AnimatedSize(
                 duration: const Duration(milliseconds: 280),
-                curve: Curves.easeOutCubic,
+                curve: Easing.emphasizedDecelerate,
                 child: _isExpanded
                     ? Container(
                         decoration: BoxDecoration(
@@ -4184,8 +4184,8 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     if (_loading) {
       return AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
+        switchInCurve: Easing.emphasizedDecelerate,
+        switchOutCurve: Easing.emphasizedAccelerate,
         transitionBuilder: (child, animation) {
           return FadeTransition(
             opacity: animation,
@@ -4193,7 +4193,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
               position: Tween<Offset>(
                 begin: const Offset(0, -0.1),
                 end: Offset.zero,
-              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+              ).animate(CurvedAnimation(parent: animation, curve: Easing.emphasizedDecelerate)),
               child: child,
             ),
           );
@@ -4238,8 +4238,8 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
     if (_error != null) {
       return AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
+        switchInCurve: Easing.emphasizedDecelerate,
+        switchOutCurve: Easing.emphasizedAccelerate,
         transitionBuilder: (child, animation) {
           return FadeTransition(
             opacity: animation,
@@ -4247,7 +4247,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
               position: Tween<Offset>(
                 begin: const Offset(0, -0.1),
                 end: Offset.zero,
-              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+              ).animate(CurvedAnimation(parent: animation, curve: Easing.emphasizedDecelerate)),
               child: child,
             ),
           );
@@ -4320,8 +4320,8 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
+      switchInCurve: Easing.emphasizedDecelerate,
+      switchOutCurve: Easing.emphasizedAccelerate,
       transitionBuilder: (child, animation) {
         return FadeTransition(
           opacity: animation,
@@ -4329,7 +4329,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
             position: Tween<Offset>(
               begin: const Offset(0, -0.1),
               end: Offset.zero,
-            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+            ).animate(CurvedAnimation(parent: animation, curve: Easing.emphasizedDecelerate)),
             child: child,
           ),
         );
@@ -4511,7 +4511,7 @@ class _PulsingRingState extends State<_PulsingRing> with SingleTickerProviderSta
     )..repeat();
     
     _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+      CurvedAnimation(parent: _controller, curve: Easing.emphasizedDecelerate),
     );
   }
   

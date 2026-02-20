@@ -606,8 +606,8 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       Expanded(
                         child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),
-                          switchInCurve: Curves.easeOut,
-                          switchOutCurve: Curves.easeIn,
+                          switchInCurve: Easing.emphasizedDecelerate,
+                          switchOutCurve: Easing.emphasizedAccelerate,
                           transitionBuilder: (child, animation) => FadeTransition(
                             opacity: animation,
                             child: SlideTransition(

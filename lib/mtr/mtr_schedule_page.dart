@@ -3384,7 +3384,7 @@ class _MtrScheduleBody extends StatelessWidget {
           
           return AnimatedContainer(
             duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutCubic,
+            curve: Easing.emphasizedDecelerate,
             margin: const EdgeInsets.symmetric(horizontal: UIConstants.cardPadding, vertical: 4),
             decoration: BoxDecoration(
               // Liquid glass effect with slightly stronger background contrast

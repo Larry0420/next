@@ -2,11 +2,9 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
-
 import 'dart:ui'; // For ImageFilter.blur
 
 import 'package:animations/animations.dart';
-
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, setEquals;
@@ -21,16 +19,14 @@ import 'package:implicitly_animated_reorderable_list_2/transitions.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
-
-//Tailor Made .dart imported
-import 'mtr/mtr_schedule_page.dart';
 import 'kmb/api/kmb.dart';
+import 'kmb/company_name.dart';
 import 'kmb/kmb_dialer.dart';
 import 'kmb/kmb_nearby_page.dart';
 import 'kmb/kmb_pinned_page.dart';
-import 'kmb/company_name.dart';
+//Tailor Made .dart imported
+import 'mtr/mtr_schedule_page.dart';
 
 // ========================= Station Grouping (Top-level) =========================
 class _StationGroupInfo {
@@ -283,7 +279,7 @@ class AnimationUtils {
     required AnimationController controller,
     double scaleFrom = 0.0,
     double scaleTo = 1.0,
-    Curve curve = MotionConstants.standardEasing,
+    Curve curve = Easing.standard,
   }) {
     final animation = Tween<double>(
       begin: scaleFrom,
@@ -340,13 +336,13 @@ class AnimationUtils {
         .animate(delay: delay)
         .scale(
           duration: duration,
-          curve: MotionConstants.springEasing,
+          curve: Curves.elasticOut,
           begin: const Offset(0.3, 0.3),
           end: const Offset(1.0, 1.0),
         )
         .fadeIn(
           duration: duration * 0.7,
-          curve: MotionConstants.standardEasing,
+          curve: Easing.standard,
         );
   }
 
@@ -360,11 +356,11 @@ class AnimationUtils {
       position: index,
       delay: delay,
       child: SlideAnimation(
-        curve: MotionConstants.deceleratedEasing,
+        curve: Easing.emphasizedDecelerate,
         duration: MotionConstants.listItemAnimation,
         verticalOffset: 50.0,
         child: FadeInAnimation(
-          curve: MotionConstants.standardEasing,
+          curve: Easing.standard,
           duration: MotionConstants.listItemAnimation,
           child: child,
         ),
@@ -472,7 +468,7 @@ class ResponsiveAnimatedContainer extends StatelessWidget {
     super.key,
     required this.child,
     this.duration = MotionConstants.fast,
-    this.curve = MotionConstants.standardEasing,
+    this.curve = Easing.standard,
     this.padding,
     this.margin,
     this.decoration,
@@ -811,13 +807,14 @@ class LrtApp extends StatelessWidget {
       splashFactory: InkSparkle.splashFactory,
       colorSchemeSeed: theme.seedColor,
       brightness: brightness,
-      pageTransitionsTheme: PageTransitionsTheme(
+      pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.iOS: const CupertinoPageTransitionsBuilder(),
-          TargetPlatform.macOS: const CupertinoPageTransitionsBuilder(),
-          TargetPlatform.android: isDark ? const ZoomPageTransitionsBuilder() : const _EnhancedPageTransitionsBuilder(),
-          TargetPlatform.windows: const _EnhancedPageTransitionsBuilder(),
-          TargetPlatform.linux: const _EnhancedPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          // 建議 Android 統一使用增強版，或確保兩者曲線接近
+          TargetPlatform.android: _EnhancedPageTransitionsBuilder(), 
+          TargetPlatform.windows: _EnhancedPageTransitionsBuilder(),
+          TargetPlatform.linux: _EnhancedPageTransitionsBuilder(),
         },
       ),
       textTheme: baseTheme.textTheme.apply(fontSizeFactor: accessibility.textScale).copyWith(
@@ -859,7 +856,7 @@ class LrtApp extends StatelessWidget {
 /* ========================= Enhanced Page Transitions ========================= */
 
 /// Enhanced page transitions builder with smooth animations
-class _EnhancedPageTransitionsBuilder extends PageTransitionsBuilder {
+class _EnhancedPageTransitionsBuilder  extends PageTransitionsBuilder {
   const _EnhancedPageTransitionsBuilder();
 
   @override
@@ -870,11 +867,53 @@ class _EnhancedPageTransitionsBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    return FadeThroughTransition(
-      animation: animation,
-      secondaryAnimation: secondaryAnimation,
-      fillColor: Theme.of(context).colorScheme.surface,
-      child: child,
+    const curve = Curves.easeInOutCubicEmphasized;
+    final curveTween = CurveTween(curve: curve);
+
+    // 新頁面進場：微距滑動 (5%)
+    final primarySlideAnimation = Tween<Offset>(
+      begin: const Offset(0.05, 0.0),
+      end: Offset.zero,
+    ).chain(curveTween).animate(animation);
+
+    // 新頁面進場：淡入
+    final primaryFadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).chain(curveTween).animate(animation);
+
+    // 舊頁面退場：被新頁面推向左側 (-5%)
+    final secondarySlideAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: const Offset(-0.05, 0.0),
+    ).chain(curveTween).animate(secondaryAnimation);
+
+    // 舊頁面退場：淡出
+    final secondaryFadeAnimation = Tween<double>(
+      begin: 1.0,
+      end: 0.0,
+    ).chain(curveTween).animate(secondaryAnimation);
+
+    // 🎯 完美的 M3 轉場層級架構：
+    return FadeTransition(
+      // 1. 最外層 Fade：讓整塊（包含 ColoredBox 底色）平滑淡入，舊頁面才不會瞬間被切斷
+      opacity: primaryFadeAnimation,
+      child: ColoredBox(
+        // 2. 固定底色：放在 Slide 外層，作為穩定的實色舞台，防止轉場黑屏/透視
+        color: Theme.of(context).colorScheme.surface,
+        child: SlideTransition(
+          // 3. 處理當前頁面被「下一頁」蓋過時的退場動畫
+          position: secondarySlideAnimation,
+          child: FadeTransition(
+            opacity: secondaryFadeAnimation,
+            child: SlideTransition(
+              // 4. 處理當前頁面進場的滑動動畫（只有內容在滑動，背景 ColoredBox 不動！）
+              position: primarySlideAnimation,
+              child: child, 
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -883,39 +922,57 @@ class _EnhancedPageTransitionsBuilder extends PageTransitionsBuilder {
 /* ========================= Motion Constants ========================= */
 
 class MotionConstants {
-  // Unified and slowed down Material motion durations for smoother experience
-  static const Duration ultraFast = Duration(milliseconds: 200);  // Increased from 100
-  static const Duration fast = Duration(milliseconds: 300);       // Increased from 150
-  static const Duration medium = Duration(milliseconds: 450);     // Increased from 300
-  static const Duration slow = Duration(milliseconds: 600);       // Increased from 400
+  // ===========================================================================
+  // 1. DURATION TOKENS (M3 規範)
+  // 對齊你偏好的「慢速質感」並直接映射到 Flutter 原生 M3 Durations 常數
+  // ===========================================================================
+  static const Duration ultraFast = Durations.short4;  // 200ms
+  static const Duration fast = Durations.medium2;      // 300ms
+  static const Duration medium = Durations.long1;      // 450ms
+  static const Duration slow = Durations.long4;        // 600ms
   
-  // Enhanced Material motion curves for smoother animations
-  static const Curve standardEasing = Curves.fastOutSlowIn;
-  static const Curve emphasizedEasing = Cubic(0.2, 0.0, 0, 1.0); // More dramatic
-  static const Curve deceleratedEasing = Cubic(0.0, 0.0, 0.2, 1.0); // Smoother deceleration
-  static const Curve acceleratedEasing = Cubic(0.4, 0.0, 1.0, 1.0); // Smoother acceleration
-  static const Curve springEasing = Curves.elasticOut; // Spring-like bounce
-  static const Curve fadeInEasing = Cubic(0.0, 0.0, 0.2, 1.0); // Optimized for fade-in (ease-out)
-  static const Curve fadeOutEasing = Cubic(0.4, 0.0, 1.0, 1.0); // Optimized for fade-out (ease-in)
-  static const Curve bounceInEasing = Curves.easeOutBack; // Slight overshoot for playful entrance
+  // ===========================================================================
+  // 2. EASING CURVES (M2 升級至 M3 原生曲線)
+  // ===========================================================================
   
-  // Unified animation configuration - all using consistent timings
-  static const Duration pageTransition = medium;        // 450ms
-  static const Duration contentTransition = fast;       // 300ms
-  static const Duration modalTransition = slow;         // 600ms
-  static const Duration microInteraction = ultraFast;   // 200ms
-  static const Duration listItemAnimation = fast;       // 300ms (increased from 150)
-  static const Duration staggerDelay = Duration(milliseconds: 50); // Increased from 30 for more noticeable stagger
+  // [Standard] 用於簡單、小範圍的非空間變化（例如：顏色漸變、透明度、清單展開）
+  static const Curve standardEasing = Easing.standard;                      // Cubic(0.2, 0.0, 0.0, 1.0)
+  static const Curve fadeInEasing = Easing.standardDecelerate;              // M3 標準進場 (0.0, 0.0, 0.0, 1.0)
+  static const Curve fadeOutEasing = Easing.standardAccelerate;             // M3 標準退場 (0.3, 0.0, 1.0, 1.0)
+
+  // [Emphasized] 用於明顯的空間位移、新頁面或彈出視窗（例如：BottomSheet、RouteDestinationCard）
+  static const Curve emphasizedEasing = Curves.easeInOutCubicEmphasized;    // True M3 emphasized 曲線
+  static const Curve deceleratedEasing = Easing.emphasizedDecelerate;       // 元素進場 (Peak velocity -> rest)
+  static const Curve acceleratedEasing = Easing.emphasizedAccelerate;       // 元素退場 (Rest -> peak velocity)
+
+  // [Custom] 趣味性互動曲線（保持不變）
+  static const Curve springEasing = Curves.elasticOut;                      // 彈性回饋
+  static const Curve bounceInEasing = Curves.easeOutBack;                   // 帶有稍微 overshoot 的進場
   
-  // Scroll-specific animation timing - unified and slowed
-  static const Duration scrollAnimation = Duration(milliseconds: 350);      // Increased from 200
-  static const Duration scrollSettling = Duration(milliseconds: 250);       // Increased from 150
-  static const Duration overscrollAnimation = Duration(milliseconds: 450);  // Increased from 300
+  // ===========================================================================
+  // 3. SEMANTIC ANIMATION CONFIGURATION
+  // 統一動畫語意，根據 M3 建議分配 Duration 與 Easing
+  // ===========================================================================
   
-  // Enhanced stagger configurations - unified
-  static const Duration listStagger = Duration(milliseconds: 40);   // Increased from 25
-  static const Duration cardStagger = Duration(milliseconds: 60);   // Increased from 40
-  static const Duration gridStagger = Duration(milliseconds: 35);   // Increased from 20
+  // 頁面與全螢幕過場：M3 建議使用較長的 Duration 搭配 Emphasized
+  static const Duration pageTransition = Durations.long2;       // 500ms (M3 官方建議 spatial transition 預設值)
+  static const Duration modalTransition = slow;                 // 600ms
+  
+  // 內容與局部過場：M3 建議使用 Medium Duration 搭配 Standard
+  static const Duration contentTransition = fast;               // 300ms
+  static const Duration listItemAnimation = fast;               // 300ms
+  static const Duration microInteraction = ultraFast;           // 200ms
+  static const Duration staggerDelay = Durations.short1;        // 50ms
+  
+  // Scroll-specific 動畫時間
+  static const Duration scrollAnimation = Durations.medium3;    // 350ms
+  static const Duration scrollSettling = Durations.medium1;     // 250ms
+  static const Duration overscrollAnimation = medium;           // 450ms
+  
+  // 列表交錯動畫 (Stagger) 設置
+  static const Duration listStagger = Durations.short1;         // 50ms
+  static const Duration cardStagger = Duration(milliseconds: 60); 
+  static const Duration gridStagger = Duration(milliseconds: 35); 
 }
 
 /* ========================= Enhanced Scroll Physics ========================= */
@@ -2768,7 +2825,7 @@ class HttpErrorBanner extends StatelessWidget {
     
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
       width: double.infinity,
       color: backgroundColor,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -3664,7 +3721,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
         ),
         title: AnimatedSwitcher(
           duration: MotionConstants.contentTransition,
-          switchInCurve: MotionConstants.standardEasing,
+          switchInCurve: Easing.standard,
           child: AutoSizeText(
             lang.appTitle, maxLines: 1,
             key: ValueKey(lang.isEnglish),
@@ -3868,17 +3925,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
         children: [
           AnimatedSwitcher(
             duration: MotionConstants.contentTransition,
-            switchInCurve: MotionConstants.standardEasing,
+            switchInCurve: Easing.standard,
             child: connectivity.isOffline ? _OfflineBanner() : const SizedBox.shrink(),
           ),
           AnimatedSwitcher(
             duration: MotionConstants.contentTransition,
-            switchInCurve: MotionConstants.standardEasing,
+            switchInCurve: Easing.standard,
             child: context.watch<HttpErrorProvider>().hasApiError ? HttpErrorBanner() : const SizedBox.shrink(),
           ),
           AnimatedSwitcher(
             duration: MotionConstants.contentTransition,
-            switchInCurve: MotionConstants.standardEasing,
+            switchInCurve: Easing.standard,
             child: (sched.isUsingCachedData && sched.showCacheAlert) ? _CachedDataBanner() : const SizedBox.shrink(),
           ),
           Expanded(
@@ -3919,12 +3976,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                 // Sub-navigation for LightRail (Schedule/Routes toggle)
                 AnimatedContainer(
                   duration: MotionConstants.pageTransition,
-                  curve: MotionConstants.standardEasing,
+                  curve: Easing.standard,
                   height: _pageIndex == 0 ? 56.0 : 0.0,
                   child: AnimatedOpacity(
                     opacity: _pageIndex == 0 ? 1.0 : 0.0,
                     duration: MotionConstants.pageTransition,
-                    curve: MotionConstants.standardEasing,
+                    curve: Easing.standard,
                     child: _pageIndex == 0
                         ? Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
@@ -3947,7 +4004,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                                               },
                                               child: AnimatedContainer(
                                                 duration: MotionConstants.microInteraction,
-                                                curve: MotionConstants.standardEasing,
+                                                curve: Easing.standard,
                                                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                                                 decoration: BoxDecoration(
                                                   color: selected 
@@ -4004,7 +4061,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                                               },
                                               child: AnimatedContainer(
                                                 duration: MotionConstants.microInteraction,
-                                                curve: MotionConstants.standardEasing,
+                                                curve: Easing.standard,
                                                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                                                 decoration: BoxDecoration(
                                                   color: selected 
@@ -4104,7 +4161,7 @@ class _OfflineBanner extends StatelessWidget {
     final lang = context.watch<LanguageProvider>();
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
       width: double.infinity,
       color: Colors.orange.shade600,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -4135,7 +4192,7 @@ class _CachedDataBanner extends StatelessWidget {
     
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
       width: double.infinity,
       color: backgroundColor,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -4228,7 +4285,7 @@ class _StatusBar extends StatelessWidget {
 
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 0.1),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
@@ -4267,7 +4324,7 @@ class _StatusBar extends StatelessWidget {
           const SizedBox(width: 14),
           AnimatedDefaultTextStyle(
             duration: MotionConstants.contentTransition,
-            curve: MotionConstants.standardEasing,
+            curve: Easing.standard,
             style: TextStyle(
               color: textColor,
               fontWeight: FontWeight.w700,
@@ -4325,7 +4382,7 @@ class _ScheduleBody extends StatelessWidget {
         itemBuilder: (context, anim, platform, index) {
           return SizeFadeTransition(
             sizeFraction: 0.7,
-            curve: MotionConstants.standardEasing,
+            curve: Easing.standard,
             animation: anim,
             child: _PlatformCard(platform: platform),
           );
@@ -4389,8 +4446,8 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
     // ✅ Non-linear expansion curve - emphasized easing for dramatic effect
     final curve = CurvedAnimation(
       parent: _animationController,
-      curve: MotionConstants.emphasizedEasing, // Non-linear: Cubic(0.2, 0.0, 0, 1.0)
-      reverseCurve: MotionConstants.acceleratedEasing, // Asymmetric reverse for snappy collapse
+      curve: Curves.easeInOutCubicEmphasized, // Non-linear: Cubic(0.2, 0.0, 0, 1.0)
+      reverseCurve: Easing.emphasizedAccelerate, // Asymmetric reverse for snappy collapse
     );
     
     // Enhanced elevation animation with non-linear progression
@@ -4409,7 +4466,7 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
     _fadeAnimation = CurvedAnimation(
       parent: _contentAnimationController,
       curve: MotionConstants.fadeInEasing, // Non-linear: Cubic(0.0, 0.0, 0.2, 1.0)
-      reverseCurve: MotionConstants.fadeOutEasing, // Asymmetric fade-out: Cubic(0.4, 0.0, 1.0, 1.0)
+      reverseCurve: Easing.standardAccelerate, // Asymmetric fade-out: Cubic(0.4, 0.0, 1.0, 1.0)
     );
     
     // ✅ Non-linear slide with emphasized easing
@@ -4418,8 +4475,8 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _contentAnimationController,
-      curve: MotionConstants.emphasizedEasing, // Non-linear slide
-      reverseCurve: MotionConstants.acceleratedEasing, // Quick slide out
+      curve: Curves.easeInOutCubicEmphasized, // Non-linear slide
+      reverseCurve: Easing.emphasizedAccelerate, // Quick slide out
     ));
     
     // Train list stagger animation controller with bounce effect
@@ -4474,7 +4531,7 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
       builder: (context, child) {
         // ✅ Subtle scale animation for smooth drop - very minimal bounce
         final expandScale = _isExpanded 
-            ? 0.98 + (0.02 * MotionConstants.emphasizedEasing.transform(_animationController.value))
+            ? 0.98 + (0.02 * Curves.easeInOutCubicEmphasized.transform(_animationController.value))
             : 1.0;
         
         // ✅ Press/push effect - scale down when pressed
@@ -4486,10 +4543,10 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
         return AnimatedScale(
           scale: scaleValue,
           duration: _isPressed ? MotionConstants.microInteraction : MotionConstants.contentTransition,
-          curve: _isPressed ? Curves.easeOutCubic : MotionConstants.emphasizedEasing,
+          curve: _isPressed ? Easing.emphasizedDecelerate : Curves.easeInOutCubicEmphasized,
           child: AnimatedContainer(
             duration: MotionConstants.contentTransition,
-            curve: MotionConstants.emphasizedEasing, // ✅ Non-linear curve for smooth dropdown
+            curve: Curves.easeInOutCubicEmphasized, // ✅ Non-linear curve for smooth dropdown
             margin: EdgeInsets.symmetric(
               horizontal: math.max(UIConstants.platformCardMargin.horizontal / 2, 8.0), // Responsive margin
               vertical: UIConstants.platformCardMargin.vertical,
@@ -4672,7 +4729,7 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
         position: index,
         delay: MotionConstants.staggerDelay,
         child: SlideAnimation(
-          curve: MotionConstants.emphasizedEasing, // ✅ Non-linear slide
+          curve: Curves.easeInOutCubicEmphasized, // ✅ Non-linear slide
           duration: MotionConstants.listItemAnimation,
           verticalOffset: 35.0, // Increased for more dramatic entrance
           child: FadeInAnimation(
@@ -4680,7 +4737,7 @@ class _PlatformCardState extends State<_PlatformCard> with TickerProviderStateMi
             duration: MotionConstants.listItemAnimation,
             child: SizeFadeTransition(
               sizeFraction: 0.7,
-              curve: MotionConstants.emphasizedEasing,
+              curve: Curves.easeInOutCubicEmphasized,
               animation: anim,
               child: _TrainTile(
                 train: train,
@@ -4722,7 +4779,7 @@ class _TrainTileState extends State<_TrainTile> {
     return AnimatedScale(
       scale: _isPressed ? 0.97 : 1.0,
       duration: MotionConstants.microInteraction,
-      curve: Curves.easeOutCubic,
+      curve: Easing.emphasizedDecelerate,
       child: OpenContainer(
         transitionType: ContainerTransitionType.fade,
         transitionDuration: MotionConstants.modalTransition,
@@ -4745,7 +4802,7 @@ class _TrainTileState extends State<_TrainTile> {
             leading: Consumer<AccessibilityProvider>(
               builder: (context, accessibility, _) => AnimatedContainer(
                 duration: MotionConstants.contentTransition,
-                curve: MotionConstants.emphasizedEasing,
+                curve: Curves.easeInOutCubicEmphasized,
                 child: AdaptiveCircleText(
                   text: widget.train.routeNo.isEmpty ? '?' : widget.train.routeNo,
                   circleSize: math.max(40, 40 * math.min(accessibility.textScale, 1.3)), // Scale circle with text but limit growth
@@ -4786,7 +4843,7 @@ class _TrainTileState extends State<_TrainTile> {
                     builder: (context, accessibility, _) => AnimatedScale(
                       scale: 1.1,
                       duration: MotionConstants.contentTransition,
-                      curve: MotionConstants.standardEasing,
+                      curve: Easing.standard,
                       child: Icon(
                         Icons.block, 
                         color: Colors.red,
@@ -4855,7 +4912,7 @@ class _TrainDetailState extends State<_TrainDetail> {
         children: [
           AnimatedDefaultTextStyle(
             duration: MotionConstants.contentTransition,
-            curve: MotionConstants.standardEasing,
+            curve: Easing.standard,
             style: Theme.of(context).textTheme.headlineMedium!.copyWith(
               color: Theme.of(context).brightness == Brightness.dark 
                   ? Colors.white.withValues(alpha: 0.95)
@@ -5026,7 +5083,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
     // Setup animations
     _contentFadeAnimation = CurvedAnimation(
       parent: _contentAnimationController,
-      curve: MotionConstants.emphasizedEasing,
+      curve: Curves.easeInOutCubicEmphasized,
     );
     
     _contentSlideAnimation = Tween<Offset>(
@@ -5034,7 +5091,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _contentAnimationController,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
     ));
     
     // Start animations
@@ -5569,7 +5626,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
         // 緊湊的加載指示器
         AnimatedContainer(
           duration: MotionConstants.contentTransition,
-          curve: MotionConstants.standardEasing,
+          curve: Easing.standard,
           height: _loading ? 2 : 0,
           margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
           child: LinearProgressIndicator(
@@ -5644,8 +5701,8 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
         Expanded(
           child: AnimatedSwitcher(
             duration: MotionConstants.contentTransition,
-            switchInCurve: MotionConstants.standardEasing,
-            switchOutCurve: MotionConstants.standardEasing,
+            switchInCurve: Easing.standard,
+            switchOutCurve: Easing.standard,
             transitionBuilder: (Widget child, Animation<double> animation) {
               return FadeTransition(
                 opacity: animation,
@@ -5655,7 +5712,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
                     end: Offset.zero,
                   ).animate(CurvedAnimation(
                     parent: animation,
-                    curve: MotionConstants.emphasizedEasing,
+                    curve: Curves.easeInOutCubicEmphasized,
                   )),
                   child: child,
                 ),
@@ -5775,8 +5832,8 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
         // 使用 AnimatedSwitcher 實現平滑佈局切換動畫 - 優化過渡效果
         return AnimatedSwitcher(
           duration: const Duration(milliseconds: 350),
-          switchInCurve: Curves.easeInOutCubic,
-          switchOutCurve: Curves.easeInOutCubic,
+          switchInCurve: Curves.easeInOutCubicEmphasized,
+          switchOutCurve: Curves.easeInOutCubicEmphasized,
           transitionBuilder: (Widget child, Animation<double> animation) {
             // 組合淡入淡出與縮放效果，創造更流暢的過渡
             return FadeTransition(
@@ -5790,7 +5847,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
                   end: 1.0,
                 ).animate(CurvedAnimation(
                   parent: animation,
-                  curve: Curves.easeOutCubic,
+                  curve: Easing.emphasizedDecelerate,
                 )),
                 child: SlideTransition(
                   position: Tween<Offset>(
@@ -5798,7 +5855,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
                     end: Offset.zero,
                   ).animate(CurvedAnimation(
                     parent: animation,
-                    curve: Curves.easeOutCubic,
+                    curve: Easing.emphasizedDecelerate,
                   )),
                   child: child,
                 ),
@@ -6174,7 +6231,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
   }) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
-      curve: MotionConstants.emphasizedEasing, // Nonlinear curve for smoother transitions
+      curve: Curves.easeInOutCubicEmphasized, // Nonlinear curve for smoother transitions
       padding: padding,
       decoration: BoxDecoration(
         color: isSelected
@@ -6216,7 +6273,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
                     // 圖標容器 - 優化尺寸與間距
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 250),
-                      curve: MotionConstants.emphasizedEasing,
+                      curve: Curves.easeInOutCubicEmphasized,
                       padding: const EdgeInsets.all(6), // Visually balanced circular padding
                       decoration: BoxDecoration(
                         color: isSelected 
@@ -6236,7 +6293,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
                     Expanded(
                       child: AnimatedDefaultTextStyle(
                         duration: const Duration(milliseconds: 250),
-                        curve: MotionConstants.emphasizedEasing, // Nonlinear text transition
+                        curve: Curves.easeInOutCubicEmphasized, // Nonlinear text transition
                         style: TextStyle(
                           fontSize: 13.5 * accessibility.textScale, // Slightly larger for better readability
                           fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
@@ -6257,7 +6314,7 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
                     // 展開/收起圖標 - 改進動畫 (nonlinear rotation)
                     AnimatedRotation(
                       duration: const Duration(milliseconds: 250),
-                      curve: MotionConstants.emphasizedEasing, // Nonlinear rotation curve
+                      curve: Curves.easeInOutCubicEmphasized, // Nonlinear rotation curve
                       turns: switchValue ? 0.5 : 0,
                       child: Icon(
                         Icons.expand_more_rounded,
@@ -6276,21 +6333,21 @@ class _RoutesPageState extends State<_RoutesPage> with TickerProviderStateMixin 
           // 內容區域 - 優化展開收起動畫與視覺反饋 (nonlinear fade)
           AnimatedSize(
             duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOutCubic,
+            curve: Curves.easeInOutCubicEmphasized,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
               switchInCurve: MotionConstants.fadeInEasing,      // Nonlinear fade-in
-              switchOutCurve: MotionConstants.fadeOutEasing,    // Nonlinear fade-out
+              switchOutCurve: Easing.standardAccelerate,    // Nonlinear fade-out
               transitionBuilder: (Widget child, Animation<double> animation) {
                 return FadeTransition(
                   opacity: CurvedAnimation(
                     parent: animation,
-                    curve: MotionConstants.emphasizedEasing,    // Emphasized nonlinear curve
+                    curve: Curves.easeInOutCubicEmphasized,    // Emphasized nonlinear curve
                   ),
                   child: SizeTransition(
                     sizeFactor: CurvedAnimation(
                       parent: animation,
-                      curve: MotionConstants.deceleratedEasing, // Smooth deceleration
+                      curve: Easing.emphasizedDecelerate, // Smooth deceleration
                     ),
                     axisAlignment: -1.0,
                     child: child,
@@ -7156,7 +7213,7 @@ class _CompactStationCardState extends State<_CompactStationCard> with TickerPro
 
     final curve = CurvedAnimation(
       parent: _animationController,
-      curve: MotionConstants.emphasizedEasing,
+      curve: Curves.easeInOutCubicEmphasized,
     );
 
     _elevationAnimation = Tween<double>(
@@ -7172,7 +7229,7 @@ class _CompactStationCardState extends State<_CompactStationCard> with TickerPro
     
     _fadeAnimation = CurvedAnimation(
       parent: _contentAnimationController,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
     );
     
     _slideAnimation = Tween<Offset>(
@@ -7180,7 +7237,7 @@ class _CompactStationCardState extends State<_CompactStationCard> with TickerPro
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _contentAnimationController,
-      curve: MotionConstants.emphasizedEasing,
+      curve: Curves.easeInOutCubicEmphasized,
     ));
     
     // Platform section stagger animation controller
@@ -7339,7 +7396,7 @@ class _CompactStationCardState extends State<_CompactStationCard> with TickerPro
       builder: (context, child) {
         return AnimatedContainer(
           duration: MotionConstants.contentTransition,
-          curve: Curves.easeOutCubic,
+          curve: Easing.emphasizedDecelerate,
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
             color: isActive 
@@ -7495,7 +7552,7 @@ class _CompactStationCardState extends State<_CompactStationCard> with TickerPro
         // Calculate stagger delay based on index
         final delay = (index * 0.04).clamp(0.0, 0.3);
         final animationValue = (_staggerController.value - delay).clamp(0.0, 1.0);
-        final curve = MotionConstants.emphasizedEasing;
+        final curve = Curves.easeInOutCubicEmphasized;
         final easedValue = curve.transform(animationValue);
         
         return Transform.translate(
@@ -7548,7 +7605,7 @@ class _CompactPlatformSectionState extends State<_CompactPlatformSection> {
       onExit: (_) => setState(() => _isHovered = false),
       child: AnimatedContainer(
         duration: MotionConstants.contentTransition,
-        curve: MotionConstants.emphasizedEasing,
+        curve: Curves.easeInOutCubicEmphasized,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
         decoration: BoxDecoration(
           color: _isHovered
@@ -8221,7 +8278,7 @@ class _SettingsPage extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(12),
                                   child: AnimatedContainer(
                                     duration: MotionConstants.contentTransition,
-                                    curve: MotionConstants.standardEasing,
+                                    curve: Easing.standard,
                                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                                     decoration: BoxDecoration(
                                       color: isSelected 
@@ -8284,7 +8341,7 @@ class _SettingsPage extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(UIConstants.borderRadiusL),
                                   child: AnimatedContainer(
                                     duration: MotionConstants.contentTransition,
-                                    curve: MotionConstants.standardEasing,
+                                    curve: Easing.standard,
                                     width: 44,
                                     height: 44,
                                     decoration: BoxDecoration(
@@ -8611,7 +8668,7 @@ class _SettingsPage extends StatelessWidget {
                             borderRadius: BorderRadius.circular(10),
                             child: AnimatedContainer(
                               duration: MotionConstants.contentTransition,
-                              curve: MotionConstants.standardEasing,
+                              curve: Easing.standard,
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                               decoration: BoxDecoration(
                                 color: isSelected 
@@ -8665,7 +8722,7 @@ class _SettingsPage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(UIConstants.borderRadiusL),
                     child: AnimatedContainer(
                       duration: MotionConstants.contentTransition,
-                      curve: MotionConstants.standardEasing,
+                      curve: Easing.standard,
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
@@ -9375,7 +9432,7 @@ class _ErrorView extends StatelessWidget {
                             const SizedBox(height: 8),
             AnimatedDefaultTextStyle(
               duration: MotionConstants.contentTransition,
-              curve: MotionConstants.standardEasing,
+              curve: Easing.standard,
               style: Theme.of(context).textTheme.titleLarge!.copyWith(
                 color: Theme.of(context).brightness == Brightness.dark 
                     ? Colors.white.withValues(alpha: 0.87)
@@ -9400,7 +9457,7 @@ class _ErrorView extends StatelessWidget {
                 builder: (context, accessibility, _) => AnimatedScale(
                   scale: 1.0,
                   duration: MotionConstants.contentTransition,
-                  curve: MotionConstants.standardEasing,
+                  curve: Easing.standard,
                   child: FilledButton.icon(
                     onPressed: onRetry, 
                     icon: Icon(Icons.refresh, size: 20 * accessibility.iconScale), 
@@ -9512,7 +9569,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
       end: 1.0,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
     ));
     
     _slideAnimation = Tween<Offset>(
@@ -9520,7 +9577,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: MotionConstants.emphasizedEasing,
+      curve: Curves.easeInOutCubicEmphasized,
     ));
     
     _scaleAnimation = Tween<double>(
@@ -9528,7 +9585,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
       end: 1.0,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: MotionConstants.deceleratedEasing,
+      curve: Easing.emphasizedDecelerate,
     ));
   }
   
@@ -9752,12 +9809,12 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                               return Transform.scale(
                                 scale: CurvedAnimation(
                                   parent: AlwaysStoppedAnimation(animationValue),
-                                  curve: MotionConstants.deceleratedEasing,
+                                  curve: Easing.emphasizedDecelerate,
                                 ).value,
                                 child: Opacity(
                                   opacity: CurvedAnimation(
                                     parent: AlwaysStoppedAnimation(animationValue),
-                                    curve: MotionConstants.standardEasing,
+                                    curve: Easing.standard,
                                   ).value,
                                   child: ActionChip(
                                     avatar: Icon(
@@ -9869,13 +9926,13 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                   0,
                   20 * (1 - CurvedAnimation(
                     parent: AlwaysStoppedAnimation(groupAnimationValue),
-                    curve: MotionConstants.emphasizedEasing,
+                    curve: Curves.easeInOutCubicEmphasized,
                   ).value),
                 ),
                 child: Opacity(
                   opacity: CurvedAnimation(
                     parent: AlwaysStoppedAnimation(groupAnimationValue),
-                    curve: MotionConstants.standardEasing,
+                    curve: Easing.standard,
                   ).value,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -9904,14 +9961,14 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                             offset: Offset(
                               20 * (1 - CurvedAnimation(
                                 parent: AlwaysStoppedAnimation(stationAnimationValue),
-                                curve: MotionConstants.deceleratedEasing,
+                                curve: Easing.emphasizedDecelerate,
                               ).value),
                               0,
                             ),
                             child: Opacity(
                               opacity: CurvedAnimation(
                                 parent: AlwaysStoppedAnimation(stationAnimationValue),
-                                curve: MotionConstants.standardEasing,
+                                curve: Easing.standard,
                               ).value,
                               child: _buildOptimizedStationTile(station, isSelected),
                             ),
@@ -9939,7 +9996,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
       child: AnimatedContainer(
         duration: MotionConstants.contentTransition,
-        curve: MotionConstants.emphasizedEasing,
+        curve: Curves.easeInOutCubicEmphasized,
         decoration: BoxDecoration(
           color: isSelected
               ? colorScheme.primaryContainer.withValues(alpha: 0.5)
@@ -9979,7 +10036,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                   // Station ID badge
                   AnimatedContainer(
                     duration: MotionConstants.contentTransition,
-                    curve: MotionConstants.emphasizedEasing,
+                    curve: Curves.easeInOutCubicEmphasized,
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
@@ -10057,7 +10114,7 @@ class _EnhancedStationSelectorState extends State<EnhancedStationSelector>
                       padding: const EdgeInsets.only(left: 8.0),
                       child: AnimatedScale(
                         duration: MotionConstants.contentTransition,
-                        curve: MotionConstants.emphasizedEasing,
+                        curve: Curves.easeInOutCubicEmphasized,
                         scale: 1.0,
                         child: Icon(
                           Icons.check_circle,
@@ -10147,7 +10204,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
     );
     _animation = CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeOutCubic, // ✅ GPU-friendly curve (single arc, no complex calculations)
+      curve: Easing.emphasizedDecelerate, // ✅ GPU-friendly curve (single arc, no complex calculations)
     );
     
     // Content fade and slide animation - optimized for render efficiency
@@ -10167,7 +10224,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _contentAnimationController,
-      curve: Curves.easeOutCubic, // Consistent GPU-friendly curve
+      curve: Easing.emphasizedDecelerate, // Consistent GPU-friendly curve
     ));
     
     // Card stagger animation - lightweight for list items
@@ -10355,7 +10412,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
             _districtScrollController.position.maxScrollExtent,
           ),
           duration: MotionConstants.contentTransition,
-          curve: MotionConstants.emphasizedEasing,
+          curve: Curves.easeInOutCubicEmphasized,
         );
       }
     });
@@ -10787,7 +10844,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
       child: AnimatedScale(
         scale: _mainButtonPressed ? 0.985 : 1.0,
         duration: const Duration(milliseconds: 150), // ✅ Faster micro-interaction
-        curve: Curves.easeOutCubic,
+        curve: Easing.emphasizedDecelerate,
         child: InkWell(
           onTap: _toggleExpanded,
           onHighlightChanged: (pressed) {
@@ -10800,7 +10857,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
           borderRadius: BorderRadius.circular(12),
           child: AnimatedContainer(
           duration: const Duration(milliseconds: 200), // ✅ Reduced from contentTransition
-          curve: Curves.easeOutCubic,
+          curve: Easing.emphasizedDecelerate,
           padding: EdgeInsets.all(isLandscape ? 6 : 8),
           decoration: BoxDecoration(
             border: Border.all(
@@ -10908,7 +10965,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                   child: AnimatedScale(
                     scale: _searchButtonPressed ? 0.9 : 1.0,
                     duration: const Duration(milliseconds: 150), // ✅ Faster micro-interaction
-                    curve: Curves.easeOutCubic,
+                    curve: Easing.emphasizedDecelerate,
                     child: InkWell(
                       customBorder: const CircleBorder(),
                       onTap: _expandAndFocusSearch,
@@ -10945,7 +11002,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
               AnimatedRotation(
                 turns: _isExpanded ? 0.5 : 0,
                 duration: const Duration(milliseconds: 200), // ✅ Reduced from contentTransition
-                curve: Curves.easeInOutCubic,
+                curve: Curves.easeInOutCubicEmphasized,
                 child: Icon(
                   Icons.keyboard_arrow_down,
                   size: (isLandscape ? 20 : 24) * accessibility.iconScale,
@@ -11046,7 +11103,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                               // Faster stagger timing for quicker UI response
                               final delay = index * 0.02; // Reduced from 0.05 for faster animation
                               final animationValue = (_animationController.value - delay).clamp(0.0, 1.0);
-                              final easedValue = Curves.easeOutCubic.transform(animationValue); // Single curve
+                              final easedValue = Easing.emphasizedDecelerate.transform(animationValue); // Single curve
                               
                               // ✅ Simplified transforms: direct calculation without nesting
                               return Opacity(
@@ -11161,7 +11218,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
               // Reduced delay and clamped values for faster visual response
               final delay = (index * 0.008).clamp(0.0, 0.1); // Reduced from 0.015
               final animationValue = (_cardStaggerController.value - delay).clamp(0.0, 1.0);
-              final easedValue = Curves.easeOutCubic.transform(animationValue); // Single curve calculation
+              final easedValue = Easing.emphasizedDecelerate.transform(animationValue); // Single curve calculation
               
               // ✅ PERFORMANCE OPTIMIZATION 10: Simplified scale calculation
               // Use direct opacity/scale without nested transforms
@@ -11198,7 +11255,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 160), // ✅ Reduced from contentTransition
-                    curve: Curves.easeOutCubic,
+                    curve: Easing.emphasizedDecelerate,
                     constraints: BoxConstraints(
                       minWidth: chipWidth,
                       maxWidth: chipWidth,
@@ -11290,8 +11347,8 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
             ),
             child: AnimatedSwitcher(
               duration: MotionConstants.contentTransition,
-              switchInCurve: MotionConstants.emphasizedEasing,
-              switchOutCurve: MotionConstants.emphasizedEasing,
+              switchInCurve: Curves.easeInOutCubicEmphasized,
+              switchOutCurve: Curves.easeInOutCubicEmphasized,
               layoutBuilder: (currentChild, previousChildren) {
                 return Stack(
                   alignment: Alignment.topCenter,
@@ -11327,7 +11384,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                   end: Offset.zero,
                 ).animate(CurvedAnimation(
                   parent: animation,
-                  curve: MotionConstants.emphasizedEasing,
+                  curve: Curves.easeInOutCubicEmphasized,
                 ));
                 
                 // Use enter animation for fading in new content
@@ -11378,8 +11435,8 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
           ),
           child: AnimatedSwitcher(
             duration: MotionConstants.contentTransition,
-            switchInCurve: MotionConstants.emphasizedEasing,
-            switchOutCurve: MotionConstants.emphasizedEasing,
+            switchInCurve: Curves.easeInOutCubicEmphasized,
+            switchOutCurve: Curves.easeInOutCubicEmphasized,
             layoutBuilder: (currentChild, previousChildren) {
               return Stack(
                 alignment: Alignment.topCenter,
@@ -11415,7 +11472,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                 end: Offset.zero,
               ).animate(CurvedAnimation(
                 parent: animation,
-                curve: MotionConstants.emphasizedEasing,
+                curve: Curves.easeInOutCubicEmphasized,
               ));
               
               // Use enter animation for fading in new content
@@ -11587,7 +11644,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
         // Calculate stagger delay based on index
         final delay = (index * 0.02).clamp(0.0, 0.3);
         final animationValue = (_cardStaggerController.value - delay).clamp(0.0, 1.0);
-        final curve = MotionConstants.emphasizedEasing;
+        final curve = Curves.easeInOutCubicEmphasized;
         final easedValue = curve.transform(animationValue);
         
         return Transform.translate(
@@ -11634,10 +11691,10 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
             child: AnimatedScale(
               duration: MotionConstants.microInteraction,
               scale: (_pressedStationId == station.id) ? 0.98 : 1.0,
-              curve: Curves.easeOutCubic,
+              curve: Easing.emphasizedDecelerate,
               child: AnimatedContainer(
                 duration: MotionConstants.contentTransition,
-                curve: Curves.easeOutCubic,
+                curve: Easing.emphasizedDecelerate,
                 decoration: BoxDecoration(
                   color: isSelected 
                       ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4)
@@ -11798,7 +11855,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
     
     return AnimatedContainer(
       duration: MotionConstants.contentTransition,
-      curve: MotionConstants.standardEasing,
+      curve: Easing.standard,
       child: Column(
         children: [
           // 主選擇器按鈕 - 使用新的模組化組件
@@ -11826,8 +11883,8 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                     // 搜索框 - 僅在點擊搜尋按鈕後顯示
                     AnimatedSwitcher(
                       duration: MotionConstants.contentTransition,
-                      switchInCurve: MotionConstants.emphasizedEasing,
-                      switchOutCurve: MotionConstants.emphasizedEasing,
+                      switchInCurve: Curves.easeInOutCubicEmphasized,
+                      switchOutCurve: Curves.easeInOutCubicEmphasized,
                       transitionBuilder: (child, animation) {
                         return FadeTransition(
                           opacity: animation,

@@ -1,27 +1,28 @@
-import 'dart:io'; // For SocketException
 import 'dart:async'; // For TimeoutException
-import 'dart:ui';
-import 'package:flutter/material.dart';
-import 'package:lrt_next_train/kmb/company_name.dart';
-import 'package:provider/provider.dart';
-import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // ✅ 必須加入這行才能使用 HapticFeedback
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:lrt_next_train/kmb/company_name.dart';
 // Local project imports
 import 'package:lrt_next_train/optionalMarquee.dart';
 import 'package:lrt_next_train/toTitleCase.dart';
-import '../main.dart' show LanguageProvider;
-import '../kmb_route_status_page.dart';
+import 'package:provider/provider.dart';
+
 import '../ctb_route_status_page.dart';
+import '../kmb_route_status_page.dart';
+import '../main.dart' show LanguageProvider;
 import '../nlb_route_status_page.dart';
 import 'api/citybus.dart';
 import 'api/kmb.dart';
 import 'api/nlb.dart';
 
+
 class KmbDialer extends StatefulWidget {
   final void Function(String route)? onRouteSelected;
   final bool rightHanded;
   const KmbDialer({super.key, this.onRouteSelected, this.rightHanded = true});
-
+  
   @override
   State<KmbDialer> createState() => _KmbDialerState();
 }
@@ -38,7 +39,7 @@ class _KmbDialerState extends State<KmbDialer> {
   bool loading = false;
   String? error;
   Map<String, List<Map<String, dynamic>>>? _routeMap;
-
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
   @override
   void initState() {
     super.initState();
@@ -322,7 +323,7 @@ class _KmbDialerState extends State<KmbDialer> {
                           return Card.filled(
                             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                             color: theme.colorScheme.surfaceContainerLow,
-                            clipBehavior: Clip.hardEdge,
+                            clipBehavior: Clip.antiAliasWithSaveLayer,
                             child: ExpansionTile(
                               shape: const Border(),
                               collapsedShape: const Border(),
@@ -352,8 +353,7 @@ class _KmbDialerState extends State<KmbDialer> {
         
         // One-Handed Dialer
         Positioned(
-          left: widget.rightHanded ? null : 12,
-          right: widget.rightHanded ? 12 : null,
+          right: 12,
           bottom: MediaQuery.of(context).padding.bottom + 12,
           child: _OneHandDialerContainer(child: _buildFixedDialer(theme)),
         ),
@@ -449,6 +449,15 @@ class _KmbDialerState extends State<KmbDialer> {
     const double btnSize = 48.0;
     const double gap = 6.0;
 
+    // 🌟 M3 毛玻璃按鍵主題顏色配置
+    // 一般按鍵的底色：使用極淡的 onSurface 作為半透明薄膜，保留玻璃透視感
+    final defaultBgColor = theme.colorScheme.onSurface.withValues(alpha: 0.1);
+    final defaultFgColor = theme.colorScheme.onSurface;
+    
+    // 停用按鍵：進一步降低透明度
+    final disabledBgColor = theme.colorScheme.onSurface.withValues(alpha: 0.04);
+    final disabledFgColor = theme.colorScheme.onSurface.withValues(alpha: 0.3);
+
     return Padding(
       padding: const EdgeInsets.all(6),
       child: Row(
@@ -462,16 +471,17 @@ class _KmbDialerState extends State<KmbDialer> {
               spacing: gap,
               runSpacing: gap,
               children: keypad.map((key) {
-                // Determine if key is enabled
                 bool enabled = false;
-                Color? bgColor;
-                Color? fgColor;
+                Color bgColor = defaultBgColor;
+                Color fgColor = defaultFgColor;
                 VoidCallback? action;
 
                 if (key == '<') {
                   enabled = canBackspace;
                   action = _onBackspace;
-                  bgColor = theme.colorScheme.secondaryContainer.withValues(alpha: 0.5);
+                  // 刪除鍵：給予一點點危險/次要顏色的暗示
+                  bgColor = theme.colorScheme.errorContainer.withValues(alpha: 0.2);
+                  fgColor = theme.colorScheme.onSurface;
                 } else if (key == 'OK') {
                   enabled = canSubmit;
                   action = () {
@@ -479,13 +489,16 @@ class _KmbDialerState extends State<KmbDialer> {
                        _onKeyTap(''); // Hacky refresh or nav
                     }
                   };
-                  bgColor = canSubmit ? theme.colorScheme.primary : theme.colorScheme.surfaceContainerHighest;
-                  fgColor = canSubmit ? theme.colorScheme.onPrimary : null;
+                  // OK 鍵：準備就緒時使用實體的 Primary 色，強烈引導用戶點擊
+                  bgColor = canSubmit 
+                      ? theme.colorScheme.primary 
+                      : defaultBgColor;
+                  fgColor = canSubmit 
+                      ? theme.colorScheme.onPrimary 
+                      : defaultFgColor;
                 } else {
                   // Digit
                   enabled = validNextKeys.contains(key) || (input.isEmpty); 
-                  // If input is empty, usually 1-9 are valid start chars. 
-                  // If strict mode preferred: enabled = validNextKeys.contains(key);
                   action = () => _onKeyTap(key);
                 }
 
@@ -497,10 +510,13 @@ class _KmbDialerState extends State<KmbDialer> {
                       padding: EdgeInsets.zero,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
+                      // ✅ 確保取消預設陰影與按壓擴散，避免弄髒毛玻璃
+                      shadowColor: Colors.transparent,
+                      surfaceTintColor: Colors.transparent,
                       backgroundColor: bgColor,
                       foregroundColor: fgColor,
-                      disabledBackgroundColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-                      disabledForegroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                      disabledBackgroundColor: disabledBgColor,
+                      disabledForegroundColor: disabledFgColor,
                     ),
                     onPressed: enabled ? action : null,
                     child: key == '<' 
@@ -531,7 +547,11 @@ class _KmbDialerState extends State<KmbDialer> {
                         padding: EdgeInsets.zero,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         elevation: 0,
-                        backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                        shadowColor: Colors.transparent,
+                        surfaceTintColor: Colors.transparent,
+                        // ✅ 英文字母鍵同樣套用薄膜感
+                        backgroundColor: defaultBgColor,
+                        foregroundColor: defaultFgColor,
                       ),
                       onPressed: () => _onKeyTap(l),
                       child: Text(l, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
@@ -553,9 +573,12 @@ class _KmbDialerState extends State<KmbDialer> {
     required bool isEnglish,
     required String input,
   }) {
+    // ① Move these outside the loop — no need to re-resolve on every iteration
+    final companyProv = context.watch<CompanyProvider>();
+    final theme = Theme.of(context);
     final tiles = <Widget>[];
 
-    // Deduplicate logic
+    // ② Deduplicate by orig-dest key
     final Map<String, List<Map<String, dynamic>>> byDest = {};
     for (final v in variants) {
       final orig = isEnglish
@@ -564,27 +587,46 @@ class _KmbDialerState extends State<KmbDialer> {
       final dest = isEnglish
           ? (v['dest_en'] ?? v['dest_tc'] ?? '').toString()
           : (v['dest_tc'] ?? v['dest_en'] ?? '').toString();
-      // Group by distinct visual line
-      final key = '$orig-$dest';
-      byDest.putIfAbsent(key, () => []).add(v);
+      byDest.putIfAbsent('$orig│$dest', () => []).add(v);
     }
 
-    // Build tiles
-    final flattened = <Map<String, dynamic>>[];
-    byDest.forEach((_, list) => flattened.addAll(list));
+    // ③ Flatten with spread instead of forEach
+    final flattened = [for (final list in byDest.values) ...list];
+
+    // ④ Local badge builder (avoids repeating Container decoration code)
+    Widget buildBadge({
+      required String label,
+      required Color bg,
+      Color? border,
+      required Color textColor,
+    }) =>
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(6),
+            border: border != null ? Border.all(color: border, width: 0.5) : null,
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+        );
 
     for (final v in flattened) {
-      final companyId = (v['companyid'] ?? v['company_id'] ?? 'kmb').toString().toLowerCase();
+      final companyId =
+          (v['companyid'] ?? v['company_id'] ?? 'kmb').toString().toLowerCase();
 
-      // Localized Company Name
-      String companyName;
-      if (companyId == 'ctb') {
-        companyName = isEnglish ? 'CTB' : '城巴';
-      } else if (companyId == 'nlb') {
-        companyName = isEnglish ? 'NLB' : '嶼巴';
-      } else {
-        companyName = isEnglish ? 'KMB' : '九巴';
-      }
+      // ⑤ switch expression (Dart 3+) — cleaner than if-else chain
+      final companyName = switch (companyId) {
+        'ctb' => isEnglish ? 'CTB' : '城巴',
+        'nlb' => isEnglish ? 'NLB' : '嶼巴',
+        _     => isEnglish ? 'KMB' : '九巴',
+      };
 
       final orig = isEnglish
           ? (v['orig_en'] ?? v['orig_tc'] ?? '').toString().toTitleCase()
@@ -594,163 +636,132 @@ class _KmbDialerState extends State<KmbDialer> {
           : (v['dest_tc'] ?? v['dest_en'] ?? '').toString();
 
       final serviceType = v['service_type']?.toString();
-      final hasService = serviceType != null && serviceType != '1' && serviceType != 'Normal';
+      final hasService =
+          serviceType != null && serviceType != '1' && serviceType != 'Normal';
 
-      // Subtitle Logic
-      String subtitle;
-      if (orig.isNotEmpty && dest.isNotEmpty) {
-        subtitle = '$orig → $dest';
-      } else {
-        // Fallback to bound label
-        final bound = v['bound']?.toString();
-        final dir = v['direction']?.toString();
-        if (dir != null && dir.isNotEmpty) {
-          subtitle = dir.toLowerCase() == 'inbound'
-              ? (isEnglish ? 'Inbound' : '入站')
-              : (isEnglish ? 'Outbound' : '出站');
-        } else if (bound != null) {
-          subtitle = bound.toUpperCase() == 'I'
-              ? (isEnglish ? 'Inbound' : '入站')
-              : (isEnglish ? 'Outbound' : '出站');
-        } else {
-          subtitle = isEnglish ? 'View Route' : '查看路線';
-        }
+      // ⑥ Simplified fallback direction (consolidated null/empty checks)
+      String? fallbackDir;
+      if (orig.isEmpty || dest.isEmpty) {
+        final dir   = v['direction']?.toString().trim().toLowerCase();
+        final bound = v['bound']?.toString().trim().toUpperCase();
+        final isInbound = dir?.startsWith('i') == true || bound == 'I';
+        fallbackDir = isInbound
+            ? (isEnglish ? 'Inbound' : '入站')
+            : (isEnglish ? 'Outbound' : '出站');
       }
 
-      // 獲取 Provider
-      final companyProv = context.watch<CompanyProvider>();
-      
-      // 直接取得三段色 (取代原本的 if-else 邏輯)
-      final badgeBgColor = companyProv.getBadgeBgColor(companyId, context);
+      final badgeBgColor     = companyProv.getBadgeBgColor(companyId, context);
       final badgeBorderColor = companyProv.getBadgeBorderColor(companyId, context);
-      final badgeTextColor = companyProv.getBadgeTextColor(companyId, context);
-
+      final badgeTextColor   = companyProv.getBadgeTextColor(companyId, context);
 
       tiles.add(
         ListTile(
           visualDensity: VisualDensity.compact,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          title: _buildHighlightedText(route, input, Theme.of(context)),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+
+          // ── Title row: route number + badges in same row ──────────────
+          title: Row(
             children: [
-              OptionalMarquee(
-                text: subtitle,
-                style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+              _buildHighlightedText(route, input, theme),
+              const SizedBox(width: 8),
+              buildBadge(
+                label: companyName,
+                bg: badgeBgColor,
+                border: badgeBorderColor,
+                textColor: badgeTextColor,
+              ),
+              if (hasService) ...[
+                const SizedBox(width: 6),
+                buildBadge(
+                  label: serviceType == 'Special'
+                      ? (isEnglish ? 'Special' : '特別')
+                      : (isEnglish ? 'Spl. $serviceType' : '特別 $serviceType'),
+                  bg: theme.colorScheme.tertiaryContainer,
+                  textColor: theme.colorScheme.onTertiaryContainer,
                 ),
-                velocity: 80.0,
-                pauseAfterRound: const Duration(milliseconds: 1500),
-              ),
-              //Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  // Company Badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: badgeBgColor,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: badgeBorderColor,
-                        width: 0.5,
-                      ),
-                    ),
-                    child: Text(
-                      companyName,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: badgeTextColor,
-                      ),
-                    ),
-                  ),
-                  if (hasService) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.tertiaryContainer,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        serviceType == 'Special'
-                          ? (isEnglish ? 'Special Departure' : '特別班次')
-                          : (isEnglish ? 'Special Departure $serviceType' : '特別班次 $serviceType'),
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.onTertiaryContainer,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+              ],
             ],
           ),
+
+          // ── Subtitle: origin (top) / destination (bottom) ─────────────
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: orig.isNotEmpty && dest.isNotEmpty
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _endpointRow(
+                        icon: Icons.trip_origin,
+                        iconSize: 10,
+                        label: isEnglish ? 'From' : '由', // 或 '起點'
+                        text: orig,
+                        theme: theme,
+                      ),
+                      const SizedBox(height: 2),
+                      _endpointRow(
+                        icon: Icons.location_on,
+                        iconSize: 10,
+                        label: isEnglish ? 'To' : '住', // 或 '目的地'
+                        text: dest,
+                        theme: theme,
+                      ),
+                    ],
+                  )
+                : Text(
+                    fallbackDir ?? (isEnglish ? 'View Route' : '查看路線'),
+                    style: theme.textTheme.bodySmall!
+                        .copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+          ),
+
           trailing: Icon(
             Icons.chevron_right,
             size: 20,
-            color: Theme.of(context).colorScheme.outline,
+            color: theme.colorScheme.outline,
           ),
+
           onTap: () {
             final r = route.toUpperCase();
-            
-            // ✅ 修正：確保 bound 參數格式正確 (I 或 O)
+
+            // ⑦ Normalise bound — collapsed into one pass
             String? bound = v['bound']?.toString();
-            
-            // 如果 bound 缺失，嘗試從 direction 推斷
             if (bound == null || bound.isEmpty) {
               final dir = v['direction']?.toString().trim().toLowerCase();
               if (dir != null) {
-                if (dir.startsWith('i') || dir == 'inbound') {
-                  bound = 'I';
-                } else if (dir.startsWith('o') || dir == 'outbound') {
-                  bound = 'O';
-                }
+                bound = (dir.startsWith('i') || dir == 'inbound') ? 'I' : 'O';
               }
             } else {
-              // 標準化 bound 為 'I' 或 'O'
-              final boundUpper = bound.trim().toUpperCase();
-              if (boundUpper.startsWith('I')) {
-                bound = 'I';
-              } else if (boundUpper.startsWith('O')) {
-                bound = 'O';
-              }
+              final up = bound.trim().toUpperCase();
+              bound = up.startsWith('I') ? 'I' : up.startsWith('O') ? 'O' : bound;
             }
-            
-            // ✅ 修正：也標準化 serviceType
-            final normalizedServiceType = serviceType?.toString();
-            
-            debugPrint('🚌 Navigating to route: $r, bound: $bound, serviceType: $normalizedServiceType, company: $companyId');
-            
-            // --- Navigation Logic ---
+
+            debugPrint(
+              '🚌 route=$r bound=$bound serviceType=$serviceType company=$companyId',
+            );
+
             if (companyId == 'ctb') {
               Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => CtbRouteStatusPage(
-                  route: r, 
-                  bound: bound, 
-                  serviceType: normalizedServiceType, 
-                  companyId: companyId
+                  route: r,
+                  bound: bound,
+                  serviceType: serviceType,
+                  companyId: companyId,
                 ),
               ));
             } else if (companyId == 'nlb') {
-               // ✅ Updated for NlbRouteStatusPage parameters
-               Navigator.of(context).push(MaterialPageRoute(
-                 builder: (_) => NlbRouteStatusPage(
-                   routeNo: r, 
-                   initialRouteId: v['routeId'].toString(), 
-                 ),
-               ));
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => NlbRouteStatusPage(
+                  routeNo: r,
+                  initialRouteId: v['routeId'].toString(),
+                ),
+              ));
             } else {
               Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => KmbRouteStatusPage(
-                  route: r, 
-                  bound: bound, 
-                  serviceType: normalizedServiceType, 
-                  companyId: companyId
+                  route: r,
+                  bound: bound,
+                  serviceType: serviceType,
+                  companyId: companyId,
                 ),
               ));
             }
@@ -760,12 +771,51 @@ class _KmbDialerState extends State<KmbDialer> {
       );
 
       if (flattened.last != v) {
-        tiles.add(const Divider(height: 1, indent: 16, endIndent: 16, thickness: 0.5));
+        tiles.add(const Divider(
+          height: 1, indent: 16, endIndent: 16, thickness: 0.5,
+        ));
       }
     }
 
     return Column(children: tiles);
   }
+
+  // ── Helper: one origin/destination row with leading icon ────────────────────
+  Widget _endpointRow({
+    required IconData icon,
+    required double iconSize,
+    required String label,
+    required String text,
+    required ThemeData theme,
+  }) {
+    final labelStyle = theme.textTheme.bodySmall!.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontWeight: FontWeight.w600,
+    );
+    final textStyle = theme.textTheme.bodySmall!.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+
+    return Row(
+      children: [
+        Icon(icon, size: iconSize, color: theme.colorScheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        SizedBox(
+          width: 40, // 讓 From/To / 由/往 對齊
+          child: Text(label, style: labelStyle),
+        ),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textStyle,
+          ),
+        ),
+      ],
+    );
+  }
+
 
   Widget _buildHighlightedText(String text, String query, ThemeData theme) {
     if (query.isEmpty) return Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16));
@@ -792,32 +842,125 @@ class _KmbDialerState extends State<KmbDialer> {
 
 class _OneHandDialerContainer extends StatefulWidget {
   final Widget child;
-  const _OneHandDialerContainer({required this.child});
+  
+  const _OneHandDialerContainer({
+    required this.child,
+    super.key, // 提升比較效能
+  });
+
   @override
   State<_OneHandDialerContainer> createState() => _OneHandDialerContainerState();
 }
 
-class _OneHandDialerContainerState extends State<_OneHandDialerContainer> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+class _OneHandDialerContainerState extends State<_OneHandDialerContainer> 
+    with SingleTickerProviderStateMixin {
+  
+  late final AnimationController _controller;
+  late final Animation<double> _scaleAnimation;
+
+  bool _isPressed = false;
+
   @override
-  void initState() { super.initState(); _ctrl.forward(); }
-  @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
-  @override
-  Widget build(BuildContext context) {
-    return LiquidGlassLayer(
-      settings: LiquidGlassSettings(
-        blur: 1, 
-        glassColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.1), 
-        thickness: 20
-      ),
-      child: ScaleTransition(
-        scale: CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
-        child: FakeGlass(
-          shape: const LiquidRoundedSuperellipse(borderRadius: 18),
-          child: widget.child,
-        ),
+  void initState() {
+    super.initState();
+    
+    // M3 Micro-interaction (微互動) 時間
+    _controller = AnimationController(
+      vsync: this,
+      duration: Durations.short4, // 200ms
+      reverseDuration: Durations.short3, // 150ms
+    );
+
+    // 按壓時的微縮放，模擬真實世界物理下壓感
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.92).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Easing.standardDecelerate,     // 進場減速
+        reverseCurve: Easing.standardAccelerate, // 退場加速
       ),
     );
   }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleTapDown(TapDownDetails details) {
+    if (!_isPressed) {
+      setState(() => _isPressed = true);
+      _controller.forward();
+      // 加入輕微震動，彌補沒有實體按鍵的觸覺回饋
+      HapticFeedback.lightImpact(); 
+    }
+  }
+
+  void _handleTapUp(TapUpDetails details) {
+    if (_isPressed) {
+      setState(() => _isPressed = false);
+      _controller.reverse();
+    }
+  }
+
+  void _handleTapCancel() {
+    if (_isPressed) {
+      setState(() => _isPressed = false);
+      _controller.reverse();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    return GestureDetector(
+      onTapDown: _handleTapDown,
+      onTapUp: _handleTapUp,
+      onTapCancel: _handleTapCancel,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _scaleAnimation.value,
+            // ✅ 使用 ClipRRect 確保毛玻璃效果與邊界裁切完美貼合
+            child: ClipRRect(
+              //borderRadius: BorderRadius.circular(12), // 依照你的 UI 圓角調整
+              child: FakeGlass( 
+                shape: const LiquidRoundedSuperellipse(borderRadius: 18),
+                settings: LiquidGlassSettings(
+                  blur: 10.0, // 保持高度模糊
+                  thickness: 50.0,
+                  // 配合 M3 ColorScheme 與透明度 (使用最新的 withValues 語法)
+                  glassColor: theme.brightness == Brightness.dark
+                  // 暗色模式：提高不透明度來遮蓋底層雜訊，確保白字清晰
+                  ? theme.colorScheme.surface.withValues(alpha: 0.45)
+                  // 亮色模式：使用稍微透亮一點的 surface，保持清爽感
+                  : theme.colorScheme.surface.withValues(alpha: 0.3),
+
+                  lightIntensity: 1.2,
+                  saturation: 1.1,
+                  refractiveIndex: 1.3,
+                ),
+                // 如果需要加一點極淡的邊框來增強立體感，可以包一層 Container
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: theme.colorScheme.outline.withValues(alpha: 0.2),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: child!,
+                ),
+              ),
+            ),
+          );
+        },
+        // ✅ 效能核心：將不需參與動畫計算的內容從這裡傳入
+        child: widget.child,
+      ),
+    );
+  }
+
 }

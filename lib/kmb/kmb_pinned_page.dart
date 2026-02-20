@@ -1183,8 +1183,8 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
+      switchInCurve: Curves.easeInOutCubicEmphasized,
+      switchOutCurve: Curves.easeInOutQuad,
       transitionBuilder: (child, animation) => FadeTransition(
         opacity: animation,
         child: SlideTransition(
