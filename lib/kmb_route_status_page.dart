@@ -1261,10 +1261,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       builder: (context, scrollController) => ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         child: FakeGlass(  // ✅ 使用 FakeGlass 而非 LiquidGlass
-          shape: LiquidRoundedSuperellipse(borderRadius: 20),
+          shape: const LiquidRoundedSuperellipse(borderRadius: 20),
           settings: LiquidGlassSettings(
-            blur: 10.0, 
-            thickness: 19,                                             // ✅ 提高模糊
+            blur: 10.0,                               // ✅ 修正：提高模糊度 (原為 1.0)
+            thickness: 19.0,                          // 保持你設定的 19
             glassColor: theme.colorScheme.surface.withValues(alpha: 0.15), // ✅ 降至 0.15
             lightIntensity: 1.2,
             saturation: 1.1,
@@ -1304,180 +1304,185 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       left: UIConstants.spacingM,
                       right: UIConstants.spacingM,
                       bottom: UIConstants.spacingL,
-                      top: UIConstants.spacingXS
+                      top: UIConstants.spacingXS,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                          // Route destination summary
-                          RouteDestinationWidget(
-                            route: widget.route,
-                            direction: _selectedDirection,
-                            serviceType: _selectedServiceType,
-                            cachedRouteData: _routeDetails,
-                            co: isEnglish ? 'KMB' : '九巴',
-                          ),
-                          const SizedBox(height: 8),
+                        // Route destination summary
+                        RouteDestinationWidget(
+                          route: widget.route,
+                          direction: _selectedDirection,
+                          serviceType: _selectedServiceType,
+                          cachedRouteData: _routeDetails,
+                          co: isEnglish ? 'KMB' : '九巴',
+                        ),
+                        const SizedBox(height: 8),
 
-
-                          // Direction toggles
-                          if (_directions.isNotEmpty) ...[
-                            Row(
-                              children: [
-                                Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
-                                const SizedBox(width: 8),
-                                Text(
-                                  isEnglish ? 'Direction' : '方向',
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
+                        // Direction toggles
+                        if (_directions.isNotEmpty) ...[
+                          Row(
+                            children: [
+                              Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                isEnglish ? 'Direction' : '方向',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.onSurface,
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: 1),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: const ClampingScrollPhysics(),
-                              child: Row(
-                                children: _directions.map((d) {
-                                  final isSelected = _selectedDirection == d;
-                                  final dUpper = d.toUpperCase();
-                                  final isOutbound = dUpper.startsWith('O');
-                                  final isInbound = dUpper.startsWith('I');
-                                  final isSpecial = !isOutbound && !isInbound;
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 1),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const ClampingScrollPhysics(),
+                            child: Row(
+                              children: _directions.map((d) {
+                                final isSelected = _selectedDirection == d;
+                                final dUpper = d.toUpperCase();
+                                final isOutbound = dUpper.startsWith('O');
+                                final isInbound = dUpper.startsWith('I');
+                                final isSpecial = !isOutbound && !isInbound;
 
-                                  final dirLabel = isSpecial
+                                final dirLabel = isSpecial
                                     ? (isEnglish ? 'Direction $d' : '方向 $d')
                                     : isOutbound 
                                         ? (isEnglish ? 'Outbound' : '去程')
                                         : (isEnglish ? 'Inbound' : '回程');
-                                  
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: UIConstants.spacingS),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 300),
-                                      child: FilterChip(
-                                        label: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              isSpecial
-                                                  ? Icons.alt_route
-                                                  : (isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left),
-                                              size: 16,
-                                              color: isSelected 
+                                
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: UIConstants.spacingS),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 300),
+                                    child: FilterChip(
+                                      label: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            isSpecial
+                                                ? Icons.alt_route
+                                                : (isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left),
+                                            size: 16,
+                                            color: isSelected 
                                                 ? theme.colorScheme.onPrimary
                                                 : isSpecial
                                                     ? theme.colorScheme.secondary
                                                     : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(dirLabel),
-                                          ],
-                                        ),
-                                        selected: isSelected,
-                                        selectedColor: isSpecial
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(dirLabel),
+                                        ],
+                                      ),
+                                      selected: isSelected,
+                                      selectedColor: isSpecial
                                           ? theme.colorScheme.secondary.withValues(alpha: 0.9)
                                           : isOutbound 
                                               ? theme.colorScheme.primary.withValues(alpha: 0.9)
                                               : theme.colorScheme.tertiary.withValues(alpha: 0.9),
-                                        backgroundColor: isSpecial
+                                      backgroundColor: isSpecial
                                           ? theme.colorScheme.secondary.withValues(alpha: 0.1)
                                           : isOutbound
                                               ? theme.colorScheme.primary.withValues(alpha: 0.1)
                                               : theme.colorScheme.tertiary.withValues(alpha: 0.1),
-                                        checkmarkColor: theme.colorScheme.onPrimary,
-                                        labelStyle: TextStyle(
-                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                        ),
-                                        elevation: isSelected ? 4 : 0,
-                                        pressElevation: 2,
-                                        onSelected: (selected) {
-                                          if (selected) {
-                                            setState(() => _selectedDirection = d);
-                                            _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
-                                            _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
-                                            _restartEtaAutoRefresh();
-                                          }
-                                        },
+                                      checkmarkColor: theme.colorScheme.onPrimary,
+                                      labelStyle: TextStyle(
+                                        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                                       ),
+                                      elevation: isSelected ? 4 : 0,
+                                      pressElevation: 2,
+                                      onSelected: (selected) {
+                                        // ✅ 加入防呆，避免重複點擊觸發多餘 API 請求
+                                        if (selected && _selectedDirection != d) {
+                                          setState(() => _selectedDirection = d);
+                                          _fetchRouteDetails(widget.route, d, _selectedServiceType ?? '1');
+                                          _fetchRouteEta(widget.route, _selectedServiceType ?? '1', silent: _hasLoadedEtaOnce);
+                                          _restartEtaAutoRefresh();
+                                        }
+                                      },
                                     ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ],
-                          
-                          // Service type toggles
-                          if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
-                            if (_directions.isNotEmpty) const SizedBox(height: 2),
-                            Row(
-                              children: [
-                                Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
-                                const SizedBox(width: 8),
-                                Text(
-                                  isEnglish ? 'Service Type' : '班次類型',
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
                                   ),
-                                ),
-                              ],
+                                );
+                              }).toList(),
                             ),
-                            const SizedBox(height: 1),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: EnhancedScrollPhysics.enhanced(),
-                              child: Row(
-                                children: (_serviceTypes..sort()).map((st) {
-                                  final isSelected = _selectedServiceType == st;
-                                  final typeLabel = st == '1'
-                                      ? (isEnglish ? 'Normal Service' : '常規班次')
-                                      : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
-                                  
-                                  return Padding(
-                                    padding: EdgeInsets.only(right: UIConstants.spacingS, bottom: maxSize),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      child: FilterChip(
-                                        label: Text(typeLabel),
-                                        selected: isSelected,
-                                        selectedColor: theme.colorScheme.primary,
-                                        backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                                        checkmarkColor: theme.colorScheme.onPrimary,
-                                        labelStyle: TextStyle(
-                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                        ),
-                                        elevation: isSelected ? 4 : 0,
-                                        pressElevation: 2,
-                                        onSelected: (selected) {
-                                          if (selected) {
-                                            setState(() => _selectedServiceType = st);
-                                            _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
-                                            _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
-                                            _restartEtaAutoRefresh();
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ],
+                          ),
                         ],
-                      ),
+                        
+                        // Service type toggles
+                        if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
+                          if (_directions.isNotEmpty) const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                isEnglish ? 'Service Type' : '班次類型',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 1),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: EnhancedScrollPhysics.enhanced(), // 這裡保留你自定義的 Physics
+                            child: Row(
+                              // ✅ 修改: 先拷貝陣列再排序，避免在 build() 過程中修改原始 State
+                              children: (_serviceTypes.toList()..sort()).map((st) {
+                                final isSelected = _selectedServiceType == st;
+                                final typeLabel = st == '1'
+                                    ? (isEnglish ? 'Normal Service' : '常規班次')
+                                    : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
+                                
+                                return Padding(
+                                  // ✅ 修改: 移除了會引發未定義變數錯誤的 maxSize，改為 0
+                                  padding: const EdgeInsets.only(right: UIConstants.spacingS, bottom: 0),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    child: FilterChip(
+                                      label: Text(typeLabel),
+                                      selected: isSelected,
+                                      selectedColor: theme.colorScheme.primary,
+                                      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                                      checkmarkColor: theme.colorScheme.onPrimary,
+                                      labelStyle: TextStyle(
+                                        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                      ),
+                                      elevation: isSelected ? 4 : 0,
+                                      pressElevation: 2,
+                                      onSelected: (selected) {
+                                        // ✅ 加入防呆，避免重複點擊觸發多餘 API 請求
+                                        if (selected && _selectedServiceType != st) {
+                                          setState(() => _selectedServiceType = st);
+                                          _fetchRouteDetails(widget.route, _selectedDirection ?? 'O', st);
+                                          _fetchRouteEta(widget.route, st, silent: _hasLoadedEtaOnce);
+                                          _restartEtaAutoRefresh();
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                ],
+                ),
+              ],
             ),
           ),
         ),
-      ),
+      )
+          
+    
     );
   }
 

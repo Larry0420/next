@@ -1568,9 +1568,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         child: FakeGlass(  // ✅ 使用 FakeGlass 而非 LiquidGlass
           shape: const LiquidRoundedSuperellipse(borderRadius: 20),
           settings: LiquidGlassSettings(
-            blur: 1.0, 
-            thickness: 10.0,                                             // ✅ 提高模糊
-            glassColor: theme.colorScheme.surfaceContainer.withValues(alpha: 0.5), // ✅ 降至 0.15
+            blur: 10.0,                               // ✅ 提高模糊 (假設你原本想寫 10.0)
+            thickness: 10.0,
+            glassColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.15), // ✅ 降至 0.15
             lightIntensity: 1.2,
             saturation: 1.1,
             lightAngle: 45.0,
@@ -1581,7 +1581,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               // ✅ 移除 color 屬性，避免雙重不透明
               border: Border(
                 top: BorderSide(
-                  color: theme.colorScheme.outline.withValues(alpha: 0.2),
+                  color: theme.colorScheme.outline.withOpacity(0.2),
                   width: 0.5,
                 ),
               ),
@@ -1597,7 +1597,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.9),
+                      color: theme.colorScheme.onSurfaceVariant.withOpacity(0.9),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -1610,180 +1610,182 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                       left: UIConstants.spacingM,
                       right: UIConstants.spacingM,
                       bottom: UIConstants.spacingL,
-                      top: UIConstants.spacingXS
+                      top: UIConstants.spacingXS,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                          // Route destination summary
-                          RouteDestinationWidget(
-                            route: widget.route,
-                            direction: _selectedDirection,
-                            serviceType: _selectedServiceType,
-                            cachedRouteData: _routeDetails,
-                            co: isEnglish ? 'CTB' : '城巴',
-                          ),
-                          const SizedBox(height: 8),
+                        // Route destination summary
+                        RouteDestinationWidget(
+                          route: widget.route,
+                          direction: _selectedDirection,
+                          serviceType: _selectedServiceType,
+                          cachedRouteData: _routeDetails,
+                          co: isEnglish ? 'CTB' : '城巴',
+                        ),
+                        const SizedBox(height: 8),
 
-
-                          // Direction toggles
-                          if (_directions.isNotEmpty) ...[
-                            Row(
-                              children: [
-                                Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
-                                const SizedBox(width: 8),
-                                Text(
-                                  isEnglish ? 'Direction' : '方向',
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
+                        // Direction toggles
+                        if (_directions.isNotEmpty) ...[
+                          Row(
+                            children: [
+                              Icon(Icons.swap_horiz, size: 18, color: theme.colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                isEnglish ? 'Direction' : '方向',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.onSurface,
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: 1),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: const ClampingScrollPhysics(),
-                              child: Row(
-                                children: _directions.map((d) {
-                                  final isSelected = _selectedDirection == d;
-                                  final dUpper = d.toUpperCase();
-                                  final isOutbound = dUpper.startsWith('O');
-                                  final isInbound = dUpper.startsWith('I');
-                                  final isSpecial = !isOutbound && !isInbound;
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 1),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const ClampingScrollPhysics(),
+                            child: Row(
+                              children: _directions.map((d) {
+                                final isSelected = _selectedDirection == d;
+                                final dUpper = d.toUpperCase();
+                                final isOutbound = dUpper.startsWith('O');
+                                final isInbound = dUpper.startsWith('I');
+                                final isSpecial = !isOutbound && !isInbound;
 
-                                  final dirLabel = isSpecial
+                                final dirLabel = isSpecial
                                     ? (isEnglish ? 'Direction $d' : '方向 $d')
                                     : isOutbound 
                                         ? (isEnglish ? 'Outbound' : '去程')
                                         : (isEnglish ? 'Inbound' : '回程');
-                                  
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: UIConstants.spacingS),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 300),
-                                      child: FilterChip(
-                                        label: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              isSpecial
-                                                  ? Icons.alt_route
-                                                  : (isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left),
-                                              size: 16,
-                                              color: isSelected 
+                                
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: UIConstants.spacingS),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 300),
+                                    child: FilterChip(
+                                      label: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            isSpecial
+                                                ? Icons.alt_route
+                                                : (isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left),
+                                            size: 16,
+                                            color: isSelected 
                                                 ? theme.colorScheme.onPrimary
                                                 : isSpecial
                                                     ? theme.colorScheme.secondary
                                                     : (isOutbound ? theme.colorScheme.primary : theme.colorScheme.tertiary),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(dirLabel),
-                                          ],
-                                        ),
-                                        selected: isSelected,
-                                        selectedColor: isSpecial
-                                          ? theme.colorScheme.secondary.withValues(alpha: 0.9)
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(dirLabel),
+                                        ],
+                                      ),
+                                      selected: isSelected,
+                                      selectedColor: isSpecial
+                                          ? theme.colorScheme.secondary.withOpacity(0.9)
                                           : isOutbound 
-                                              ? theme.colorScheme.primary.withValues(alpha: 0.9)
-                                              : theme.colorScheme.tertiary.withValues(alpha: 0.9),
-                                        backgroundColor: isSpecial
-                                          ? theme.colorScheme.secondary.withValues(alpha: 0.1)
+                                              ? theme.colorScheme.primary.withOpacity(0.9)
+                                              : theme.colorScheme.tertiary.withOpacity(0.9),
+                                      backgroundColor: isSpecial
+                                          ? theme.colorScheme.secondary.withOpacity(0.1)
                                           : isOutbound
-                                              ? theme.colorScheme.primary.withValues(alpha: 0.1)
-                                              : theme.colorScheme.tertiary.withValues(alpha: 0.1),
-                                        checkmarkColor: theme.colorScheme.onPrimary,
-                                        labelStyle: TextStyle(
-                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                        ),
-                                        elevation: isSelected ? 4 : 0,
-                                        pressElevation: 2,
-                                        onSelected: (selected) {
-                                          if (selected) {
-                                            setState(() => _selectedDirection = d);
-                                            _fetchRouteDetails(widget.route, d,);
-                                            _fetchRouteEta(widget.route, silent: _hasLoadedEtaOnce);
-                                            _restartEtaAutoRefresh();
-                                          }
-                                        },
+                                              ? theme.colorScheme.primary.withOpacity(0.1)
+                                              : theme.colorScheme.tertiary.withOpacity(0.1),
+                                      checkmarkColor: theme.colorScheme.onPrimary,
+                                      labelStyle: TextStyle(
+                                        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                                       ),
+                                      elevation: isSelected ? 4 : 0,
+                                      pressElevation: 2,
+                                      onSelected: (selected) {
+                                        if (selected && _selectedDirection != d) {
+                                          setState(() => _selectedDirection = d);
+                                          _fetchRouteDetails(widget.route, d); // ✅ 移除了多餘的逗號
+                                          _fetchRouteEta(widget.route, silent: _hasLoadedEtaOnce);
+                                          _restartEtaAutoRefresh();
+                                        }
+                                      },
                                     ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ],
-                          
-                          // Service type toggles
-                          if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
-                            if (_directions.isNotEmpty) const SizedBox(height: 2),
-                            Row(
-                              children: [
-                                Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
-                                const SizedBox(width: 8),
-                                Text(
-                                  isEnglish ? 'Service Type' : '班次類型',
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
                                   ),
-                                ),
-                              ],
+                                );
+                              }).toList(),
                             ),
-                            const SizedBox(height: 1),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: EnhancedScrollPhysics.enhanced(),
-                              child: Row(
-                                children: (_serviceTypes..sort()).map((st) {
-                                  final isSelected = _selectedServiceType == st;
-                                  final typeLabel = st == '1'
-                                      ? (isEnglish ? 'Normal Service' : '常規班次')
-                                      : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
-                                  
-                                  return Padding(
-                                    padding: EdgeInsets.only(right: UIConstants.spacingS, bottom: maxSize),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      child: FilterChip(
-                                        label: Text(typeLabel),
-                                        selected: isSelected,
-                                        selectedColor: theme.colorScheme.primary,
-                                        backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                                        checkmarkColor: theme.colorScheme.onPrimary,
-                                        labelStyle: TextStyle(
-                                          color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                        ),
-                                        elevation: isSelected ? 4 : 0,
-                                        pressElevation: 2,
-                                        onSelected: (selected) {
-                                          if (selected) {
-                                            setState(() => _selectedServiceType = st);
-                                            _fetchRouteDetails(widget.route, _selectedDirection ?? 'O',);
-                                            _fetchRouteEta(widget.route, silent: _hasLoadedEtaOnce);
-                                            _restartEtaAutoRefresh();
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ],
+                          ),
                         ],
-                      ),
+                        
+                        // Service type toggles
+                        if (_serviceTypes.isNotEmpty && _serviceTypes.length > 1) ...[
+                          if (_directions.isNotEmpty) const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Icon(Icons.alt_route, size: 18, color: theme.colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                isEnglish ? 'Service Type' : '班次類型',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 1),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            // ✅ 注意: 如果 EnhancedScrollPhysics 是你自定義的 class 則保留，否則建議用 BouncingScrollPhysics 或 ClampingScrollPhysics
+                            physics: const BouncingScrollPhysics(), 
+                            child: Row(
+                              // ✅ 修改: 先拷貝陣列再排序，避免在 build 過程中發生狀態突變 (Side effect)
+                              children: (_serviceTypes.toList()..sort()).map((st) {
+                                final isSelected = _selectedServiceType == st;
+                                final typeLabel = st == '1'
+                                    ? (isEnglish ? 'Normal Service' : '常規班次')
+                                    : (isEnglish ? 'Special Service ($st)' : '特別班次 ($st)');
+                                
+                                return Padding(
+                                  // ✅ 修改: 移除了未知的 maxSize 變數，改為固定的 padding 或是 0
+                                  padding: const EdgeInsets.only(right: UIConstants.spacingS, bottom: 0), 
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    child: FilterChip(
+                                      label: Text(typeLabel),
+                                      selected: isSelected,
+                                      selectedColor: theme.colorScheme.primary,
+                                      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                                      checkmarkColor: theme.colorScheme.onPrimary,
+                                      labelStyle: TextStyle(
+                                        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                      ),
+                                      elevation: isSelected ? 4 : 0,
+                                      pressElevation: 2,
+                                      onSelected: (selected) {
+                                        if (selected && _selectedServiceType != st) {
+                                          setState(() => _selectedServiceType = st);
+                                          _fetchRouteDetails(widget.route, _selectedDirection ?? 'O');
+                                          _fetchRouteEta(widget.route, silent: _hasLoadedEtaOnce);
+                                          _restartEtaAutoRefresh();
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                ],
+                ),
+              ],
             ),
           ),
         ),
-      ),
+      )
     );
   }
 
@@ -1952,14 +1954,14 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                       }
                     },
                     selectedColor: isOutbound 
-                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.2) 
-                      : Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.2),
-                    checkmarkColor: isOutbound ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.85) : Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.85),
+                      ? Theme.of(context).colorScheme.primary.withOpacity(0.2) 
+                      : Theme.of(context).colorScheme.tertiary.withOpacity(0.2),
+                    checkmarkColor: isOutbound ? Theme.of(context).colorScheme.primary.withOpacity(0.85) : Theme.of(context).colorScheme.tertiary.withOpacity(0.85),
                     avatar: isSelected 
                       ? Icon(
                           isOutbound ? Icons.arrow_circle_right : Icons.arrow_circle_left,
                           size: 18,
-                          color: isOutbound ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.85) : Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.85),
+                          color: isOutbound ? Theme.of(context).colorScheme.primary.withOpacity(0.85) : Theme.of(context).colorScheme.tertiary.withOpacity(0.85),
                         )
                       : null,
                   );
@@ -3053,7 +3055,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       elevation: 3,
-              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.05),
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
@@ -3077,12 +3079,12 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: cs.secondary.withValues(alpha: 0.1),
+                  color: cs.secondary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '${lang.type} $serviceType',
-                  style: TextStyle(fontSize: 11, color: cs.secondary.withValues(alpha: 0.85)),
+                  style: TextStyle(fontSize: 11, color: cs.secondary.withOpacity(0.85)),
                 ),
               ),
           ],
@@ -3390,8 +3392,8 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                         boxShadow: [
                           BoxShadow(
                             color: isHighlighted
-                              ? Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.5)
-                              : Theme.of(context).colorScheme.shadow.withValues(alpha: 0.3),
+                              ? Theme.of(context).colorScheme.tertiary.withOpacity(0.5)
+                              : Theme.of(context).colorScheme.shadow.withOpacity(0.3),
                             blurRadius: isHighlighted ? 8 : 4,
                             offset: const Offset(0, 2),
                           ),
@@ -3501,9 +3503,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                               Polyline(
                                 points: polylinePoints,
                                 strokeWidth: 6.0,
-                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.6),
+                                color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
                                 borderStrokeWidth: 1.0,
-                                borderColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.1),
+                                borderColor: Theme.of(context).colorScheme.surface.withOpacity(0.1),
                               ),
                             ],
                           ),
@@ -3524,9 +3526,9 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                             ),
                             markerSize: const Size(18, 18),
                             markerDirection: MarkerDirection.heading,
-                            headingSectorColor: Theme.of(context).colorScheme.error.withValues(alpha: 0.2),
+                            headingSectorColor: Theme.of(context).colorScheme.error.withOpacity(0.2),
                             headingSectorRadius: 60,
-                            accuracyCircleColor: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
+                            accuracyCircleColor: Theme.of(context).colorScheme.error.withOpacity(0.1),
                             showAccuracyCircle: true,
                             showHeadingSector: true,
                           ),
@@ -3560,11 +3562,11 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
             //   margin: const EdgeInsets.only(top: 8),
             //   padding: const EdgeInsets.all(12),
             //   decoration: BoxDecoration(
-            //     color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
+            //     color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
             //     borderRadius: BorderRadius.circular(20),
             //     boxShadow: [
             //       BoxShadow(
-            //         color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.1),
+            //         color: Theme.of(context).colorScheme.shadow.withOpacity(0.1),
             //         blurRadius: 6,
             //         offset: const Offset(0, 2),
             //       ),
@@ -4043,7 +4045,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: isDeparted 
-                    ? colorScheme.onSurface.withValues(alpha: 0.6)
+                    ? colorScheme.onSurface.withOpacity(0.6)
                     : (isNearlyArrived ? colorScheme.secondary : colorScheme.primary),
                 fontSize: 24,
               ),
@@ -4079,7 +4081,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
           Text(
             '($abs)',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
               fontSize: 10,
               height: 1.2,
             ),
@@ -4091,7 +4093,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
     : Text(
         abs,
         style: theme.textTheme.labelSmall?.copyWith(
-          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+          color: colorScheme.onSurfaceVariant.withOpacity(0.7),
           fontSize: 10,
           height: 1.2,
         ),
@@ -4211,11 +4213,11 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
         : colorScheme.tertiaryContainer.withAlpha(150); // 淺色模式下更飽和
 
     // 邊框使用主題色 Tertiary 且透明度更高，使其更顯眼
-    final nearbyBorderColor = colorScheme.tertiary.withValues(alpha: isDark ? 0.8 : 0.6);
+    final nearbyBorderColor = colorScheme.tertiary.withOpacity(isDark ? 0.8 : 0.6);
 
     // 文字顏色使用 onTertiaryContainer 確保高對比度
     final nearbyTextPrimary = colorScheme.onTertiaryContainer;
-    final nearbyTextSecondary = colorScheme.onTertiaryContainer.withValues(alpha: 0.85); // 副標題顏色較淡，但依然清晰
+    final nearbyTextSecondary = colorScheme.onTertiaryContainer.withOpacity(0.85); // 副標題顏色較淡，但依然清晰
 
     // Active state base colors
     final activeSurface = widget.isNearby ? nearbyBgColor : colorScheme.surfaceContainerHigh;
@@ -4225,8 +4227,8 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
 
     // Dynamic Border Color
     final currentBorderColor = isActive
-        ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary.withValues(alpha: 0.3))
-        : colorScheme.outlineVariant.withValues(alpha: 0.3);
+        ? (widget.isNearby ? nearbyBorderColor : colorScheme.primary.withOpacity(0.3))
+        : colorScheme.outlineVariant.withOpacity(0.3);
 
     final now = DateTime.now();
     final hasDeparted = _displayEtas.any((e) {
@@ -4274,7 +4276,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                   width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                   decoration: BoxDecoration(
-                    color: nearbyTextSecondary.withValues(alpha: 0.1),
+                    color: nearbyTextSecondary.withOpacity(0.1),
                     border: Border(
                       bottom: BorderSide(color: nearbyBorderColor, width: 1.5),
                     ),
@@ -4312,7 +4314,6 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                       ),
                     ),
                     const SizedBox(width: 12),
-                    /*
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4320,7 +4321,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                           _buildStatusSection(theme, colorScheme, nearbyTextSecondary),
                           //const SizedBox(height: 6),
                           OptionalMarquee(
-                            text: widget.displayName,//.toTitleCase(),
+                            text: widget.displayName.toTitleCase(),
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                               color: widget.isNearby ? nearbyTextPrimary : colorScheme.onSurface,
@@ -4330,7 +4331,6 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         ],
                       ),
                     ),
-                    */
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       onPressed: _toggleExpanded,
@@ -4355,7 +4355,7 @@ class _ExpandableStopCardState extends State<ExpandableStopCard> with AutomaticK
                         decoration: BoxDecoration(
                           color: colorScheme.surfaceContainer,
                           border: Border(
-                            top: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.2)),
+                            top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.2)),
                           ),
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -4699,10 +4699,10 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
             child: Container(
               height: 60,
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                  color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
                   width: 1.0,
                 ),
               ),
@@ -4780,10 +4780,10 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
             filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
             child: Container(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                  color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
                   width: 1.0,
                 ),
               ),
@@ -4817,7 +4817,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w500,
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
                                           ),
                                         ),
                                     ],
@@ -4829,7 +4829,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                 width: 36,
                                 height: 36,
                                 decoration: BoxDecoration(
-                                  color: dirColor.withValues(alpha: 0.15),
+                                  color: dirColor.withOpacity(0.15),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Icon(
@@ -4848,7 +4848,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                       child: displayFrom.isEmpty && displayTo.isEmpty 
                       ? Text(
                           isEnglish ? 'Details unavailable' : '暫無路線資料',
-                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5)),
                         )
                       : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4868,7 +4868,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
                                     height: 1,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                   ),
                                 ),
                                 Expanded(
@@ -4879,7 +4879,7 @@ class _RouteDestinationWidgetState extends State<RouteDestinationWidget> {
                                       fontSize: 10,
                                       height: 1,
                                       fontWeight: FontWeight.w400,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.88),
                                     ),
                                   ),
                                 ),
@@ -4975,7 +4975,7 @@ class _PulsingRingState extends State<_PulsingRing> with SingleTickerProviderSta
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-              color: widget.color.withValues(alpha: 1.0 - _animation.value),
+              color: widget.color.withOpacity(1.0 - _animation.value),
               width: 3,
             ),
           ),
