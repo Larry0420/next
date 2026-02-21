@@ -11,7 +11,7 @@ import 'package:provider/provider.dart';
 
 import '../ctb_route_status_page.dart';
 import '../kmb_route_status_page.dart';
-import '../main.dart' show LanguageProvider;
+import '../main.dart' show LanguageProvider, EnhancedPageRoute;
 import '../nlb_route_status_page.dart';
 import 'api/citybus.dart';
 import 'api/kmb.dart';
@@ -740,7 +740,7 @@ class _KmbDialerState extends State<KmbDialer> {
             );
 
             if (companyId == 'ctb') {
-              Navigator.of(context).push(MaterialPageRoute(
+              Navigator.of(context).push(EnhancedPageRoute(
                 builder: (_) => CtbRouteStatusPage(
                   route: r,
                   bound: bound,
@@ -749,14 +749,14 @@ class _KmbDialerState extends State<KmbDialer> {
                 ),
               ));
             } else if (companyId == 'nlb') {
-              Navigator.of(context).push(MaterialPageRoute(
+              Navigator.of(context).push(EnhancedPageRoute(
                 builder: (_) => NlbRouteStatusPage(
                   routeNo: r,
                   initialRouteId: v['routeId'].toString(),
                 ),
               ));
             } else {
-              Navigator.of(context).push(MaterialPageRoute(
+              Navigator.of(context).push(EnhancedPageRoute(
                 builder: (_) => KmbRouteStatusPage(
                   route: r,
                   bound: bound,

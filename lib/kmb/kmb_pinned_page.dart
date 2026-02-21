@@ -12,7 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../kmb_route_status_page.dart';
 import '../ctb_route_status_page.dart';
-import '../main.dart' show LanguageProvider;
+import '../main.dart' show LanguageProvider, EnhancedPageRoute;
 import '../toTitleCase.dart';
 import 'api/citybus.dart';
 import 'api/kmb.dart';
@@ -608,7 +608,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
               if (companyId == 'ctb' || companyId == 'nwfb') {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  EnhancedPageRoute(
                     builder: (context) => CtbRouteStatusPage(
                       route: routeNum,
                       bound: direction,
@@ -620,7 +620,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
               } else {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => KmbRouteStatusPage(route: routeNum, bound: direction, serviceType: serviceType, companyId: null,)),
+                EnhancedPageRoute(builder: (context) => KmbRouteStatusPage(route: routeNum, bound: direction, serviceType: serviceType, companyId: null,)),
               ).then((_) => _loadData());
               }
             },
@@ -938,20 +938,36 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     }
   }
 
-  Color _getEtaColor(dynamic raw) {
-    if (raw == null) return Colors.grey;
+  Color _getEtaColor(dynamic raw, BuildContext context) {
+    final cs = Theme.of(context).colorScheme; // 獲取當前主題配色
+
+    if (raw == null) return cs.outline; // 用 outline 取代 grey，適配深淺色
+
     try {
       final dt = DateTime.parse(raw.toString()).toLocal();
       final diff = dt.difference(DateTime.now());
-      if (diff.isNegative) return Colors.grey;
-      if (diff.inMinutes <= 2) return Colors.red;
-      if (diff.inMinutes <= 5) return Colors.orange;
-      if (diff.inMinutes <= 10) return Colors.green;
-      return Colors.blue;
+
+      if (diff.isNegative) return cs.outline; // 已過期：使用低調的輪廓色
+
+      if (diff.inMinutes <= 2) {
+        return cs.error; // 緊急：紅色 (Error)
+      } 
+      if (diff.inMinutes <= 5) {
+        // 次緊急：通常 Tertiary 在 M3 是暖色系/對比色，或者用 errorContainer
+        // 如果想要橙色感覺，可以考慮混色，但最標準是 Semantic Role
+        return cs.tertiary; 
+      }
+      if (diff.inMinutes <= 10) {
+        return cs.primary; // 正常：主色 (Primary)
+      }
+      
+      // 很久以後：次要色 (Secondary) 或 onSurfaceVariant
+      return cs.secondary; 
     } catch (_) {
-      return Colors.grey;
+      return cs.outline;
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -987,12 +1003,15 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     final badgeTextColor = companyProv.getBadgeTextColor(companyId, context);
     final companyName = companyProv.getName(companyId, isEn);
 
+    final radius = BorderRadius.circular(16);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(16),
+          // [修改點 1] 改為直角 (90 degree angle)
+          borderRadius: radius, 
           border: Border.all(
             color: badgeBorderColor.withValues(alpha: 0.3),
             width: 1.0,
@@ -1022,11 +1041,14 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
         ),
         child: Material(
           color: Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-          clipBehavior: Clip.antiAlias,
+          // [修改點 2] Material 也要改成直角，甚至可以移除此行（預設即為 zero）
+          borderRadius: radius,
+          // [修改點 3] 直角不需要 antiAlias，移除以優化效能 (Performance Optimization)
+          clipBehavior: Clip.none, 
           child: InkWell(
             onTap: _handleTap,
-            borderRadius: BorderRadius.circular(16),
+            // [修改點 4] 水波紋邊界改為直角，確保填滿角落
+            borderRadius: radius, 
             child: Padding(
               padding: const EdgeInsets.all(14.0),
               child: Row(
@@ -1048,6 +1070,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
         ),
       ),
     );
+
   }
 
   void _handleTap() {
@@ -1076,33 +1099,45 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
             autoExpandStopId: stopId,
           );
 
-    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    Navigator.push(context, EnhancedPageRoute(builder: (_) => page));
   }
 
   Widget _buildRouteBadge(
-    Color bgColor,
-    Color borderColor,
-    Color textColor,
-    IconData icon,
-    String route,
-    String companyName,
+    Color bgColor, Color borderColor, Color textColor,
+    IconData icon, String route, String companyName,
   ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderColor, width: 1.5),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(route, style: TextStyle(fontWeight: FontWeight.bold, color: textColor, fontSize: 14)),
-          const SizedBox(height: 2),
-          Icon(icon, color: textColor, size: 16),
-          const SizedBox(height: 2),
-          Text(companyName, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: textColor.withValues(alpha: 0.8))),
-        ],
+    return ConstrainedBox(
+      // 固定寬度範圍，確保 Expanded 中間區不會左右漂移
+      constraints: const BoxConstraints(minWidth: 56, maxWidth: 72),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: borderColor, width: 1.5),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              route,
+              style: TextStyle(fontWeight: FontWeight.bold, color: textColor, fontSize: 14),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              strutStyle: const StrutStyle(fontSize: 14, height: 1.2, forceStrutHeight: true),
+            ),
+            const SizedBox(height: 2),
+            Icon(icon, color: textColor, size: 16),
+            const SizedBox(height: 2),
+            Text(
+              companyName,
+              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: textColor.withValues(alpha: 0.8)),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              strutStyle: const StrutStyle(fontSize: 9, height: 1.2, forceStrutHeight: true),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1128,7 +1163,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
               Icon(directionIcon, size: 11, color: directionColor.withValues(alpha: 0.8)),
               const SizedBox(width: 4),
               Expanded(
-                child: AutoSizeText(
+                child: Text(
                   dest,
                   style: TextStyle(
                     fontSize: 11,
@@ -1136,7 +1171,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
                     fontWeight: FontWeight.w500,
                   ),
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
                 ),
               ),
             ],
@@ -1156,9 +1191,15 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     if (_loading) {
       content = const SizedBox(
         key: ValueKey('loading'),
-        height: 2,
-        width: 100,
-        child: LinearProgressIndicator(stopIndicatorRadius: 20, trackGap: 60),
+        height: 20,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            height: 2,
+            width: 100,
+            child: LinearProgressIndicator(stopIndicatorRadius: 20, trackGap: 60),
+          ),
+        ),
       );
     } else if (_etas.isEmpty) {
       content = Text(
@@ -1170,32 +1211,53 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           color: noSchedule ? Colors.grey.shade600 : Colors.orange.shade700,
           fontSize: 11,
           fontStyle: FontStyle.italic,
+          height: 1.2,
         ),
       );
     } else {
       content = Wrap(
         key: const ValueKey('etas'),
-        spacing: 12,
-        runSpacing: 4,
+        spacing: 20,
+        runSpacing: 12,
+        alignment: WrapAlignment.center, 
         children: _etas.take(3).map(_buildEtaItem).toList(),
       );
     }
 
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      switchInCurve: Curves.easeInOutCubicEmphasized,
-      switchOutCurve: Curves.easeInOutQuad,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.1),
-            end: Offset.zero,
-          ).animate(animation),
-          child: child,
-        ),
-      ),
-      child: content,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // [關鍵] 取得父元件可用寬度，強制所有 content 狀態都是全寬
+        // 這樣 AnimatedSize 的 width 永遠不變，只有 height 在做動畫
+        final double? fixedWidth =
+            constraints.maxWidth.isFinite ? constraints.maxWidth : null;
+
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOutCubicEmphasized,
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: fixedWidth, // 鎖定全寬，null = 不限制 (fallback)
+            child: ClipRect(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                switchInCurve: Curves.easeInOutCubicEmphasized,
+                switchOutCurve: Curves.easeInOutQuad,
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.1),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                ),
+                child: content,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1214,41 +1276,85 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
 
     if (etaRaw != null) {
       try {
+        final now = DateTime.now();
         final dt = DateTime.parse(etaRaw.toString()).toLocal();
-        final diff = dt.difference(DateTime.now());
-        final mins = diff.inMinutes;
+        final diff = dt.difference(now);
+        final seconds = diff.inSeconds; // 統一用秒數判斷
         etaTime = _formatEtaTime(dt);
 
-        if (mins <= 0 && diff.inSeconds > -60) {
+        if (seconds <= -60) {
+          // 1. 已經離開超過 1 分鐘 -> 顯示負數或離站
+          etaText = isEn ? '- min' : '- 分鐘'; // 或考慮顯示 "Departed" / "已離站"
+          isDeparted = true;
+        } else if (seconds <= 0) {
+          // 2. 過去 1 分鐘內 (0 ~ -59s) -> 視為到達中
           etaText = isEn ? 'Arriving' : '到達中';
           isNearlyArrived = true;
-        } else if (diff.isNegative) {
-          etaText = isEn ? '- min' : '- 分鐘';
-          isDeparted = true;
-        } else if (mins < 1) {
-          etaText = isEn ? 'Due' : '即將抵達';
+        } else if (seconds < 60) {
+          // 3. 未來 1 分鐘內 (1s ~ 59s) -> 即將抵達 (NOW)
+          etaText = isEn ? 'NOW' : '即將抵達';
           isNearlyArrived = true;
         } else {
+          // 4. 超過 1 分鐘 -> 顯示分鐘數
+          // (seconds / 60).ceil() 確保 61秒顯示 "2 min" 而不是 "1 min" (視需求而定，通常 ceil 比較準)
+          // 但 KMB/CTB 通常用 floor (inMinutes 預設是 floor)，這裡保留你的 inMinutes 邏輯
+          final mins = diff.inMinutes; 
           etaText = isEn ? '$mins min' : '$mins分鐘';
         }
+
       } catch (_) {}
     }
 
     final textColor = isDeparted
         ? Colors.grey[400]
-        : (isNearlyArrived ? Colors.green : _getEtaColor(etaRaw));
+        : (isNearlyArrived ? Colors.green : _getEtaColor(etaRaw, context));
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(etaText, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textColor)),
-        if (etaTime.isNotEmpty)
-          Text(etaTime, style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant.withValues(alpha: 0.7))),
-        if (rmk.isNotEmpty)
-          Text(rmk, style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant.withValues(alpha: 0.7))),
-      ],
-    );
+    // 估算：時間文字 "12 分鐘" 大約 50-60px，給稍微寬一點的空間
+    return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 72), // 稍微放寬一點點給 "25分鐘"
+        child: Column(
+          // [關鍵] 讓所有子元件 (Text) 在 Column 內水平居中
+          crossAxisAlignment: CrossAxisAlignment.center, 
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AutoSizeText(
+              etaText,
+              minFontSize: 1,
+              maxFontSize: 20,
+              style: TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
+              strutStyle: const StrutStyle(
+                  fontSize: 20, height: 1.2, forceStrutHeight: true),
+              maxLines: 1,
+              overflow: TextOverflow.visible,
+              textAlign: TextAlign.center, // [關鍵] 文字內容居中
+            ),
+            if (etaTime.isNotEmpty)
+              Text(
+                etaTime,
+                style: TextStyle(
+                    fontSize: 9, color: cs.onSurfaceVariant.withValues(alpha: 0.7)),
+                strutStyle: const StrutStyle(
+                    fontSize: 9, height: 1.2, forceStrutHeight: true),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center, // [關鍵]
+              ),
+            if (rmk.isNotEmpty)
+              Text(
+                rmk,
+                style: TextStyle(
+                    fontSize: 9, color: cs.onSurfaceVariant.withValues(alpha: 0.7)),
+                strutStyle: const StrutStyle(
+                    fontSize: 9, height: 1.2, forceStrutHeight: true),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center, // [關鍵]
+              ),
+          ],
+        ),
+      );
+
   }
 
   Widget _buildUnpinButton(ColorScheme cs) {
@@ -1259,7 +1365,10 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
         backgroundColor: cs.primaryContainer.withValues(alpha: 0.5),
         foregroundColor: cs.primary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.all(1),
+        padding: const EdgeInsets.all(6),
+        // ↓ 這兩行是關鍵：移除 Material 預設 48×48 最小觸控目標
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }

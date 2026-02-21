@@ -48,7 +48,7 @@ class OptionalMarquee extends StatelessWidget {
           strutStyle: strutStyle,
         )..layout(maxWidth: double.infinity);
 
-        final bool overflows = textPainter.width > maxWidth;
+        final bool overflows = textPainter.width+1 > maxWidth;
 
         // Use exact measured height (no multiplication)
         return SizedBox(

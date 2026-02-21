@@ -16,7 +16,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../kmb_route_status_page.dart';
 // Keep only:
-import '../main.dart' show AccessibilityProvider, LanguageProvider, DeveloperSettingsProvider;
+import '../main.dart' show AccessibilityProvider, LanguageProvider, DeveloperSettingsProvider, EnhancedPageRoute;
 import '../toTitleCase.dart';
 import 'company_name.dart';
 
@@ -1358,7 +1358,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                         final seq = routeEtas.first['seq']?.toString();
                         final stopIdFromEta = routeEtas.first['stop']?.toString();
                         // Navigate to route status page with auto-expand
-                        Navigator.of(context).push(MaterialPageRoute(
+                        Navigator.of(context).push(EnhancedPageRoute(
                           builder: (_) => KmbRouteStatusPage(
                             route: route,
                             bound: bound.toString().isNotEmpty ? bound.toString().toUpperCase() : null,
@@ -1568,7 +1568,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
   Widget _buildDistanceInfo(BuildContext context, LanguageProvider langProv, double distance) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.only(left: 12),
       child: Align(
         alignment: Alignment.centerLeft,
         child: Container(
@@ -1696,7 +1696,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
             
             if (companyUpper == 'CTB' || companyUpper == 'NWFB') {
               // Navigate to CTB Route Status Page
-              Navigator.of(context).push(MaterialPageRoute(
+              Navigator.of(context).push(EnhancedPageRoute(
                 builder: (_) => CtbRouteStatusPage(
                   route: route,
                   bound: normalizedBound,
@@ -1708,7 +1708,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               ));
             } else {
               // Navigate to KMB Route Status Page (default)
-              Navigator.of(context).push(MaterialPageRoute(
+              Navigator.of(context).push(EnhancedPageRoute(
                 builder: (_) => KmbRouteStatusPage(
                   route: route,
                   bound: normalizedBound,

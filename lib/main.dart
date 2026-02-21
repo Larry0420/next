@@ -855,6 +855,21 @@ class LrtApp extends StatelessWidget {
 
 /* ========================= Enhanced Page Transitions ========================= */
 
+class EnhancedPageRoute<T> extends MaterialPageRoute<T> {
+  EnhancedPageRoute({
+    required super.builder,
+    super.settings,
+    super.fullscreenDialog,
+  });
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 500);
+
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 450);
+  // ↑ 返回動畫可以稍短，感覺更自然
+}
+
 /// Enhanced page transitions builder with smooth animations
 class _EnhancedPageTransitionsBuilder  extends PageTransitionsBuilder {
   const _EnhancedPageTransitionsBuilder();
@@ -916,6 +931,7 @@ class _EnhancedPageTransitionsBuilder  extends PageTransitionsBuilder {
       ),
     );
   }
+
 }
 
 
