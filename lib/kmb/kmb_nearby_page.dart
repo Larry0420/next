@@ -462,7 +462,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         style: TextStyle(fontSize: 11 * textScale),
       ),
       selected: isCustom,
-      visualDensity: VisualDensity.compact,
+      visualDensity: VisualDensity.standard,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       selectedColor: cs.primaryContainer,
@@ -676,7 +676,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                 ? const Align(
                     alignment: Alignment.bottomCenter,
                     child: Padding(
-                      padding: EdgeInsets.only(bottom: 10.0),
+                      padding: EdgeInsets.only(bottom: 1),
                       child: LinearProgressIndicator(),
                     ),
                   )
@@ -738,14 +738,13 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     int idx,
     LanguageProvider langProv,
     DeveloperSettingsProvider devSettings,
-    CompanyProvider companyProv, // ← use this, remove context.watch below
+    CompanyProvider companyProv, 
   ) {
     final s = _nearby[idx];
     final showRank = devSettings.showRankBadge;
     final dark = isDark;
 
     // 1. Get Company Information
-    // ← removed: final companyProv = context.watch<CompanyProvider>();
     final String? companyId = s.meta['co'] ?? s.meta['company'];
     final badgeBgColor = companyProv.getBadgeBgColor(companyId, context);
     final badgeBorderColor = companyProv.getBadgeBorderColor(companyId, context);
@@ -760,139 +759,189 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
     final etas = _stopEtaCache[s.stopId] ?? [];
 
+     // [修改點] 使用 Composite Key (組合鍵) 來區分不同方向與服務類型
     final Map<String, List<Map<String, dynamic>>> etasByRoute = {};
     for (final eta in etas) {
       final route = eta['route']?.toString() ?? '';
+      final dir = eta['dir']?.toString() ?? '';
+      final serviceType = eta['service_type']?.toString() ?? '1';
+      
       if (route.isEmpty) continue;
-      etasByRoute.putIfAbsent(route, () => []).add(eta);
-    }
 
+      // 這樣 968-O-1 和 968-I-1 就會變成兩個獨立的群組
+      final compositeKey = '$route-$dir-$serviceType';
+      etasByRoute.putIfAbsent(compositeKey, () => []).add(eta);
+    }
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      // 使用三段色風格優化 Card 邊框
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: badgeBorderColor.withValues(alpha: 0.3), // 統一使用公司邊框色
+          color: badgeBorderColor.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
       child: InkWell(
         onTap: () => _showStopDetails(context, s, etas),
-        // 2. 處理視覺反饋的圓角（確保水波紋不會超出邊框）
-        borderRadius: BorderRadius.circular(12), 
-        child: Padding(
-          padding: const EdgeInsets.all(14.0),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  // 2. 序號 Badge 套用三段色
-                  // 條件判斷：只有當開發者設定開啟時才顯示序號
-                  if (showRank) ...[
-                    Container(
-                      width: 28, height: 28,
-                      decoration: BoxDecoration(
-                        color: badgeBgColor,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: badgeBorderColor, width: 1.5),
-                      ),
-                      child: Center(
-                        child: Text(
-                          '${idx + 1}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: badgeTextColor,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOutCubicEmphasized,
+          alignment: Alignment.topCenter,
+          child: Padding(
+            padding: const EdgeInsets.all(14.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start, // 確保 Column 內文字靠左
+              children: [
+                // ----------------------------------------
+                // 1. 第一行：標題列 (公司標籤 + 站名 + 導航圖示)
+                // ----------------------------------------
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // (可選) 序號 Badge
+                    if (showRank) ...[
+                      Container(
+                        width: 28, height: 28,
+                        decoration: BoxDecoration(
+                          color: badgeBgColor,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: badgeBorderColor, width: 1.5),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${idx + 1}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: badgeTextColor,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10), // 只有顯示 Badge 時才需要的間距
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            // 3. 公司標籤套用三段色 (同 Dialer 一致)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: badgeBgColor,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: badgeBorderColor, width: 0.5),
-                              ),
-                              child: Text(
-                                companyName,
-                                style: TextStyle(
-                                  fontSize: 9, 
-                                  color: badgeTextColor, 
-                                  fontWeight: FontWeight.bold
-                                ),
+                      const SizedBox(width: 10),
+                    ],
+
+                    // 中間內容區塊 (公司標籤 + 站名)
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // 公司標籤
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: badgeBgColor,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: badgeBorderColor, width: 0.5),
+                            ),
+                            child: Text(
+                              companyName,
+                              style: TextStyle(
+                                fontSize: 9,
+                                color: badgeTextColor,
+                                fontWeight: FontWeight.bold,
+                                height: 1.1,
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            // buildStopCard 入面
-                            Expanded(
-                              child: kIsWeb
+                          ),
+                          
+                          const SizedBox(width: 6),
+                          
+                          // 站名
+                          Expanded(
+                            child: kIsWeb
                                 ? AutoSizeText(
-                                    maxFontSize: 12,
                                     displayName.toTitleCase(),
-                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: badgeTextColor, height: 1.2),
+                                    maxFontSize: 14,
+                                    minFontSize: 10,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: badgeTextColor,
+                                      height: 1.2,
+                                    ),
                                     maxLines: 1,
-                                    overflow: TextOverflow.fade,
+                                    overflow: TextOverflow.ellipsis,
                                   )
                                 : OptionalMarquee(
                                     text: displayName.toTitleCase(),
-                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: badgeTextColor, height: 1.2),
-                                    velocity: 50.0,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: badgeTextColor,
+                                      height: 1.2,
+                                    ),
+                                    velocity: 40.0,
                                     blankSpace: 30.0,
                                     pauseAfterRound: const Duration(seconds: 2),
                                   ),
-                            ),
+                          ),
+                        ],
+                      ),
+                    ),
 
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            Icon(Icons.near_me_rounded, size: 11, color: badgeTextColor),
-                            const SizedBox(width: 3),
-                            Text(
-                              _fmtDistance(s.distanceMeters, langProv: langProv),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(context).colorScheme.onSecondaryContainer.withValues(alpha: 0.7),
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                    const SizedBox(width: 8),
+
+                    // 右側導航箭頭
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 24,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    ),
+                  ],
+                ), // Row 結束
+
+                const SizedBox(height: 4),
+
+                // ----------------------------------------
+                // 2. 第二行：距離資訊列
+                // ----------------------------------------
+                Row(
+                  children: [
+                    Icon(Icons.near_me_rounded, size: 11, color: badgeTextColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      _fmtDistance(s.distanceMeters, langProv: langProv),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSecondaryContainer.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ), // Row 結束
+
+                const SizedBox(height: 12),
+
+                // ----------------------------------------
+                // 3. 第三行：ETA 班次 Footer (支援動畫切換)
+                // ----------------------------------------
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  switchInCurve: Curves.easeInOutCubicEmphasized,
+                  switchOutCurve: Curves.easeInOutQuad,
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.05),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
                     ),
                   ),
-                  Icon(Icons.chevron_right, size: 30, color: Colors.grey[400]),
-                ],
-              ),
-              
-              // 1. 統一間距處理 (放在 Column 內)
-              const SizedBox(height: 12),
+                  child: _buildFooterSection(s, etasByRoute, langProv, dark, badgeTextColor),
+                ),
 
-              // 2. 使用 AnimatedSwitcher 處理狀態切換動畫
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                switchInCurve: Curves.bounceIn,
-                switchOutCurve: Curves.bounceOut,
-                child: _buildFooterSection(s, etasByRoute, langProv, dark, badgeTextColor),
-              ),
-
-            ],
-          ),
-        ),
-      ),
-    );
+              ],
+            ), // Column 結束
+          ), // Padding 結束
+        ), // AnimatedSize 結束
+      ), // InkWell 結束
+    ); // Card 結束
   }
 
   Widget _buildFooterSection(
@@ -906,12 +955,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     if (etasByRoute.isNotEmpty) {
       return SizedBox(
         key: const ValueKey('routes'),
-        width: double.infinity,
+        width: double.infinity, // [保持] 佔滿寬度
         child: Wrap(
           spacing: 6,
           runSpacing: 6,
           children: etasByRoute.entries.take(8).map((entry) {
-            return _buildRouteChip(context, entry.key, entry.value, langProv);
+            // [關鍵修改] 從 value (ETA資料) 中取出乾淨的 route 名稱，而不是使用 compositeKey
+            final actualRoute = entry.value.isNotEmpty ? (entry.value.first['route']?.toString() ?? '') : '';
+            return _buildRouteChip(context, actualRoute, entry.value, langProv);
           }).toList(),
         ),
       );
@@ -919,41 +970,46 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
     // 情況 B: 已加載但無班次 (Empty State)
     if (_stopEtaCache.containsKey(s.stopId)) {
-      return Padding(
+      return SizedBox(
         key: const ValueKey('empty'),
-        padding: const EdgeInsets.symmetric(vertical: 4.0),
-        child: Row(
-          children: [
-            Icon(Icons.info_outline, size: 12, color: isDark ? Colors.grey[500] : Colors.grey[800]),
-            const SizedBox(width: 6),
-            Text(
-              langProv.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-                fontStyle: FontStyle.italic,
+        width: double.infinity, // [新增] 強制佔滿寬度，防止 AnimatedSize 寬度跳動
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 12, color: isDark ? Colors.grey[500] : Colors.grey[800]),
+              const SizedBox(width: 6),
+              Text(
+                langProv.isEnglish ? 'No upcoming buses' : '沒有即將到站的巴士',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  fontStyle: FontStyle.italic,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
 
     // 情況 C: 加載中 (Loading State)
-    return Padding(
+    return SizedBox(
       key: const ValueKey('loading'),
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: SizedBox(
-          height: 3,
-          width: 120, // 稍微縮短寬度，視覺上更精緻
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(2),
-            child: LinearProgressIndicator(
-              // 使用品牌主色 (coColor) 作為進度條顏色，強化公司辨識度
-              backgroundColor: coColor.withValues(alpha: 0.1),
-              color: coColor.withValues(alpha: 0.5),
+      width: double.infinity, // [新增] 強制佔滿寬度，防止 AnimatedSize 寬度跳動
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            height: 3,
+            width: 120, 
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                backgroundColor: coColor.withValues(alpha: 0.1),
+                color: coColor.withValues(alpha: 0.5),
+              ),
             ),
           ),
         ),
@@ -983,36 +1039,46 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           final dt = DateTime.parse(etaStr).toLocal();
           final now = DateTime.now();
           final diff = dt.difference(now);
-          
+
+          final cs = Theme.of(context).colorScheme;
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+
           if (diff.inMinutes <= 0) {
             etaText = langProv.isEnglish ? 'Due' : '即到';
-            etaColor = Colors.green;
+            // 綠色 (M3 適配)
+            etaColor = isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32); 
           } else if (diff.inMinutes <= 2) {
             etaText = '${diff.inMinutes}′';
-            etaColor = Colors.red;
+            // 紅色 (M3 系統錯誤/緊急色)
+            etaColor = cs.error; 
           } else if (diff.inMinutes <= 5) {
             etaText = '${diff.inMinutes}′';
-            etaColor = Colors.orange;
+            // 橙色 (M3 適配，深色用亮橘，淺色用深橘)
+            etaColor = isDark ? const Color(0xFFFFB74D) : const Color(0xFFEF6C00); 
           } else if (diff.inMinutes < 60) {
             etaText = '${diff.inMinutes}′';
-            etaColor = Colors.blue;
+            // 藍色 -> 改為 M3 系統主色 (確保融合桌布主題)
+            etaColor = cs.primary; 
           } else {
             etaText = DateFormat.Hm().format(dt);
-            etaColor = Colors.grey[700]!;
+            // 灰色 -> 改為 M3 次要文字色 (自動適配深淺色)
+            etaColor = cs.onSurfaceVariant; 
           }
+
         } catch (_) {}
       }
     }
     
     // Direction icon and color
     IconData dirIcon = Icons.arrow_forward;
+    final cs = Theme.of(context).colorScheme;
     Color dirColor = Colors.blue;
     if (dir.toUpperCase().startsWith('O')) {
       dirIcon = Icons.arrow_circle_right_outlined;
-      dirColor = Colors.green;
+      dirColor = cs.primary;
     } else if (dir.toUpperCase().startsWith('I')) {
       dirIcon = Icons.arrow_circle_left_outlined;
-      dirColor = Colors.orange;
+      dirColor = cs.tertiary;
     }
     
     return Container(
@@ -1756,21 +1822,29 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
                       final dt = DateTime.parse(etaStr).toLocal();
                       final now = DateTime.now();
                       final diff = dt.difference(now);
+                      
+                      final cs = Theme.of(context).colorScheme;
+                      final isDark = Theme.of(context).brightness == Brightness.dark;
+
                       if (diff.inMinutes <= 0) {
                         timeDisplay = langProv.isEnglish ? 'Due' : '即將到站';
-                        timeColor = Colors.red;
+                        // 紅色 (緊急) -> M3 系統錯誤/緊急色
+                        timeColor = cs.error; 
                         abs = DateFormat.Hm().format(dt);
                       } else if (diff.inMinutes <= 5) {
                         timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
-                        timeColor = Colors.orange;
+                        // 橙色 (次緊急) -> 適配深淺色
+                        timeColor = isDark ? const Color(0xFFFFB74D) : const Color(0xFFEF6C00); 
                         abs = DateFormat.Hm().format(dt);
                       } else if (diff.inMinutes < 60) {
                         timeDisplay = langProv.isEnglish ? '${diff.inMinutes} min' : '${diff.inMinutes}分鐘';
-                        timeColor = Colors.green;
+                        // 綠色 (正常) -> 適配深淺色
+                        timeColor = isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32); 
                         abs = DateFormat.Hm().format(dt);
                       } else {
                         timeDisplay = DateFormat.Hm().format(dt);
-                        timeColor = Colors.blue;
+                        // 藍色 (較久) -> M3 系統主色 (確保融合主題)
+                        timeColor = cs.primary; 
                       }
                     } catch (_) {}
                   }
@@ -1804,11 +1878,12 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
   Widget _buildRouteBadge(String route, String dir, BuildContext context) {
     // Determine direction colors (matching existing app logic)
+    final cs = Theme.of(context).colorScheme;
     Color dirColor = Colors.blue;
     if (dir.toUpperCase().startsWith('O')) {
-      dirColor = Colors.green;
+      dirColor = cs.primary;
     } else if (dir.toUpperCase().startsWith('I')) {
-      dirColor = Colors.orange;
+      dirColor = cs.tertiary;
     }
 
     return Container(

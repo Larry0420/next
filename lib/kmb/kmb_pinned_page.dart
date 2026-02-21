@@ -939,35 +939,34 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
   }
 
   Color _getEtaColor(dynamic raw, BuildContext context) {
-    final cs = Theme.of(context).colorScheme; // 獲取當前主題配色
-
-    if (raw == null) return cs.outline; // 用 outline 取代 grey，適配深淺色
-
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    if (raw == null) return Colors.grey;
     try {
       final dt = DateTime.parse(raw.toString()).toLocal();
       final diff = dt.difference(DateTime.now());
 
-      if (diff.isNegative) return cs.outline; // 已過期：使用低調的輪廓色
+      if (diff.isNegative) return isDark ? Colors.grey[600]! : Colors.grey;
 
       if (diff.inMinutes <= 2) {
-        return cs.error; // 緊急：紅色 (Error)
-      } 
+        // M3 Error Color 或是稍柔和的紅色
+        return Theme.of(context).colorScheme.error; 
+      }
       if (diff.inMinutes <= 5) {
-        // 次緊急：通常 Tertiary 在 M3 是暖色系/對比色，或者用 errorContainer
-        // 如果想要橙色感覺，可以考慮混色，但最標準是 Semantic Role
-        return cs.tertiary; 
+        // 橙色在 M3 深色模式下需要亮一點，淺色模式下深一點
+        return isDark ? const Color(0xFFFFB74D) : const Color(0xFFEF6C00);
       }
       if (diff.inMinutes <= 10) {
-        return cs.primary; // 正常：主色 (Primary)
+        // 綠色同理
+        return isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
       }
       
-      // 很久以後：次要色 (Secondary) 或 onSurfaceVariant
-      return cs.secondary; 
+      // 正常藍色 -> Primary
+      return Theme.of(context).colorScheme.primary;
     } catch (_) {
-      return cs.outline;
+      return Colors.grey;
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -993,6 +992,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     final direction = widget.stop['direction']?.toString() ?? 'O';
     final directionUpper = direction.toUpperCase();
     final isInbound = directionUpper.startsWith('I');
+    
     final directionColor = isInbound ? cs.tertiary : cs.primary;
     final directionIcon = isInbound ? Icons.arrow_circle_left : Icons.arrow_circle_right;
 
