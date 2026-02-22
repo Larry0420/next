@@ -259,14 +259,14 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         if (_globalStopMap == null) {
           await Future.wait([
             Geolocator.getCurrentPosition(
-              desiredAccuracy: LocationAccuracy.low,
+              desiredAccuracy: LocationAccuracy.high,
               timeLimit: const Duration(seconds: 10),
             ).then((pos) => _position = pos),
             _buildUnifiedStopMap(langProv),
           ]);
         } else {
           _position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.low,
+            desiredAccuracy: LocationAccuracy.high,
             timeLimit: const Duration(seconds: 10),
           );
         }
@@ -295,15 +295,26 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           Geolocator.getCurrentPosition(
             desiredAccuracy: accuracy,
             timeLimit: const Duration(seconds: 10),
-          ).then((pos) => _position = pos),
+          ).catchError((_) async {
+            // FIX: Fallback to last known position on timeout
+            final lastPos = await Geolocator.getLastKnownPosition();
+            if (lastPos != null) return lastPos;
+            throw Exception(langProv?.isEnglish == true ? 'Location timeout' : '定位超時');
+          }).then((pos) => _position = pos),
           _buildUnifiedStopMap(langProv),
         ]);
       } else {
         _position = await Geolocator.getCurrentPosition(
           desiredAccuracy: accuracy,
           timeLimit: const Duration(seconds: 10),
-        );
+        ).catchError((_) async {
+          // FIX: Fallback here as well
+          final lastPos = await Geolocator.getLastKnownPosition();
+          if (lastPos != null) return lastPos;
+          throw Exception(langProv?.isEnglish == true ? 'Location timeout' : '定位超時');
+        });
       }
+      
       if (!mounted || _position == null) return;
       await _updateNearbyList(_position!);
       await _fetchEtasForNearbyStops();
@@ -428,10 +439,22 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     setState(() => _rangeMeters = meters);
     _rangeDebounce?.cancel();
     _rangeDebounce = Timer(const Duration(milliseconds: 300), () async {
-      //_isFetching = false; // reset so refresh after range change isn't blocked
-      await _init();
+      // FIX: If we already have the location, skip the GPS fetch
+      if (_position != null) {
+        setState(() { _loading = true; _error = null; });
+        try {
+          await _updateNearbyList(_position!);
+          await _fetchEtasForNearbyStops();
+        } catch (e) {
+          _setError(e.toString());
+        }
+      } else {
+        // Fallback to full init only if position is completely missing
+        await _init();
+      }
     });
   }
+
 
   Widget _buildRangeChip(String label, double meters, double textScale) {
     final isSelected = _rangeMeters == meters;
@@ -456,21 +479,31 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
   Widget _buildCustomRangeChip(LanguageProvider langProv, double textScale) {
     final isCustom = !_presetRanges.contains(_rangeMeters);
     final cs = Theme.of(context).colorScheme;
-    return FilterChip(
+    
+    return ChoiceChip( // 1. FIX: Changed from FilterChip to ChoiceChip for web rendering consistency
       label: Text(
         isCustom ? '${_rangeMeters.toInt()}' : (langProv.isEnglish ? 'Custom' : '自訂'),
-        style: TextStyle(fontSize: 11 * textScale),
+        style: TextStyle(
+          fontSize: 11 * textScale,
+          // Optional: Added dynamic font weight to match your other _buildRangeChip styling
+          fontWeight: isCustom ? FontWeight.w600 : FontWeight.w400, 
+        ),
       ),
       selected: isCustom,
-      visualDensity: VisualDensity.standard,
+      visualDensity: VisualDensity.compact,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       selectedColor: cs.primaryContainer,
       checkmarkColor: cs.primary,
       showCheckmark: false,
-      onSelected: (selected) { if (selected) _showCustomRangeDialog(langProv); },
+      // 2. FIX: Removed `if (selected)` so the user can always open the dialog
+      // even if the custom chip is already currently active.
+      onSelected: (_) { 
+        _showCustomRangeDialog(langProv); 
+      },
     );
   }
+
 
   void _showCustomRangeDialog(LanguageProvider langProv) {
     _customRangeController.text = _rangeMeters.toInt().toString();

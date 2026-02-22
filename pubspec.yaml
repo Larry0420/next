@@ -25,13 +25,16 @@ dependencies:
   geolocator: ^14.0.2
   auto_size_text: ^3.0.0 # Or the latest version
   flutter_svg: ^2.0.10
-  flutter_map: ^8.0.0
+  flutter_map: ^8.2.2
   latlong2: ^0.9.1
-  flutter_map_location_marker: ^10.1.0
+  flutter_map_location_marker: ^10.2.0
   marquee: ^2.3.0
   package_info_plus: ^9.0.0
   url_launcher: ^6.1.10
   web: ^1.0.0 # 加入這個
+
+  
+  
 
 dev_dependencies:
   flutter_test:

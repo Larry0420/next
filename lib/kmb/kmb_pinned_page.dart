@@ -1149,6 +1149,8 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     Color directionColor,
     IconData directionIcon,
   ) {
+    final lang = context.read<LanguageProvider>();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1164,9 +1166,9 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  dest,
+                  '${lang.to}: $dest',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 12,
                     color: directionColor.withValues(alpha: 0.9),
                     fontWeight: FontWeight.w500,
                   ),
@@ -1193,7 +1195,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
         key: ValueKey('loading'),
         height: 20,
         child: Align(
-          alignment: Alignment.centerLeft,
+          alignment: Alignment.center,
           child: SizedBox(
             height: 2,
             width: 100,
@@ -1209,17 +1211,18 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
             : (isEn ? 'Service not available' : '服務暫停'),
         style: TextStyle(
           color: noSchedule ? Colors.grey.shade600 : Colors.orange.shade700,
-          fontSize: 11,
+          fontSize: 14,
           fontStyle: FontStyle.italic,
           height: 1.2,
         ),
+        textAlign: TextAlign.left,
       );
     } else {
       content = Wrap(
         key: const ValueKey('etas'),
         spacing: 20,
         runSpacing: 12,
-        alignment: WrapAlignment.center, 
+        alignment: WrapAlignment.start, 
         children: _etas.take(3).map(_buildEtaItem).toList(),
       );
     }
@@ -1272,6 +1275,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     String etaText = isEn ? 'No upcoming buses' : '沒有即將到站的巴士';
     String etaTime = '';
     bool isDeparted = false;
+    bool noEtaRemark = true;
     bool isNearlyArrived = false;
 
     if (etaRaw != null) {
@@ -1286,20 +1290,24 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           // 1. 已經離開超過 1 分鐘 -> 顯示負數或離站
           etaText = isEn ? '- min' : '- 分鐘'; // 或考慮顯示 "Departed" / "已離站"
           isDeparted = true;
+          noEtaRemark = false;
         } else if (seconds <= 0) {
           // 2. 過去 1 分鐘內 (0 ~ -59s) -> 視為到達中
           etaText = isEn ? 'Arriving' : '到達中';
           isNearlyArrived = true;
+          noEtaRemark = false;
         } else if (seconds < 60) {
           // 3. 未來 1 分鐘內 (1s ~ 59s) -> 即將抵達 (NOW)
           etaText = isEn ? 'NOW' : '即將抵達';
           isNearlyArrived = true;
+          noEtaRemark = false;
         } else {
           // 4. 超過 1 分鐘 -> 顯示分鐘數
           // (seconds / 60).ceil() 確保 61秒顯示 "2 min" 而不是 "1 min" (視需求而定，通常 ceil 比較準)
           // 但 KMB/CTB 通常用 floor (inMinutes 預設是 floor)，這裡保留你的 inMinutes 邏輯
           final mins = diff.inMinutes; 
           etaText = isEn ? '$mins min' : '$mins分鐘';
+          noEtaRemark = false;
         }
 
       } catch (_) {}
@@ -1311,7 +1319,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
 
     // 估算：時間文字 "12 分鐘" 大約 50-60px，給稍微寬一點的空間
     return ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 72), // 稍微放寬一點點給 "25分鐘"
+        constraints: BoxConstraints(maxWidth: noEtaRemark ? 150 : 72), // 稍微放寬一點點給 "25分鐘"
         child: Column(
           // [關鍵] 讓所有子元件 (Text) 在 Column 內水平居中
           crossAxisAlignment: CrossAxisAlignment.center, 
@@ -1319,14 +1327,14 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           children: [
             AutoSizeText(
               etaText,
-              minFontSize: 1,
-              maxFontSize: 20,
+              minFontSize: 9,
+              maxFontSize: noEtaRemark ? 15 : 22,
               style: TextStyle(
                   fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
               strutStyle: const StrutStyle(
                   fontSize: 20, height: 1.2, forceStrutHeight: true),
               maxLines: 1,
-              overflow: TextOverflow.visible,
+              //overflow: TextOverflow.visible,
               textAlign: TextAlign.center, // [關鍵] 文字內容居中
             ),
             if (etaTime.isNotEmpty)

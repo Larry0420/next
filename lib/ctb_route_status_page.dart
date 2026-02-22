@@ -3476,8 +3476,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                       ),
                       children: [
                         TileLayer(
-                          urlTemplate: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-                          subdomains: const ['a', 'b', 'c'],
+                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'com.example.lrtnexttrain',
                           
                           // 設置合理的縮放限制
@@ -3489,7 +3488,7 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
                           
                           // ✅ 處理高動態像素比設備 (Retina)
                           // 如果設備像素比高於 1.5，開啟 retinaMode 會讓地圖更清晰
-                          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+                          retinaMode: false,
                           
                           // 緩衝區設定 (預載入相鄰瓦片，讓滑動更順暢)
                           keepBuffer: 3, 

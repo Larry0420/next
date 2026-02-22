@@ -1,23 +1,25 @@
-import 'package:auto_size_text/auto_size_text.dart';
-import 'package:flutter/material.dart';
-import '/kmb/api/kmb.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
-import 'package:flutter/foundation.dart' show compute;
-import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants, EnhancedScrollPhysics, AccessibilityProvider;
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
-import 'dart:async';
-import 'package:path_provider/path_provider.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+
+import 'package:auto_size_text/auto_size_text.dart';
+import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '/kmb/api/kmb.dart';
+import '../main.dart' show LanguageProvider, DeveloperSettingsProvider, UIConstants, EnhancedScrollPhysics, AccessibilityProvider;
 import 'optionalMarquee.dart';
 import 'toTitleCase.dart';
 
@@ -2936,8 +2938,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                       ),
                       children: [
                         TileLayer(
-                          urlTemplate: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-                          subdomains: const ['a', 'b', 'c'],
+                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'com.example.lrtnexttrain',
                           
                           // 設置合理的縮放限制
@@ -2949,7 +2950,7 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                           
                           // ✅ 處理高動態像素比設備 (Retina)
                           // 如果設備像素比高於 1.5，開啟 retinaMode 會讓地圖更清晰
-                          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+                          retinaMode: false,
                           
                           // 緩衝區設定 (預載入相鄰瓦片，讓滑動更順暢)
                           keepBuffer: 3, 
