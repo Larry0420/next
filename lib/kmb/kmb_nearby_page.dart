@@ -803,7 +803,11 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
 
       // 這樣 968-O-1 和 968-I-1 就會變成兩個獨立的群組
       final compositeKey = '$route-$dir-$serviceType';
-      etasByRoute.putIfAbsent(compositeKey, () => []).add(eta);
+      etasByRoute.putIfAbsent(compositeKey, () => []).add({
+        ...eta,
+        // [新增] 注入 rmk_service，方便 _buildRouteChip 直接讀取
+        'rmk_service': serviceType,
+      });
     }
     
     return Card(
@@ -992,7 +996,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
         child: Wrap(
           spacing: 6,
           runSpacing: 6,
-          children: etasByRoute.entries.take(8).map((entry) {
+          children: etasByRoute.entries.map((entry) {
             // [關鍵修改] 從 value (ETA資料) 中取出乾淨的 route 名稱，而不是使用 compositeKey
             final actualRoute = entry.value.isNotEmpty ? (entry.value.first['route']?.toString() ?? '') : '';
             return _buildRouteChip(context, actualRoute, entry.value, langProv);
@@ -1050,21 +1054,31 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     );
   }
 
-  Widget _buildRouteChip(BuildContext context, String route, List<Map<String, dynamic>> routeEtas, LanguageProvider langProv) {
+  Widget _buildRouteChip(
+    BuildContext context,
+    String route,
+    List<Map<String, dynamic>> routeEtas,
+    LanguageProvider langProv,
+  ) {
     // Sort by eta time
     routeEtas.sort((a, b) {
       final etaA = a['eta']?.toString() ?? '';
       final etaB = b['eta']?.toString() ?? '';
       return etaA.compareTo(etaB);
     });
-    
-    final dir = routeEtas.first['dir']?.toString() ?? '';
-    
-    // Get first ETA
+
     final firstEta = routeEtas.isNotEmpty ? routeEtas.first : null;
+    final dir = firstEta?['dir']?.toString() ?? '';
+
+    // [新增] 從注入的 rmk_service 讀取，fallback 到 service_type
+    final serviceType = firstEta?['rmk_service']?.toString()
+        ?? firstEta?['service_type']?.toString()
+        ?? '1';
+    final isSpecialService = serviceType.isNotEmpty && serviceType != '1' && serviceType != 'null';
+
     String etaText = '—';
     Color etaColor = Colors.grey;
-    
+
     if (firstEta != null) {
       final etaStr = firstEta['eta']?.toString() ?? '';
       if (etaStr.isNotEmpty) {
@@ -1072,40 +1086,35 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
           final dt = DateTime.parse(etaStr).toLocal();
           final now = DateTime.now();
           final diff = dt.difference(now);
-
           final cs = Theme.of(context).colorScheme;
           final isDark = Theme.of(context).brightness == Brightness.dark;
+          final seconds = diff.inSeconds;
 
-          if (diff.inMinutes <= 0) {
+          if (seconds <= 0) {
             etaText = langProv.isEnglish ? 'Due' : '即到';
-            // 綠色 (M3 適配)
-            etaColor = isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32); 
+            etaColor = isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
           } else if (diff.inMinutes <= 2) {
             etaText = '${diff.inMinutes}′';
-            // 紅色 (M3 系統錯誤/緊急色)
-            etaColor = cs.error; 
+            etaColor = cs.error;
           } else if (diff.inMinutes <= 5) {
             etaText = '${diff.inMinutes}′';
-            // 橙色 (M3 適配，深色用亮橘，淺色用深橘)
-            etaColor = isDark ? const Color(0xFFFFB74D) : const Color(0xFFEF6C00); 
+            etaColor = isDark ? const Color(0xFFFFB74D) : const Color(0xFFEF6C00);
           } else if (diff.inMinutes < 60) {
             etaText = '${diff.inMinutes}′';
-            // 藍色 -> 改為 M3 系統主色 (確保融合桌布主題)
-            etaColor = cs.primary; 
+            etaColor = cs.primary;
           } else {
             etaText = DateFormat.Hm().format(dt);
-            // 灰色 -> 改為 M3 次要文字色 (自動適配深淺色)
-            etaColor = cs.onSurfaceVariant; 
+            etaColor = cs.onSurfaceVariant;
           }
-
         } catch (_) {}
       }
     }
-    
-    // Direction icon and color
-    IconData dirIcon = Icons.arrow_forward;
+
     final cs = Theme.of(context).colorScheme;
-    Color dirColor = Colors.blue;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    IconData dirIcon = Icons.arrow_forward;
+    Color dirColor = cs.primary;
     if (dir.toUpperCase().startsWith('O')) {
       dirIcon = Icons.arrow_circle_right_outlined;
       dirColor = cs.primary;
@@ -1113,7 +1122,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       dirIcon = Icons.arrow_circle_left_outlined;
       dirColor = cs.tertiary;
     }
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
       decoration: BoxDecoration(
@@ -1126,6 +1135,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Route number
           Text(
@@ -1134,24 +1144,60 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               fontSize: 12,
               fontWeight: FontWeight.bold,
               color: dirColor,
+              height: 1.1,
             ),
           ),
+
+          // [新增] Service Type badge ── 只在非標準班次 (非 '1') 時顯示
+          if (isSpecialService) ...[
+            const SizedBox(width: 2),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+              decoration: BoxDecoration(
+                // 用稍微不同的顏色區分，例如 amber 系
+                color: isDark
+                    ? Colors.amber.withValues(alpha: 0.25)
+                    : Colors.amber.withValues(alpha: 0.20),
+                borderRadius: BorderRadius.circular(3),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.amber.withValues(alpha: 0.5)
+                      : Colors.amber.withValues(alpha: 0.6),
+                  width: 0.8,
+                ),
+              ),
+              child: Text(
+                'S$serviceType',  // 例如：S2, S3
+                style: TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                  color: isDark ? Colors.amber[300] : Colors.amber[800],
+                  height: 1.1,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+          ],
+
           const SizedBox(width: 3),
           Icon(dirIcon, size: 11, color: dirColor),
           const SizedBox(width: 5),
-          // ETA
+
+          // ETA time
           Text(
             etaText,
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
               color: etaColor,
+              height: 1.1,
             ),
           ),
         ],
       ),
     );
   }
+
 
   // Helper widget for sort chips
   Widget _buildSortChip({
@@ -1756,13 +1802,18 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
       : (destTc.isNotEmpty ? destTc : destEn).toString();
 
     final bound = routeEtas.first['dir'] ?? routeEtas.first['bound'] ?? '';
-    final serviceType = routeEtas.first['service_type'] ?? routeEtas.first['servicetype'] ?? '';
+    // [提取 Service Type]
+    final serviceType = routeEtas.first['service_type']?.toString() ?? routeEtas.first['servicetype']?.toString() ?? '1';
     final hasValidEta = routeEtas.any((eta) => (eta['eta']?.toString() ?? '').isNotEmpty);
 
-    // DETECT COMPANY: Check 'co' or 'company' field
+    // [提取第一筆的 rmk，用來做 Badge 首字]
+    final rmkEnTop = routeEtas.first['rmk_en'] ?? routeEtas.first['rmken'] ?? '';
+    final rmkTcTop = routeEtas.first['rmk_tc'] ?? routeEtas.first['rmktc'] ?? '';
+    final topRmk = langProv.isEnglish ? rmkEnTop : (rmkTcTop.isNotEmpty ? rmkTcTop : rmkEnTop);
+
     final companyId = routeEtas.first['co']?.toString() ?? 
                       routeEtas.first['company']?.toString() ?? 
-                      'KMB'; // Default to KMB if not specified
+                      'KMB';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 3, top: 6),
@@ -1827,7 +1878,7 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
               children: [
                 Row(
                   children: [
-                    _buildRouteBadge(route, bound, context),
+                    _buildRouteBadge(route, bound, context, serviceType, topRmk.toString()),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1909,37 +1960,91 @@ class _KmbNearbyPageState extends State<KmbNearbyPage> {
     );
   }
 
-  Widget _buildRouteBadge(String route, String dir, BuildContext context) {
-    // Determine direction colors (matching existing app logic)
-    final cs = Theme.of(context).colorScheme;
-    Color dirColor = Colors.blue;
-    if (dir.toUpperCase().startsWith('O')) {
-      dirColor = cs.primary;
-    } else if (dir.toUpperCase().startsWith('I')) {
-      dirColor = cs.tertiary;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: dirColor.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: dirColor.withValues(alpha: 0.4),
-          width: 1,
-        ),
-      ),
-      child: Text(
-        route,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-          color: dirColor,
-          letterSpacing: -0.2,
-        ),
-      ),
-    );
+Widget _buildRouteBadge(
+  String route, 
+  String dir, 
+  BuildContext context,
+  String serviceType,
+  String rmk, // 傳入多語系的 remark 來抓取首字
+) {
+  // Determine direction colors (matching existing app logic)
+  final cs = Theme.of(context).colorScheme;
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  
+  Color dirColor = Colors.blue;
+  if (dir.toUpperCase().startsWith('O')) {
+    dirColor = cs.primary;
+  } else if (dir.toUpperCase().startsWith('I')) {
+    dirColor = cs.tertiary;
   }
+
+  // 判斷是否為特別班次
+  final isSpecial = serviceType.isNotEmpty && serviceType != '1' && serviceType != 'null';
+  
+  // 萃取 badge 文字 (例如 "特", "短", "Sp")
+  String specialBadgeText = '';
+  if (isSpecial) {
+    if (rmk.isNotEmpty && !rmk.contains('原定') && !rmk.contains('Scheduled')) {
+      specialBadgeText = rmk.substring(0, 1);
+    } else {
+      // 預設 fallback
+      specialBadgeText = RegExp(r'[a-zA-Z]').hasMatch(rmk) ? 'Sp' : '特';
+    }
+  }
+
+  return Container(
+    padding: EdgeInsets.symmetric(
+      horizontal: isSpecial ? 6 : 10, // 為了塞下標籤，微調 padding
+      vertical: 4
+    ),
+    decoration: BoxDecoration(
+      color: dirColor.withValues(alpha: 0.15),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(
+        color: dirColor.withValues(alpha: 0.4),
+        width: 1,
+      ),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          route,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: dirColor,
+            letterSpacing: -0.2,
+          ),
+        ),
+        // 如果是特別班次，加上小 Badge
+        if (isSpecial) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.amber[900]?.withValues(alpha: 0.6) : Colors.amber[100],
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: isDark ? Colors.amber[600]! : Colors.amber[700]!,
+                width: 0.5,
+              ),
+            ),
+            child: Text(
+              specialBadgeText,
+              style: TextStyle(
+                fontSize: 10, // 字體稍大一點點
+                fontWeight: FontWeight.w900,
+                color: isDark ? Colors.amber[200] : Colors.amber[900],
+                height: 1.1,
+              ),
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
 
 
 }
