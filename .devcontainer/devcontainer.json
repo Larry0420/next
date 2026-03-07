@@ -1,0 +1,21 @@
+{
+    "name": "Flutter iFlow Environment",
+    "build": {
+      "dockerfile": "../Dockerfile" // 指向你之前寫好的那個 Dockerfile
+    },
+    "mounts": [
+      "source=${localWorkspaceFolder},target=/app,type=bind"
+    ],
+    "workspaceFolder": "/app",
+    "customizations": {
+      "vscode": {
+        "extensions": [
+          "Dart-Code.flutter",
+          "Dart-Code.dart-code"
+        ]
+      }
+    },
+    "remoteUser": "root",
+    "postCreateCommand": "flutter doctor && npm install -g @iflow-ai/iflow-cli" 
+  }
+  

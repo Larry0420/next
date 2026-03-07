@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Auto Start iFlow Docker",
+            "type": "shell",
+            "command": "docker run -it -v ${workspaceFolder}:/app flutter-iflow",
+            "runOptions": {
+                "runOn": "folderOpen" // 重點：資料夾開啟時自動執行
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
