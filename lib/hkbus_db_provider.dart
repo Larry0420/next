@@ -1,14 +1,8 @@
-// hkbus_db_provider.dart 頂部
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart'
-  if (dart.library.html) 'stubs/path_provider_stub.dart';
-
-
 
 class UnifiedBusRoute {
   final String routeId;      // JSON 裡的 Key (例如 "101+1+KENNEDY TOWN+KWUN TONG")
@@ -200,13 +194,7 @@ class HkbusDbProvider extends ChangeNotifier {
   /// 初始化：先讀 Cache，若無或過期則下載
   Future<void> initDb({bool forceUpdate = false}) async {
     try {
-      String? jsonString;
-
-      if (kIsWeb) {
-        jsonString = await _loadFromPrefs(forceUpdate);
-      } else {
-        jsonString = await _loadFromFile(forceUpdate);
-      }
+      String? jsonString = await _loadWithCache(forceUpdate);
 
       if (jsonString == null || jsonString.isEmpty) {
         throw Exception('Failed to load hkbus DB: empty content');
@@ -221,86 +209,54 @@ class HkbusDbProvider extends ChangeNotifier {
 
       _isReady = true;
       notifyListeners();
-      debugPrint('✅ hkbus DB loaded: ${_routeList!.length} routes, ${_stopList!.length} stops');
-
+      debugPrint('✅ hkbus DB loaded: ${_routeList!.length} routes');
     } catch (e) {
       debugPrint('❌ Error loading hkbus DB: $e');
     }
   }
 
-/// Web：用 SharedPreferences 做 cache
-Future<String?> _loadFromPrefs(bool forceUpdate) async {
-  final prefs = await SharedPreferences.getInstance();
-  const key   = 'hkbus_db_json';
-  const keyAt = 'hkbus_db_cached_at';
+  Future<String?> _loadWithCache(bool forceUpdate) async {
+    final prefs = await SharedPreferences.getInstance();
+    const key   = 'hkbus_db_json';
+    const keyAt = 'hkbus_db_cached_at';
 
-  if (!forceUpdate) {
-    final cachedAt = prefs.getString(keyAt);
-    final cached   = prefs.getString(key);
-    if (cached != null && cachedAt != null) {
-      final age = DateTime.now().difference(DateTime.parse(cachedAt));
-      if (age.inHours < 12) {
-        debugPrint('💾 hkbus DB from SharedPreferences (${age.inMinutes}min old)');
-        return cached;
-      }
-    }
-  }
-
-  debugPrint('🌐 Downloading hkbus DB (web)...');
-  try {
-    final res = await http.get(Uri.parse(dbUrl));
-    if (res.statusCode == 200) {
-      await prefs.setString(key, res.body);
-      await prefs.setString(keyAt, DateTime.now().toIso8601String());
-      return res.body;
-    }
-  } catch (e) {
-    debugPrint('❌ Download failed: $e');
-  }
-  // 下載失敗，用舊 cache
-  return prefs.getString(key);
-}
-
-  /// Mobile/Desktop：用 File 做 cache
-  Future<String?> _loadFromFile(bool forceUpdate) async {
-    final dir  = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/routeFareList.min.json');
-
-    bool needsUpdate = forceUpdate || !file.existsSync();
-    if (!needsUpdate) {
-      final age = DateTime.now().difference(file.lastModifiedSync());
-      if (age.inHours > 12) needsUpdate = true;
-    }
-
-    if (needsUpdate) {
-      debugPrint('📥 Downloading hkbus DB (native)...');
-      try {
-        final res = await http.get(Uri.parse(dbUrl));
-        if (res.statusCode == 200) {
-          await file.writeAsString(res.body);
-          debugPrint('✅ hkbus DB saved to cache');
-          return res.body;
+    // Web 上跳過 localStorage cache，直接 fetch
+    // 因為 JSON 可能超過 localStorage 5MB 限制
+    if (!kIsWeb) {
+      if (!forceUpdate) {
+        final cachedAt = prefs.getString(keyAt);
+        final cached   = prefs.getString(key);
+        if (cached != null && cachedAt != null) {
+          final age = DateTime.now().difference(DateTime.parse(cachedAt));
+          if (age.inHours < 12) {
+            debugPrint('💾 hkbus DB from cache (${age.inMinutes}min old)');
+            return cached;
+          }
         }
-      } catch (e) {
-        debugPrint('❌ Download failed: $e');
       }
-      // 下載失敗，讀舊檔（如果有）
-      if (file.existsSync()) return file.readAsString();
-      return null;
     }
 
-    debugPrint('📂 hkbus DB from file cache');
-    return file.readAsString();
+    // 抓遠端（Web + Native fallback 都走這裡）
+    debugPrint('🌐 Downloading hkbus DB...');
+    try {
+      final res = await http.get(Uri.parse(dbUrl));
+      if (res.statusCode == 200) {
+        // Native 才寫 cache
+        if (!kIsWeb) {
+          await prefs.setString(key, res.body);
+          await prefs.setString(keyAt, DateTime.now().toIso8601String());
+        }
+        return res.body;
+      }
+    } catch (e) {
+      debugPrint('❌ Download failed: $e');
+    }
+
+    // Native fallback：用舊 cache
+    if (!kIsWeb) return prefs.getString(key);
+    return null;
   }
 
-  Future<void> refresh() async => initDb(forceUpdate: true);
-    
-
-
-  Future<File> _getCacheFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/routeFareList.min.json');
-  }
 
   // ==========================================
   // 解析 Helper (給 Dialer / Search / Nearby 用)

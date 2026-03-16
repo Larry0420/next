@@ -1,6 +1,7 @@
 import 'dart:async'; // For TimeoutException
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // ✅ 必須加入這行才能使用 HapticFeedback
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
@@ -49,6 +50,10 @@ class _KmbDialerState extends State<KmbDialer> {
   void initState() {
     super.initState();
     _fetchRoutes();
+    // 觸發 DB 載入
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<HkbusDbProvider>().initDb();
+    });
   }
 
   Future<void> _fetchRoutes() async {
@@ -344,8 +349,8 @@ class _KmbDialerState extends State<KmbDialer> {
     // 監聽 DbProvider 的狀態
     final hkbusDb = context.watch<HkbusDbProvider>();
     
-    /*/ 如果 JSON 還沒載入完，顯示一個全螢幕的 Loading
-    if (!hkbusDb.isReady) {
+    // 如果 JSON 還沒載入完，顯示一個全螢幕的 Loading
+    if (!hkbusDb.isReady && !kIsWeb) {
       return Scaffold(
         appBar: AppBar(title: const Text('Routes')),
         body: const Center(
@@ -360,7 +365,7 @@ class _KmbDialerState extends State<KmbDialer> {
         ),
       );
     }
-    */
+
 
     // Apply filter to the main list if no search query
     List<Map<String, dynamic>> displayList;
