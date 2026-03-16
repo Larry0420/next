@@ -5,8 +5,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart'  // 只在 non-web 有效
-    if (dart.library.html) 'package:hk_transport/stubs/path_provider_stub.dart';
+import 'package:path_provider/path_provider.dart'
+  if (dart.library.html) 'stubs/path_provider_stub.dart';
+
 
 
 class UnifiedBusRoute {
