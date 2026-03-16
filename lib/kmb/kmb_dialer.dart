@@ -344,7 +344,7 @@ class _KmbDialerState extends State<KmbDialer> {
     // 監聽 DbProvider 的狀態
     final hkbusDb = context.watch<HkbusDbProvider>();
     
-    // 如果 JSON 還沒載入完，顯示一個全螢幕的 Loading
+    /*/ 如果 JSON 還沒載入完，顯示一個全螢幕的 Loading
     if (!hkbusDb.isReady) {
       return Scaffold(
         appBar: AppBar(title: const Text('Routes')),
@@ -360,6 +360,7 @@ class _KmbDialerState extends State<KmbDialer> {
         ),
       );
     }
+    */
 
     // Apply filter to the main list if no search query
     List<Map<String, dynamic>> displayList;
