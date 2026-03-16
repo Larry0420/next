@@ -963,6 +963,189 @@ const Map<String, _LineMetadata> _lineMetadata = {
   'DRL': _LineMetadata('Disneyland Resort Line', '迪士尼綫', Color.fromRGBO(241, 115, 172, 1)),
 };
 
+// ========================= MTR Persistent State =========================
+/// 
+/// MtrPersistentState - Comprehensive app state persistence for MTR module
+/// 
+/// This class saves/restores the complete user session including:
+/// - Selected line code
+/// - Selected station code  
+/// - Selected direction filter
+/// - Complete ETA schedule data with timestamp
+/// 
+/// This ensures users see their last viewed data immediately on app launch,
+/// without waiting for network requests or seeing default configurations.
+///
+class MtrPersistentState {
+  static const String _stateKey = 'mtr_complete_app_state_v2';
+  static const String _timestampKey = 'mtr_state_timestamp_v2';
+  static const Duration _maxCacheAge = Duration(minutes: 30);
+  
+  final String? lineCode;
+  final String? stationCode;
+  final String? direction;
+  final MtrScheduleResponse? scheduleData;
+  final DateTime? savedAt;
+  
+  MtrPersistentState({
+    this.lineCode,
+    this.stationCode,
+    this.direction,
+    this.scheduleData,
+    this.savedAt,
+  });
+  
+  bool get hasValidSelection => lineCode != null && stationCode != null;
+  bool get hasScheduleData => scheduleData != null;
+  
+  /// Check if the cached state is still fresh (within max cache age)
+  bool get isFresh {
+    if (savedAt == null) return false;
+    return DateTime.now().difference(savedAt!) < _maxCacheAge;
+  }
+  
+  /// Convert state to JSON for persistent storage
+  Map<String, dynamic> toJson() {
+    return {
+      'lineCode': lineCode,
+      'stationCode': stationCode,
+      'direction': direction,
+      'scheduleData': scheduleData != null ? _scheduleToJson(scheduleData!) : null,
+      'savedAt': savedAt?.toIso8601String(),
+    };
+  }
+  
+  /// Create state from JSON
+  factory MtrPersistentState.fromJson(Map<String, dynamic> json) {
+    return MtrPersistentState(
+      lineCode: json['lineCode'] as String?,
+      stationCode: json['stationCode'] as String?,
+      direction: json['direction'] as String?,
+      scheduleData: json['scheduleData'] != null 
+          ? _scheduleFromJson(json['scheduleData'] as Map<String, dynamic>)
+          : null,
+      savedAt: json['savedAt'] != null 
+          ? DateTime.tryParse(json['savedAt'] as String)
+          : null,
+    );
+  }
+  
+  /// Save complete state to persistent storage
+  static Future<void> save({
+    required String? lineCode,
+    required String? stationCode,
+    required String? direction,
+    required MtrScheduleResponse? scheduleData,
+  }) async {
+    try {
+      final prefs = await _sharedPrefsInstance;
+      final state = MtrPersistentState(
+        lineCode: lineCode,
+        stationCode: stationCode,
+        direction: direction,
+        scheduleData: scheduleData,
+        savedAt: DateTime.now(),
+      );
+      
+      await prefs.setString(_stateKey, jsonEncode(state.toJson()));
+      await prefs.setInt(_timestampKey, DateTime.now().millisecondsSinceEpoch);
+      
+      debugPrint('MTR PersistentState: Saved complete state (line=$lineCode, station=$stationCode, hasData=${scheduleData != null})');
+    } catch (e) {
+      debugPrint('MTR PersistentState: Failed to save state: $e');
+    }
+  }
+  
+  /// Load complete state from persistent storage
+  static Future<MtrPersistentState?> load() async {
+    try {
+      final prefs = await _sharedPrefsInstance;
+      final jsonStr = prefs.getString(_stateKey);
+      
+      if (jsonStr == null) {
+        debugPrint('MTR PersistentState: No saved state found');
+        return null;
+      }
+      
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final state = MtrPersistentState.fromJson(json);
+      
+      debugPrint('MTR PersistentState: Loaded state (line=${state.lineCode}, station=${state.stationCode}, hasData=${state.hasScheduleData}, isFresh=${state.isFresh})');
+      return state;
+    } catch (e) {
+      debugPrint('MTR PersistentState: Failed to load state: $e');
+      return null;
+    }
+  }
+  
+  /// Clear saved state
+  static Future<void> clear() async {
+    try {
+      final prefs = await _sharedPrefsInstance;
+      await prefs.remove(_stateKey);
+      await prefs.remove(_timestampKey);
+      debugPrint('MTR PersistentState: Cleared saved state');
+    } catch (e) {
+      debugPrint('MTR PersistentState: Failed to clear state: $e');
+    }
+  }
+  
+  /// Helper: Convert schedule to JSON
+  static Map<String, dynamic> _scheduleToJson(MtrScheduleResponse schedule) {
+    return {
+      'status': schedule.status,
+      'message': schedule.message,
+      'lineStationKey': schedule.lineStationKey,
+      'currentTime': schedule.currentTime?.toIso8601String(),
+      'systemTime': schedule.systemTime?.toIso8601String(),
+      'isDelay': schedule.isDelay,
+      'directionTrains': schedule.directionTrains.map((key, trains) => MapEntry(
+        key,
+        trains.map((train) => {
+          'dest': train.destination,
+          'plat': train.platform,
+          'time': train.time,
+          'ttnt': train.timeInMinutes,
+          'seq': train.sequence,
+          'timetype': train.timeType,
+          'route': train.route,
+        }).toList(),
+      )),
+    };
+  }
+  
+  /// Helper: Convert JSON to schedule
+  static MtrScheduleResponse _scheduleFromJson(Map<String, dynamic> json) {
+    return MtrScheduleResponse(
+      status: json['status'] as int? ?? 0,
+      message: json['message'] as String? ?? '',
+      lineStationKey: json['lineStationKey'] as String?,
+      currentTime: json['currentTime'] != null 
+          ? DateTime.tryParse(json['currentTime'] as String)
+          : null,
+      systemTime: json['systemTime'] != null 
+          ? DateTime.tryParse(json['systemTime'] as String)
+          : null,
+      isDelay: json['isDelay'] as bool? ?? false,
+      directionTrains: (json['directionTrains'] as Map<String, dynamic>? ?? {}).map((key, trains) {
+        final trainList = (trains as List<dynamic>?) ?? [];
+        return MapEntry(
+          key,
+          trainList.map((train) => MtrTrainInfo(
+            destination: train['dest'] as String? ?? '',
+            platform: train['plat'] as String? ?? '',
+            time: train['time'] as String? ?? '',
+            timeInMinutes: train['ttnt'] as int?,
+            sequence: train['seq'] as int?,
+            timeType: train['timetype'] as String?,
+            route: train['route'] as String?,
+          )).toList(),
+        );
+      }),
+    );
+  }
+}
+
 // ========================= MTR Catalog Provider =========================
 
 class MtrCatalogProvider extends ChangeNotifier {
@@ -1000,6 +1183,10 @@ class MtrCatalogProvider extends ChangeNotifier {
   }
   
   /// Initialize with user settings - call this after DeveloperSettingsProvider is ready
+  /// 
+  /// This method now uses MtrPersistentState to restore the complete application state
+  /// including the selected line, station, direction, and any cached ETA schedule data.
+  /// This ensures users see their last viewed data immediately without waiting for network.
   Future<void> initializeWithSettings(bool shouldLoadCachedSelection) async {
     if (_hasAppliedUserPreference) {
       debugPrint('MTR Catalog: User preference already applied, skipping');
@@ -1020,6 +1207,57 @@ class MtrCatalogProvider extends ChangeNotifier {
         _selectedStation = _selectedLine!.stations.isNotEmpty ? _selectedLine!.stations.first : null;
         notifyListeners();
       }
+    }
+  }
+  
+  /// Restore state from persistent storage (MtrPersistentState)
+  /// Returns the restored schedule data if available, or null
+  /// 
+  /// This is called by MtrScheduleProvider to coordinate state restoration
+  Future<MtrScheduleResponse?> restoreFromPersistentState() async {
+    try {
+      final state = await MtrPersistentState.load();
+      
+      if (state == null || !state.hasValidSelection) {
+        debugPrint('MTR Catalog: No valid persistent state to restore');
+        return null;
+      }
+      
+      // Find the line in loaded lines
+      MtrLine? line;
+      if (_lines.isNotEmpty) {
+        line = _lines.firstWhere(
+          (l) => l.lineCode == state.lineCode,
+          orElse: () => _lines.first,
+        );
+      }
+      
+      // Find the station in the line
+      MtrStation? station;
+      if (line != null && line.stations.isNotEmpty) {
+        station = line.stations.firstWhere(
+          (s) => s.stationCode == state.stationCode,
+          orElse: () => line!.stations.first,
+        );
+      }
+      
+      // Only update if we found valid line and station
+      if (line != null && station != null) {
+        _selectedLine = line;
+        _selectedStation = station;
+        _selectedDirection = state.direction;
+        
+        debugPrint('MTR Catalog: Restored from persistent state (line=${line.lineCode}, station=${station.stationCode}, hasSchedule=${state.hasScheduleData})');
+        notifyListeners();
+        
+        return state.scheduleData;
+      } else {
+        debugPrint('MTR Catalog: Could not restore - line or station not found in catalog');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('MTR Catalog: Failed to restore from persistent state: $e');
+      return null;
     }
   }
   
@@ -1297,6 +1535,40 @@ class MtrScheduleProvider extends ChangeNotifier {
     } catch (_) {}
   }
   
+  /// Restore schedule data from persistent state
+  /// This should be called after MtrCatalogProvider has restored line/station selection
+  /// 
+  /// Returns true if data was restored, false otherwise
+  Future<bool> restoreFromPersistentState() async {
+    try {
+      final state = await MtrPersistentState.load();
+      
+      if (state == null || !state.hasScheduleData) {
+        debugPrint('MTR Schedule: No persistent schedule data to restore');
+        return false;
+      }
+      
+      // Check if data is still fresh (within max cache age)
+      if (!state.isFresh) {
+        debugPrint('MTR Schedule: Persistent data is stale (>30min), will fetch fresh data');
+        return false;
+      }
+      
+      // Restore the schedule data
+      _data = state.scheduleData;
+      _lastSuccessfulRefreshTime = state.savedAt;
+      _error = null;
+      _consecutiveErrors = 0;
+      
+      debugPrint('MTR Schedule: Restored schedule data from persistent state (${state.savedAt})');
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('MTR Schedule: Failed to restore from persistent state: $e');
+      return false;
+    }
+  }
+  
   final MtrApiService _api = MtrApiService();
   
   MtrScheduleResponse? _data;
@@ -1481,6 +1753,15 @@ class MtrScheduleProvider extends ChangeNotifier {
         _error = null;
         _lastSuccessfulRefreshTime = DateTime.now();
         _consecutiveErrors = 0; // Reset on success
+        
+        // Persist the complete state (line, station, direction, schedule data)
+        // This ensures users see their last data immediately on app relaunch
+        unawaited(MtrPersistentState.save(
+          lineCode: lineCode,
+          stationCode: stationCode,
+          direction: null, // Direction is managed by catalog provider
+          scheduleData: schedule,
+        ));
       }
     } catch (e) {
       final errorMessage = _formatError(e.toString());
@@ -1649,30 +1930,28 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     // Detect if this page is currently visible in the PageView
     _checkPageVisibility();
 
-    // Load auto-refresh preference and trigger auto-refresh on app start
+    // Auto-refresh control: only start if page is visible and has selection
+    // Note: Full state restoration is handled by _initializeCatalogAndSchedule in initState
     if (!_autoRefreshInitialized) {
       _autoRefreshInitialized = true;
       final schedule = context.read<MtrScheduleProvider>();
       final catalog = context.read<MtrCatalogProvider>();
-      final devSettings = context.read<DeveloperSettingsProvider>();
 
       schedule.loadAutoRefreshPref().then((_) {
-        // Auto-load selection if enabled
-        catalog.initializeWithSettings(devSettings.mtrAutoLoadCachedSelection).then((_) {
-          // After catalog is initialized, trigger auto-refresh if conditions are met
-          if (_isPageVisible && catalog.hasSelection && schedule.autoRefreshEnabled) {
-              if (!schedule.isAutoRefreshActive) {
-              debugPrint('MTR Page: Auto-triggering auto-refresh on app start');
-              schedule.startAutoRefresh(
-                catalog.selectedLine!.lineCode,
-                catalog.selectedStation!.stationCode,
-                preferLive: true,
-              );
-            }
-          } else if (schedule.isAutoRefreshActive && (!catalog.hasSelection || !schedule.autoRefreshEnabled)) {
-            schedule.stopAutoRefresh();
+        // After state is restored by _initializeCatalogAndSchedule, 
+        // manage auto-refresh based on current conditions
+        if (_isPageVisible && catalog.hasSelection && schedule.autoRefreshEnabled) {
+          if (!schedule.isAutoRefreshActive) {
+            debugPrint('MTR Page: Auto-triggering auto-refresh after state restoration');
+            schedule.startAutoRefresh(
+              catalog.selectedLine!.lineCode,
+              catalog.selectedStation!.stationCode,
+              preferLive: true,
+            );
           }
-        });
+        } else if (schedule.isAutoRefreshActive && (!catalog.hasSelection || !schedule.autoRefreshEnabled)) {
+          schedule.stopAutoRefresh();
+        }
       });
     }
   }
@@ -1691,29 +1970,29 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
   
   /// Handle page visibility changes - start/stop auto-refresh accordingly
   ///
-  /// This method now re-initializes the current selection from the catalog
-  /// (applyCachedSelection) before starting auto-refresh. That prevents a
-  /// spurious immediate auto-refresh when the user simply navigates to the
-  /// MTR page and the selection/index hasn't been re-applied yet.
+  /// When page becomes visible:
+  /// 1. If we have a valid selection, resume auto-refresh
+  /// 2. If state was lost (rare), attempt to restore from MtrPersistentState
   Future<void> _handleVisibilityChanged() async {
     final schedule = context.read<MtrScheduleProvider>();
     final catalog = context.read<MtrCatalogProvider>();
 
     if (_isPageVisible) {
-      // Ensure catalog selection is applied/re-initialized before starting
-      // auto-refresh. This re-initializes the current index/selection state
-      // so startAutoRefresh receives a valid and up-to-date line/station.
-      try {
-        // Reload catalog data and apply cached selection so the line/station
-        // lists are guaranteed to be present before we start auto-refresh.
-        await catalog.reloadWithSettings(true);
-      } catch (e) {
-        debugPrint('MTR Page: Failed to reload/apply cached selection on visibility: $e');
+      // If we don't have selection but have persistent state, restore it
+      // This handles edge cases where the provider state was cleared
+      if (!catalog.hasSelection) {
+        try {
+          debugPrint('MTR Page: No selection on visibility change, attempting restore');
+          await catalog.reloadWithSettings(true);
+          await schedule.restoreFromPersistentState();
+        } catch (e) {
+          debugPrint('MTR Page: Failed to restore on visibility change: $e');
+        }
       }
 
       // Page became visible - resume auto-refresh if enabled and we have selection
-        if (schedule.autoRefreshEnabled && catalog.hasSelection && !schedule.isAutoRefreshActive) {
-        debugPrint('MTR Page: Resuming auto-refresh (page became visible) after re-init selection');
+      if (schedule.autoRefreshEnabled && catalog.hasSelection && !schedule.isAutoRefreshActive) {
+        debugPrint('MTR Page: Resuming auto-refresh (page became visible)');
         schedule.startAutoRefresh(
           catalog.selectedLine!.lineCode,
           catalog.selectedStation!.stationCode,
@@ -1753,17 +2032,59 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
   }
   
   /// Initialize catalog and schedule based on auto-load setting
-  void _initializeCatalogAndSchedule() {
+  /// 
+  /// Uses MtrPersistentState to restore complete application state:
+  /// 1. Restore line/station selection from persistent state
+  /// 2. Restore cached schedule data (if fresh) to show immediately
+  /// 3. Trigger background refresh to get latest data
+  /// 
+  /// This ensures users see their last data instantly without waiting for network,
+  /// eliminating the "flash of default content" problem.
+  void _initializeCatalogAndSchedule() async {
     final catalog = context.read<MtrCatalogProvider>();
+    final schedule = context.read<MtrScheduleProvider>();
     final devSettings = context.read<DeveloperSettingsProvider>();
     
-    // Apply user preference for auto-loading cached selection
-    catalog.initializeWithSettings(devSettings.mtrAutoLoadCachedSelection).then((_) {
-      // After catalog is initialized with user preference, load schedule if appropriate
-      if (devSettings.mtrAutoLoadCachedSelection && catalog.hasSelection) {
+    // Step 1: If auto-load is enabled, try to restore from MtrPersistentState
+    // This restores line, station, direction, AND schedule data in one atomic operation
+    if (devSettings.mtrAutoLoadCachedSelection) {
+      debugPrint('MTR Page: Attempting to restore complete state from persistent storage');
+      
+      // First load catalog data (lines/stations)
+      await catalog.reloadWithSettings(true);
+      
+      // Then restore schedule data from persistent state
+      final restored = await schedule.restoreFromPersistentState();
+      
+      if (restored && catalog.hasSelection) {
+        debugPrint('MTR Page: Successfully restored state, triggering background refresh');
+        // Data restored - trigger silent background refresh for latest data
+        // Use silent refresh to avoid jarring loading indicators
+        schedule.loadSchedule(
+          catalog.selectedLine!.lineCode,
+          catalog.selectedStation!.stationCode,
+          forceRefresh: true,
+          silentRefresh: true, // Silent - don't show loading spinner since we have data
+          priority: _PendingOperation.priorityUserAction,
+        );
+        
+        // Start auto-refresh if enabled and page is visible
+        if (_isPageVisible && schedule.autoRefreshEnabled) {
+          schedule.startAutoRefresh(
+            catalog.selectedLine!.lineCode,
+            catalog.selectedStation!.stationCode,
+            preferLive: true,
+          );
+        }
+      } else if (catalog.hasSelection) {
+        // No cached schedule data (or stale), load fresh
+        debugPrint('MTR Page: No cached schedule data, loading fresh');
         _loadScheduleIfNeeded();
       }
-    });
+    } else {
+      // Auto-load disabled - use traditional flow with default selection
+      await catalog.initializeWithSettings(false);
+    }
   }
 
   @override
@@ -1780,24 +2101,20 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
     if (state == AppLifecycleState.resumed) {
       // Resume auto-refresh only if page is visible AND auto-refresh is enabled
       if (_isPageVisible && schedule.autoRefreshEnabled) {
-
-        // Reload catalog and apply cached selection to ensure the selected
-        // line and station exist before triggering refresh.
-        try {
-          await catalog.reloadWithSettings(true);
-        } catch (e) {
-          debugPrint('MTR Page: Failed to reload/apply cached selection on resume: $e');
-        }
-
+        // State should already be restored by _initializeCatalogAndSchedule
+        // or _handleVisibilityChanged. Just resume auto-refresh if needed.
         if (catalog.hasSelection) {
-          debugPrint('MTR Page: App resumed, page is visible - refreshing data');
-          // App resumed - use user action priority
+          debugPrint('MTR Page: App resumed, page is visible - resuming auto-refresh');
+          
+          // Silent refresh to get latest data without jarring UI
           schedule.loadSchedule(
             catalog.selectedLine!.lineCode,
             catalog.selectedStation!.stationCode,
             forceRefresh: true,
+            silentRefresh: schedule.hasData, // Silent if we have cached data
             priority: _PendingOperation.priorityUserAction,
           );
+          
           if (!schedule.isAutoRefreshActive) {
             schedule.startAutoRefresh(
               catalog.selectedLine!.lineCode,
@@ -1806,7 +2123,10 @@ class _MtrSchedulePageState extends State<MtrSchedulePage> with WidgetsBindingOb
             );
           }
         } else {
-          debugPrint('MTR Page: App resumed but no selection available after re-init - skipping refresh');
+          debugPrint('MTR Page: App resumed but no selection - attempting restore');
+          // Try to restore from persistent state
+          await catalog.reloadWithSettings(true);
+          await schedule.restoreFromPersistentState();
         }
       } else if (!_isPageVisible) {
         debugPrint('MTR Page: App resumed, but page is hidden - skipping refresh');
@@ -3703,7 +4023,12 @@ class _TrainListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final statusInfo = _getStatusInfo(context);
-    
+    final timeDisplay = train.displayTimeLocalized(lang.isEnglish);
+    final isStatusDisplay = timeDisplay == 'Arriving' ||
+                           timeDisplay == '即將到達' ||
+                           timeDisplay == 'Departing' ||
+                           timeDisplay == '正在離開';
+
     return Container(
       margin: EdgeInsets.only(bottom: isLast ? 0 : 6),
       padding: const EdgeInsets.all(10),
@@ -3728,7 +4053,7 @@ class _TrainListItem extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          // Destination
+          // Destination and platform info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -3744,23 +4069,32 @@ class _TrainListItem extends StatelessWidget {
                   maxLines: 1,
                 ),
                 const SizedBox(height: 3),
-                _buildTrainSubtitle(context),
+                // Only show platform and sequence, NOT minutes/status (shown on right)
+                _buildTrainMetaInfo(context),
               ],
             ),
           ),
-          // Time display
+          // Unified time/status display - right side only
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: colorScheme.primaryContainer.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(8),
+              color: isStatusDisplay
+                  ? statusInfo.color.withValues(alpha: 0.12)
+                  : colorScheme.primaryContainer.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isStatusDisplay
+                    ? statusInfo.color.withValues(alpha: 0.4)
+                    : colorScheme.primary.withValues(alpha: 0.2),
+                width: 1,
+              ),
             ),
             child: Text(
-              train.displayTimeLocalized(lang.isEnglish),
+              timeDisplay,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w700,
-                fontSize: 14,
-                color: colorScheme.primary,
+                fontSize: isStatusDisplay ? 13 : 14,
+                color: isStatusDisplay ? statusInfo.color : colorScheme.primary,
               ),
             ),
           ),
@@ -3837,60 +4171,17 @@ class _TrainListItem extends StatelessWidget {
     return (color: colorScheme.primary, shadow: null);
   }
 
-  Widget _buildTrainSubtitle(BuildContext context) {
+  /// Build train metadata row (platform + sequence only)
+  /// Note: Minutes and status are now displayed in the right-side time box only
+  Widget _buildTrainMetaInfo(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final minutesVal = train.timeInMinutes;
-    final minutesLabel = () {
-      if (minutesVal == null) return '-';
-      if (lang.isEnglish) {
-        if (minutesVal <= 0) return '0 min';
-        if (minutesVal == 1) return '1 min';
-        return '$minutesVal mins';
-      } else {
-        final v = minutesVal < 0 ? 0 : minutesVal;
-        return '$v 分鐘';
-      }
-    }();
-
-    // Determine status using optimized properties
-    // For through trains: ttnt=0 means "Departing"
-    // For EAL terminus: timetype='A'/ttnt=0 = "Arriving", timetype='D'/ttnt=0 = "Departing"
-    String statusLabel = '';
-    Color? statusColor;
-    IconData? statusIcon;
-    
-    // Handle trains at platform (ttnt = 0)
-    if (minutesVal != null && minutesVal <= 0) {
-      // EAL terminus arrival (timetype='A')
-      if (train.timeType?.toUpperCase() == 'A') {
-        statusLabel = lang.isEnglish ? 'Arriving' : '即將到達';
-        statusColor = Colors.green;
-        statusIcon = Icons.adjust;
-      } else {
-        // Through trains or EAL terminus departure (timetype='D')
-        statusLabel = lang.isEnglish ? 'Departing' : '正在離開';
-        statusColor = Colors.deepOrange;
-        statusIcon = Icons.near_me;
-      }
-    } 
-    // Arriving: Train is 1-2 minutes away
-    else if (minutesVal != null && minutesVal <= 2) {
-      statusLabel = lang.isEnglish ? 'Arriving' : '即將到達';
-      statusColor = Colors.green;
-      statusIcon = Icons.adjust;
-    } 
-    // Approaching: Train is 3 minutes away
-    else if (minutesVal != null && minutesVal == 3) {
-      statusLabel = lang.isEnglish ? 'Approaching' : '接近中';
-      statusColor = Colors.amber;
-      statusIcon = Icons.directions_transit;
-    }
 
     return Wrap(
       spacing: 4,
       runSpacing: 3,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        // Platform info (if enabled and available)
         if (devSettings.showMtrArrivalDetails && train.platform.isNotEmpty)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -3912,27 +4203,29 @@ class _TrainListItem extends StatelessWidget {
                   style: TextStyle(
                     color: colorScheme.primary,
                     fontWeight: FontWeight.w700,
-                    fontSize: 10,
+                    fontSize: 12,
                     letterSpacing: 0.3,
                   ),
                 ),
               ],
             ),
           ),
-        if (minutesLabel.isNotEmpty)
+        // Train sequence number (if available)
+        /*
+        if (train.sequence != null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: colorScheme.secondaryContainer.withValues(alpha: 0.3),
+              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(5),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.schedule, size: 9, color: colorScheme.onSurfaceVariant),
+                Icon(Icons.numbers, size: 9, color: colorScheme.onSurfaceVariant),
                 const SizedBox(width: 3),
                 Text(
-                  minutesLabel,
+                  '${train.sequence}',
                   style: TextStyle(
                     fontSize: 10,
                     color: colorScheme.onSurfaceVariant,
@@ -3942,43 +4235,7 @@ class _TrainListItem extends StatelessWidget {
               ],
             ),
           ),
-        if (statusLabel.isNotEmpty)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: statusColor?.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(5),
-              border: Border.all(
-                color: statusColor?.withValues(alpha: 0.4) ?? Colors.transparent,
-                width: 0.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: statusColor?.withValues(alpha: 0.2) ?? Colors.transparent,
-                  blurRadius: 3,
-                  spreadRadius: 0,
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (statusIcon != null) ...[
-                  Icon(statusIcon, size: 9, color: statusColor),
-                  const SizedBox(width: 3),
-                ],
-                Text(
-                  statusLabel,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 10,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          */
       ],
     );
   }

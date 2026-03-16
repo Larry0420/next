@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:lrt_next_train/toTitleCase.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -74,7 +75,20 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   Timer? _highlightTimer;
   final Map<String, GlobalKey> _stopKeys = {};
 
+  // Nearby logic（hkbus style）
+  String? _nearestStopId;       // 唯一最近站點 ID（排序取第一）
+  double? _nearestDistanceM;    // 最近站點距離（metres），用於 badge 顯示
+  static const double _nearbyBadgeRange = 200.0; // 200m 內才顯示 Nearby badge
+
   // ETA 相關（僅在展開時載入）
+  final Map<String, Map<String, dynamic>> _expandedStopsById = {};
+  final Set<String> _etaRefreshingByStopId = <String>{};
+
+  Timer? _etaRefreshTimer;
+  bool _etaRefreshInFlight = false;
+
+  static const Duration _etaRefreshInterval = Duration(seconds: 20);
+
   final Map<String, List<UnifiedEta>> _etaByStopId = {};
   final Set<String> _etaLoadingByStopId = {};
 
@@ -90,7 +104,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   void initState() {
     super.initState();
     // 確保是單一公司代碼（避免 "kmb+ctb" 這樣的組合值）
-    _selectedCompany = (widget.initialCompany ?? widget.companies.first).split('+').first;
+    _selectedCompany = (widget.initialCompany ?? widget.companies.first).toLowerCase().split('+').first;  // ✅ fixed: ensure lowercase
     _loadMapViewPreference();
     _initializeLocation();
     _initializeRouteContext();
@@ -109,6 +123,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
               widget.route,
               direction: widget.bound,
               serviceType: widget.serviceType,
+              company: _selectedCompany,
             );
 
       if (routeData != null) {
@@ -146,6 +161,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
   @override
   void dispose() {
+    _etaRefreshTimer?.cancel();
     _scrollController.dispose();
     _highlightTimer?.cancel();
     _draggableController.dispose();
@@ -190,87 +206,116 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     } catch (_) {}
   }
 
-  /// 獲取用戶位置並滾動到最近站點
+  /// 獲取用戶位置，更新最近站點，並滾動到該站點
+  /// 參考 hkbus/hk-independent-bus-eta RouteEtaPage.tsx 邏輯：
+  /// 排序找距離最小者，而非固定閾值，Nearby badge 另外設 200m 範圍
   Future<void> _getUserLocationAndScrollToNearest() async {
     if (!mounted) return;
-    
     setState(() => _locationLoading = true);
-    
+
     try {
-      // 獲取當前位置
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.best,
           timeLimit: Duration(seconds: 5),
         ),
       );
-      
       if (!mounted) return;
       setState(() => _userPosition = pos);
-      
       if (_allStops.isEmpty) return;
-      
-      // 找到最近站點
-      String? nearestStopId;
-      double minDistance = double.infinity;
-      
-      for (final stop in _allStops) {
-        // ✅ 確保 stop 係 Map 而唔係 String，防止 stop['lat'] 爆 type error
-        if (stop is! Map<String, dynamic>) {
-          debugPrint('⚠️ _allStops contains non-map: ${stop.runtimeType} = $stop');
-          continue;
-        }
-        final lat = stop['lat']?.toString();
-        final lng = stop['long']?.toString() ?? stop['lng']?.toString();
-        final stopId = stop['stop']?.toString();
-        
-        if (lat == null || lng == null || stopId == null) continue;
-        
-        try {
-          final distance = Geolocator.distanceBetween(
-            pos.latitude,
-            pos.longitude,
-            double.parse(lat),
-            double.parse(lng),
-          );
-          
-          if (distance < minDistance) {
-            minDistance = distance;
-            nearestStopId = stopId;
-          }
-        } catch (_) {}
-      }
-      
-      // 滾動到最近站點
-      if (nearestStopId != null && _stopKeys.containsKey(nearestStopId)) {
-        final key = _stopKeys[nearestStopId];
-        if (key?.currentContext != null) {
-          Scrollable.ensureVisible(
-            key!.currentContext!,
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-            alignment: 0.3, // 將站點放在視圖 30% 位置
-          );
-          
-          // 高亮顯示
-          setState(() {
-            _highlightedStopId = nearestStopId;
-          });
-          
-          _highlightTimer?.cancel();
-          _highlightTimer = Timer(const Duration(seconds: 3), () {
-            if (mounted) {
-              setState(() => _highlightedStopId = null);
-            }
-          });
-        }
-      }
+
+      // ✅ hkbus 風格：map → sort → 取第一，無固定距離閾值
+      final ranked = _allStops
+          .where((s) =>
+              s is Map &&
+              s['lat'] != null &&
+              (s['long'] ?? s['lng']) != null &&
+              s['stop'] != null)
+          .map((s) {
+            final lat = double.tryParse(s['lat'].toString());
+            final lng = double.tryParse(
+                (s['long'] ?? s['lng']).toString());
+            if (lat == null || lng == null) return null;
+            final dist = Geolocator.distanceBetween(
+              pos.latitude, pos.longitude, lat, lng,
+            );
+            return (stopId: s['stop'].toString(), distance: dist);
+          })
+          .whereType<({String stopId, double distance})>()
+          .toList()
+        ..sort((a, b) => a.distance.compareTo(b.distance));
+
+      if (ranked.isEmpty) return;
+
+      final nearest = ranked.first;
+
+      // 更新最近站點狀態（_buildStopCard 用 _nearestStopId 判斷 isNearby）
+      setState(() {
+        _nearestStopId = nearest.stopId;
+        _nearestDistanceM = nearest.distance;
+        _highlightedStopId = nearest.stopId;
+      });
+
+      _highlightTimer?.cancel();
+      _highlightTimer = Timer(const Duration(seconds: 4), () {
+        if (mounted) setState(() => _highlightedStopId = null);
+      });
+
+      // ✅ 優先 ensureVisible（widget 已 build）；若 key 不存在則 index fallback
+      await _scrollToStop(nearest.stopId);
+
     } catch (e) {
       debugPrint('Error getting location: $e');
     } finally {
-      if (mounted) {
-        setState(() => _locationLoading = false);
+      if (mounted) setState(() => _locationLoading = false);
+    }
+  }
+
+  /// 預先填充 _stopKeys（在 _allStops 更新後呼叫，避免 lazy build 造成 key 缺失）
+  void _preFillStopKeys() {
+    for (final s in _allStops) {
+      final stopId = s['stop']?.toString();
+      if (stopId != null && stopId.isNotEmpty) {
+        _stopKeys.putIfAbsent(stopId, () => GlobalKey());
       }
+    }
+  }
+
+  /// 滾動到指定站點：先嘗試 ensureVisible，失敗則 index estimat fallback
+  Future<void> _scrollToStop(String stopId) async {
+    // 嘗試直接 ensureVisible
+    final key = _stopKeys[stopId];
+    if (key?.currentContext != null) {
+      await Scrollable.ensureVisible(
+        key!.currentContext!,
+        duration: const Duration(milliseconds: 500),
+        curve: Easing.emphasizedDecelerate,
+        alignment: 0.2,
+      );
+      return;
+    }
+
+    // Fallback：用 index 估算位置（SliverList lazy build 時 key 可能未存在）
+    final idx = _allStops.indexWhere(
+        (s) => s['stop']?.toString() == stopId);
+    if (idx >= 0 && _scrollController.hasClients) {
+      await _scrollController.animateTo(
+        idx * 80.0, // 估算每個 card 高度約 80dp
+        duration: const Duration(milliseconds: 400),
+        curve: Easing.emphasizedDecelerate,
+      );
+      // 等 widget build 後補做精確 ensureVisible
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final key2 = _stopKeys[stopId];
+        if (key2?.currentContext != null) {
+          await Scrollable.ensureVisible(
+            key2!.currentContext!,
+            alignment: 0.2,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
     }
   }
 
@@ -303,7 +348,15 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     final hkbusDb = context.read<HkbusDbProvider>();
     
     if (!hkbusDb.isReady) {
-      throw Exception('Unified database not ready');
+      // ✅ fixed: wait for DB ready instead of throwing immediately
+      void listener() {
+        if (hkbusDb.isReady) {
+          hkbusDb.removeListener(listener);
+          if (mounted) _fetchFromUnifiedDb();
+        }
+      }
+      hkbusDb.addListener(listener);
+      return;
     }
 
     // 優先用 initialRouteId（從 dialer 傳入）精確匹配，否則用路線號＋方向＋服務類型
@@ -315,6 +368,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       widget.route,
       direction: widget.bound,
       serviceType: widget.serviceType,
+      company: _selectedCompany,
     );
 
     if (routeData == null) {
@@ -329,7 +383,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     final rawGroups = hkbusDb.buildStopGroupsForRoute(route.routeId);
 
     // 防止 rawGroups 其實係 List<String> 或混雜 List/Map
-    final stopGroups = rawGroups.whereType<Map<String, dynamic>>().toList();
+    final stopGroups = rawGroups.whereType<Map>().toList();
 
     if (stopGroups.length != rawGroups.length) {
       debugPrint(
@@ -339,47 +393,22 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       debugPrint('sample=${rawGroups.take(5).toList()}');
     }
 
-    List<Map<String, dynamic>> stops;
+    List<Map<String, dynamic>> stops = [];
 
-    // NLB 專營路線回退：當 stopGroups 為空且路線包含 NLB 時，從 stopsByCompany 建立站點
-    if (stopGroups.isEmpty &&
-        route.companies.any((c) => c.toLowerCase() == 'nlb')) {
-      final nlbStopsRaw = route.stopsByCompany['nlb'];
-      if (nlbStopsRaw != null) {
-        List<String> nlbStops = [];
-        if (nlbStopsRaw is String) {
-          try {
-            final parsed = jsonDecode(nlbStopsRaw);
-            if (parsed is List) {
-              nlbStops = parsed.map((e) => e.toString()).toList();
-            }
-          } catch (_) {}
-        } else if (nlbStopsRaw is List) {
-          nlbStops = nlbStopsRaw.map((e) => e.toString()).toList();
-        }
-        stops = nlbStops.asMap().entries.map((entry) {
-          final stopId = entry.value;
-          final coords = hkbusDb.getStopCoordinates(stopId);
-          return {
-            'seq': entry.key + 1,
-            'stop': stopId,
-            'name_tc': hkbusDb.getStopName(stopId, isEnglish: false),
-            'name_en': hkbusDb.getStopName(stopId, isEnglish: true),
-            'kmb_stop_id': null,
-            'ctb_stop_id': null,
-            'gmb_stop_id': null,
-            'nlb_stop_id': stopId,
-            'lat': coords?['lat'],
-            'lng': coords?['lng'],
-          };
-        }).toList();
-      } else {
-        stops = [];
-      }
+    if (stopGroups.isEmpty) {
+      // 通用 fallback：當 stopGroups 為空時，從 route.stopsByCompany 直接構建站點
+      // 這處理單一公司路線（如 KMB、CTB、LWB）的 stops 是 List 而非 Map 的情況
+      final coKey = _selectedCompany.toLowerCase();
+      final rawStops = route.stopsByCompany[coKey] ??
+          route.stopsByCompany[route.primaryCompany] ??
+          (route.stopsByCompany.isNotEmpty ? route.stopsByCompany.values.first : null);
+
+      stops = _normalizeStops(rawStops, company: coKey);
     } else {
       // 轉換為統一格式，並添加站點座標
       stops = stopGroups.map((group) {
-        final stopId = group['${_selectedCompany}_stop_id'] ??
+        final _co = _selectedCompany.toLowerCase();  // ✅ fixed: ensure lowercase key
+        final stopId = group['${_co}_stop_id'] ??
             group['kmb_stop_id'] ??
             group['ctb_stop_id'] ??
             group['gmb_stop_id'] ??
@@ -401,9 +430,13 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           'kmb_stop_id': group['kmb_stop_id'],
           'ctb_stop_id': group['ctb_stop_id'],
           'gmb_stop_id': group['gmb_stop_id'],
+          'gmb_stop_seq': group['gmb_stop_seq'] ?? (seq0 + 1), // ← 新增
           'nlb_stop_id': group['nlb_stop_id'],
           'lat': coords?['lat'],
           'lng': coords?['lng'],
+          'long': coords?['lng'],     // ✅ fixed: _buildStopCard reads 'long' first
+          'fare': group['fare'],
+          'fare_holiday': group['fare_holiday'],
         };
       }).where((s) => s['stop'] != null).toList();
     }
@@ -423,6 +456,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         };
         loading = false;
       });
+      _preFillStopKeys(); // ✅ 新增
     }
   }
 
@@ -441,6 +475,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         case 'nlb':
           await _fetchNlbData();
           break;
+        case 'gmb':
+          await _fetchGmbData();   // ← 新增
+          break;
         default:
           throw Exception('Unsupported company: $company');
       }
@@ -451,45 +488,107 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   }
 
   Future<void> _fetchKmbData() async {
-    final r = widget.route.trim().toUpperCase();
-    // 直接使用 API
-    final result = await Kmb.fetchRouteStatus(r);
-    await _processKmbData(result);
-  }
+    final hkbusDb = context.read<HkbusDbProvider>();
 
-  
+    // 🔍 DEBUG: Trace fetch path
+    debugPrint('🔍 _fetchKmbData: using unified DB pattern');
 
-  Future<void> _processKmbData(Map<String, dynamic> result) async {
-    final rawEntries = result['data']?['stops'];
-    // ✅ 改用 _normalizeStops，同時處理 List<Map> 和 List<String>
-    final entries = _normalizeStops(rawEntries, company: 'kmb');
+    // 從統一數據庫獲取路線數據
+    final routeData = hkbusDb.getRouteByNumber(
+      widget.route,
+      direction: widget.bound,
+      serviceType: widget.serviceType,
+      company: _selectedCompany,
+    );
 
-    if (entries.isEmpty) {
-      debugPrint('KMB stops empty or invalid for ${widget.route}. raw type=${rawEntries.runtimeType}');
+    if (routeData == null) {
+      throw Exception('Route ${widget.route} not found in unified DB');
     }
+
+    // 獲取 KMB 特定的站點列表
+    final kmbStopsRaw = routeData.stopsByCompany['kmb'];
+    if (kmbStopsRaw == null) {
+      throw Exception('No KMB stops found for route ${widget.route}');
+    }
+
+    // 安全地提取站點列表
+    List<String> kmbStops = [];
+    if (kmbStopsRaw is String) {
+      try {
+        final parsed = jsonDecode(kmbStopsRaw);
+        if (parsed is List) {
+          kmbStops = parsed.map((e) => e.toString()).toList();
+        }
+      } catch (_) {}
+    } else if (kmbStopsRaw is List) {
+      kmbStops = kmbStopsRaw.map((e) => e.toString()).toList();
+    }
+
+    if (kmbStops.isEmpty) {
+      throw Exception('No KMB stops found for route ${widget.route}');
+    }
+
+    // 構建站點條目
+    final entries = kmbStops.asMap().entries.map((entry) {
+      return {
+        'seq': entry.key + 1,
+        'stop': entry.value,
+      };
+    }).toList();
 
     await _processStopEntries(entries, 'kmb');
   }
 
-  Future<void> _processCtbData(Map<String, dynamic> result) async {
-    final rawEntries = result['data']?['stops'];
-    // ✅ 改用 _normalizeStops
-    final entries = _normalizeStops(rawEntries, company: 'ctb');
+  Future<void> _fetchCtbData() async {
+    final hkbusDb = context.read<HkbusDbProvider>();
 
-    if (entries.isEmpty) {
-      debugPrint('CTB stops empty or invalid for ${widget.route}. raw type=${rawEntries.runtimeType}');
+    // 🔍 DEBUG: Trace fetch path
+    debugPrint('🔍 _fetchCtbData: using unified DB pattern');
+
+    // 從統一數據庫獲取路線數據
+    final routeData = hkbusDb.getRouteByNumber(
+      widget.route,
+      direction: widget.bound,
+      serviceType: widget.serviceType,
+      company: _selectedCompany,
+    );
+
+    if (routeData == null) {
+      throw Exception('Route ${widget.route} not found in unified DB');
     }
 
+    // 獲取 CTB 特定的站點列表
+    final ctbStopsRaw = routeData.stopsByCompany['ctb'];
+    if (ctbStopsRaw == null) {
+      throw Exception('No CTB stops found for route ${widget.route}');
+    }
+
+    // 安全地提取站點列表
+    List<String> ctbStops = [];
+    if (ctbStopsRaw is String) {
+      try {
+        final parsed = jsonDecode(ctbStopsRaw);
+        if (parsed is List) {
+          ctbStops = parsed.map((e) => e.toString()).toList();
+        }
+      } catch (_) {}
+    } else if (ctbStopsRaw is List) {
+      ctbStops = ctbStopsRaw.map((e) => e.toString()).toList();
+    }
+
+    if (ctbStops.isEmpty) {
+      throw Exception('No CTB stops found for route ${widget.route}');
+    }
+
+    // 構建站點條目
+    final entries = ctbStops.asMap().entries.map((entry) {
+      return {
+        'seq': entry.key + 1,
+        'stop': entry.value,
+      };
+    }).toList();
+
     await _processStopEntries(entries, 'ctb');
-  }
-
-
-
-  Future<void> _fetchCtbData() async {
-    final r = widget.route.trim().toUpperCase();
-    // 直接使用 API
-    final result = await Citybus.fetchRouteStatus(r);
-    await _processCtbData(result);
   }
 
 
@@ -501,6 +600,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       widget.route,
       direction: widget.bound,
       serviceType: widget.serviceType,
+      company: _selectedCompany,
     );
 
     if (routeData == null) {
@@ -541,30 +641,122 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     await _processStopEntries(entries, 'nlb');
   }
 
+  Future<void> _fetchGmbData() async {
+    final hkbusDb = context.read<HkbusDbProvider>();
+
+    final routeData = hkbusDb.getRouteByNumber(
+      widget.route,
+      direction: widget.bound,
+      serviceType: widget.serviceType,
+      company: _selectedCompany,
+    );
+
+    if (routeData == null) {
+      throw Exception('Route ${widget.route} not found in unified DB');
+    }
+
+    final gmbStopsRaw = routeData.stopsByCompany['gmb'];
+    if (gmbStopsRaw == null) {
+      throw Exception('No GMB stops found for route ${widget.route}');
+    }
+
+    List<String> gmbStops = [];
+    if (gmbStopsRaw is String) {
+      try {
+        final parsed = jsonDecode(gmbStopsRaw);
+        if (parsed is List) {
+          gmbStops = parsed.map((e) => e.toString()).toList();
+        }
+      } catch (_) {}
+    } else if (gmbStopsRaw is List) {
+      gmbStops = gmbStopsRaw.map((e) => e.toString()).toList();
+    }
+
+    if (gmbStops.isEmpty) {
+      throw Exception('No GMB stops found for route ${widget.route}');
+    }
+
+    final entries = gmbStops.asMap().entries.map((entry) {
+      return <String, dynamic>{
+        'seq': entry.key + 1,
+        'stop': entry.value,
+        'gmb_stop_id': entry.value,
+        'gmb_stop_seq': entry.key + 1, // 1-based seq for ETA API
+      };
+    }).toList();
+
+    await _processStopEntries(entries, 'gmb');
+  }
+
+
   // ✅ 新增 normalizeStops helper - 保證任何來源的 stops 都是 List<Map<String, dynamic>>
   List<Map<String, dynamic>> _normalizeStops(
     dynamic stopsRaw, {
     String? company,
   }) {
     final hkbusDb = context.read<HkbusDbProvider>();
-    final output = <Map<String, dynamic>>[];
+    final List<Map<String, dynamic>> output = [];
 
-    if (stopsRaw == null) return output;
+    // 🔍 DEBUG: Track input
+    debugPrint('🔍 _normalizeStops: input type=${stopsRaw?.runtimeType}, company=$company');
+    if (stopsRaw is List && stopsRaw.isNotEmpty) {
+      debugPrint('🔍 _normalizeStops: first item type=${stopsRaw.first?.runtimeType}');
+    }
 
+    if (stopsRaw == null) {
+      debugPrint('🔍 _normalizeStops: returning empty (null input)');
+      return output;
+    }
+
+    // 如果係 String，先嘗試 Decode
+    if (stopsRaw is String) {
+      try {
+        final decoded = jsonDecode(stopsRaw);
+        // Decode 完再 call 自己
+        return _normalizeStops(decoded, company: company);
+      } catch (e) {
+        debugPrint('❌ _normalizeStops: Failed to decode string: $stopsRaw');
+        return output;
+      }
+    }
+
+    // 如果係 List
     if (stopsRaw is List) {
+      debugPrint('🔍 _normalizeStops: processing List with ${stopsRaw.length} items');
       for (int i = 0; i < stopsRaw.length; i++) {
         final item = stopsRaw[i];
 
-        // Case A: 已經係 Map
+        if (item == null) {
+          debugPrint('🔍 _normalizeStops: item $i is null, skipping');
+          continue;
+        }
+
+        // Case A: 已經係 Map (API 格式) — enrich missing fields
         if (item is Map) {
-          output.add(Map<String, dynamic>.from(item));
+          final m = Map<String, dynamic>.from(item);
+          final sid = m['stop']?.toString();
+          if (sid != null && sid.isNotEmpty) {
+            m['name_tc'] ??= hkbusDb.getStopName(sid, isEnglish: false);  // ✅ fixed: enrich
+            m['name_en'] ??= hkbusDb.getStopName(sid, isEnglish: true);
+            if (m['lat'] == null || m['lng'] == null) {
+              final c = hkbusDb.getStopCoordinates(sid);
+              m['lat'] ??= c?['lat'];
+              m['lng'] ??= c?['lng'];
+              m['long'] ??= c?['lng'];
+            }
+          }
+          output.add(m);
           continue;
         }
 
         // Case B: 係 stopId String（Unified DB 的 stopsByCompany 格式）
-        final stopId = item?.toString() ?? '';
-        if (stopId.isEmpty) continue;
+        final stopId = item.toString();
+        if (stopId.isEmpty) {
+          debugPrint('🔍 _normalizeStops: item $i has empty stopId, skipping');
+          continue;
+        }
 
+        debugPrint('🔍 _normalizeStops: item $i is String stopId=$stopId');
         final coords = hkbusDb.getStopCoordinates(stopId);
         output.add({
           'seq': i + 1,
@@ -574,30 +766,115 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           'kmb_stop_id': company == 'kmb' ? stopId : null,
           'ctb_stop_id': company == 'ctb' ? stopId : null,
           'gmb_stop_id': company == 'gmb' ? stopId : null,
+          'gmb_stop_seq': company == 'gmb' ? (i + 1) : null, // ← 補上
           'nlb_stop_id': company == 'nlb' ? stopId : null,
           'lat': coords?['lat'],
           'lng': coords?['lng'],
           'long': coords?['lng'],
         });
       }
-    } else if (stopsRaw is String) {
-      // Case C: JSON string（部分 API 可能這樣返回）
-      try {
-        return _normalizeStops(jsonDecode(stopsRaw), company: company);
-      } catch (_) {}
+    } else if (stopsRaw is Map) {
+      debugPrint('🔍 _normalizeStops: input is Map, attempting to extract company=$company');
+       // 如果有人傳錯咗成個 Map 入嚟，例如 {"kmb": ["stop1", "stop2"]}
+       final coKey = company?.toLowerCase() ?? 'kmb';
+       if (stopsRaw.containsKey(coKey)) {
+         debugPrint('🔍 _normalizeStops: extracting company=$coKey from Map');
+         return _normalizeStops(stopsRaw[coKey], company: company);
+       } else if (stopsRaw.isNotEmpty) {
+         debugPrint('🔍 _normalizeStops: extracting first value from Map');
+         return _normalizeStops(stopsRaw.values.first, company: company);
+       }
     }
 
+    debugPrint('🔍 _normalizeStops: returning ${output.length} stops');
     return output;
   }
+
+  void _startEtaRefreshLoopIfNeeded() {
+    if (_etaRefreshTimer != null || _expandedStopsById.isEmpty) return;
+
+    _etaRefreshTimer = Timer.periodic(_etaRefreshInterval, (_) {
+      _refreshExpandedStops();
+    });
+  }
+
+  void _stopEtaRefreshLoopIfIdle() {
+    if (_expandedStopsById.isNotEmpty) return;
+
+    _etaRefreshTimer?.cancel();
+    _etaRefreshTimer = null;
+  }
+
+  Future<void> _refreshExpandedStops() async {
+    if (!mounted || _expandedStopsById.isEmpty || _etaRefreshInFlight) return;
+
+    _etaRefreshInFlight = true;
+    try {
+      final expandedStops = _expandedStopsById.values.toList(growable: false);
+
+      for (final stop in expandedStops) {
+        await _fetchEtaForSingleStop(
+          stop,
+          force: true,
+          showLoading: false,
+        );
+      }
+    } finally {
+      _etaRefreshInFlight = false;
+    }
+  }
+
+  void _handleStopExpansionChange(Map<String, dynamic> stop, bool isExpanded) {
+    final stopId = stop['stop']?.toString();
+    if (stopId == null || stopId.isEmpty) return;
+
+    if (isExpanded) {
+      _expandedStopsById[stopId] = Map<String, dynamic>.from(stop);
+      _startEtaRefreshLoopIfNeeded();
+
+      final hasCache = _etaByStopId[stopId]?.isNotEmpty ?? false;
+
+      _fetchEtaForSingleStop(
+        stop,
+        force: hasCache,
+        showLoading: !hasCache,
+      );
+    } else {
+      _expandedStopsById.remove(stopId);
+      _stopEtaRefreshLoopIfIdle();
+    }
+  }
+
+  void _resetExpandedEtaTracking({bool clearEtaCache = false}) {
+    _etaRefreshTimer?.cancel();
+    _etaRefreshTimer = null;
+    _etaRefreshInFlight = false;
+
+    _expandedStopsById.clear();
+    _etaLoadingByStopId.clear();
+    _etaRefreshingByStopId.clear();
+
+    if (clearEtaCache) {
+      _etaByStopId.clear();
+    }
+  }
+
 
 
   Future<void> _processStopEntries(List<Map<String, dynamic>> entries, String company) async {
     if (!mounted) return;
     
+    // 🔍 DEBUG: Track input
+    debugPrint('🔍 _processStopEntries: entries=${entries.length}, company=$company');
+    if (entries.isNotEmpty) {
+      debugPrint('🔍 _processStopEntries: first entry=${entries.first}');
+    }
+    
     final hkbusDb = context.read<HkbusDbProvider>();
     
     // 過濾和排序
     entries = entries.where((e) => e.containsKey('seq')).toList();
+    debugPrint('🔍 _processStopEntries: after filter=${entries.length}');
     entries.sort((a, b) {
       final ai = int.tryParse(a['seq']?.toString() ?? '0') ?? 0;
       final bi = int.tryParse(b['seq']?.toString() ?? '0') ?? 0;
@@ -627,20 +904,14 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       enriched.every((e) => e is Map<String, dynamic>),
       '_allStops contains non-map items',
     );
-
-    if (mounted) {
-      setState(() {
-        _allStops = enriched;
-        data = {
-          'route': widget.route,
-          'stops': enriched,
-          'companies': widget.companies,
-        };
-        loading = false;
-      });
+    debugPrint('🔍 _processStopEntries: enriched=${enriched.length}');
+    if (enriched.isNotEmpty) {
+      debugPrint('🔍 _processStopEntries: first enriched=${enriched.first}');
     }
 
+    // Normalize stops to ensure consistent format
     final normalizedStops = _normalizeStops(enriched, company: company);
+    debugPrint('🔍 _processStopEntries: normalized=${normalizedStops.length}');
 
     if (mounted) {
       setState(() {
@@ -652,6 +923,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         };
         loading = false;
       });
+      _preFillStopKeys(); // ✅ 新增
+      debugPrint('🔍 _processStopEntries: setState called with ${normalizedStops.length} stops');
     }
 
   }
@@ -663,40 +936,69 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   /// - CTB: 6-digit stop ID
   /// - NLB: String int stop ID + routeId
   /// - GMB: Integer stop ID + route_id + route_seq
-  Future<void> _fetchEtaForSingleStop(Map<String, dynamic> stop) async {
+  Future<void> _fetchEtaForSingleStop(
+    Map<String, dynamic> stop, {
+    bool force = false,
+    bool showLoading = true,
+  }) async {
     final stopId = stop['stop']?.toString();
     if (stopId == null || stopId.isEmpty) return;
 
-    // 檢查內存緩存
-    if (_etaByStopId.containsKey(stopId) && _etaByStopId[stopId]!.isNotEmpty) {
+    final hasCachedEta = _etaByStopId.containsKey(stopId) &&
+        _etaByStopId[stopId]!.isNotEmpty;
+
+    if (!force && hasCachedEta) {
       debugPrint('📦 ETA memory cache hit for stop: $stopId');
       return;
     }
 
-    // 確保路線上下文已初始化
+    if (_etaLoadingByStopId.contains(stopId) ||
+        _etaRefreshingByStopId.contains(stopId)) {
+      return;
+    }
+
     if (_routeContext == null) {
       debugPrint('⚠️ Route context not initialized, initializing now...');
       await _initializeRouteContext();
     }
 
+    final busySet =
+        showLoading ? _etaLoadingByStopId : _etaRefreshingByStopId;
+
     if (mounted) {
-      setState(() => _etaLoadingByStopId.add(stopId));
+      setState(() => busySet.add(stopId));
     }
 
     try {
       List<UnifiedEta> etas = [];
 
-      // 對於聯營路線，獲取所有公司的 ETA
       if (widget.companies.length > 1 && widget.useUnifiedDb) {
         etas = await _fetchJointOperationEtas(stop);
       } else {
-        // 單一公司
-        final companyStopId = stop['${_selectedCompany}_stop_id']?.toString() ?? stopId;
+        final co = _selectedCompany.toLowerCase();
+        final companyStopId =
+            stop['${co}_stop_id']?.toString() ?? stopId;
+
+        // ── GMB 專用：用 stop-level RouteContext 帶入 stop_seq ──
+        RouteContext effectiveContext =
+            _routeContext ?? RouteContext(routeNumber: widget.route);
+
+        if (co == 'gmb') {
+          final rawSeq = stop['gmb_stop_seq'];
+          final stopSeq = rawSeq is int
+              ? rawSeq
+              : int.tryParse(rawSeq?.toString() ?? '') ?? 0;
+
+          effectiveContext = effectiveContext.copyWith(gmbStopSeq: stopSeq);
+        }
+
+
+
         etas = await _etaService.fetchEta(
           company: _selectedCompany,
           routeNumber: widget.route,
           stopId: companyStopId,
-          routeContext: _routeContext ?? RouteContext(routeNumber: widget.route),
+          routeContext: effectiveContext,  // ← 用 effectiveContext 而非 _routeContext
         );
       }
 
@@ -709,23 +1011,26 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       debugPrint('❌ Error fetching ETA for stop $stopId: $e');
     } finally {
       if (mounted) {
-        setState(() => _etaLoadingByStopId.remove(stopId));
+        setState(() => busySet.remove(stopId));
       }
     }
   }
 
   /// 獲取聯營路線的所有公司 ETA
-  Future<List<UnifiedEta>> _fetchJointOperationEtas(Map<String, dynamic> stop) async {
-    final etas = <UnifiedEta>[];
+  Future<List<UnifiedEta>> _fetchJointOperationEtas(
+    Map<String, dynamic> stop,
+  ) async {
     final companyEtasMap = <String, List<UnifiedEta>>{};
-
-    // 並行獲取所有公司的 ETA
     final futures = <Future<void>>[];
 
     for (final company in widget.companies) {
-      final companyStopId = stop['${company}_stop_id']?.toString() ?? stop['stop']?.toString();
+      // 每間公司必須用自己的 stop ID，不允許跨公司 fallback
+      final coKey = '${company.toLowerCase()}_stop_id';
+      final companyStopId = stop[coKey]?.toString();
+
       if (companyStopId == null || companyStopId.isEmpty) {
-        debugPrint('⚠️ No stop ID for company $company in joint operation');
+        debugPrint('⚠️ No ${company} stop ID in stop map (key=$coKey), skipping');
+        companyEtasMap[company] = [];
         continue;
       }
 
@@ -735,10 +1040,24 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           company: company,
           routeNumber: widget.route,
           stopId: companyStopId,
-          routeContext: _routeContext ?? RouteContext(routeNumber: widget.route),
+          routeContext:
+              _routeContext ?? RouteContext(routeNumber: widget.route),
         )
             .then((companyEtas) {
-          companyEtasMap[company] = companyEtas;
+          companyEtasMap[company] = companyEtas
+              .map((eta) => UnifiedEta(
+                    company: company,
+                    eta: eta.eta,
+                    diffMinutes: eta.diffMinutes,
+                    sequence: eta.sequence,
+                    remarkTc: eta.remarkTc,
+                    remarkEn: eta.remarkEn,
+                    remarkSc: eta.remarkSc,
+                    isRealtime: eta.isRealtime,
+                    isWheelchairAccessible: eta.isWheelchairAccessible,
+                    routeVariant: eta.routeVariant,
+                  ))
+              .toList();
         }).catchError((e) {
           debugPrint('❌ Failed to fetch ETA for $company: $e');
           companyEtasMap[company] = [];
@@ -748,49 +1067,42 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
     await Future.wait(futures);
 
-    // 合併所有公司的 ETA，添加公司標識
-    for (final entry in companyEtasMap.entries) {
-      final company = entry.key;
-      final companyEtas = entry.value;
+    // 合併並按時間排序
+    final allEtas = companyEtasMap.values.expand((e) => e).toList()
+      ..sort((a, b) => a.eta.compareTo(b.eta));
 
-      // 為每個 ETA 添加公司信息
-      final markedEtas = companyEtas.map((eta) {
-        return UnifiedEta(
-          company: company,
-          eta: eta.eta,
-          diffMinutes: eta.diffMinutes,
-          sequence: eta.sequence,
-          remarkTc: eta.remarkTc,
-          remarkEn: eta.remarkEn,
-          remarkSc: eta.remarkSc,
-          isRealtime: eta.isRealtime,
-          isWheelchairAccessible: eta.isWheelchairAccessible,
-          routeVariant: eta.routeVariant,
-        );
-      }).toList();
-
-      etas.addAll(markedEtas);
-    }
-
-    // 按時間排序
-    etas.sort((a, b) => a.eta.compareTo(b.eta));
-
-    return etas;
+    return allEtas;
   }
 
+  /// 過濾掉距現在 ≤10 秒（即將或已離站）的 ETA
+  /// isRealtime = true 時才過濾，預測班次不過濾（避免全空）
+  List<UnifiedEta> _filterValidEtas(List<UnifiedEta> etas) {
+    final now = DateTime.now();
+    return etas.where((eta) {
+      final diffSec = eta.eta.difference(now).inSeconds;
+      // realtime: 必須 >10 秒才顯示
+      // non-realtime / scheduled: 直接顯示（只過濾負數離站）
+      if (eta.isRealtime) {
+        return diffSec > 15;
+      } else {
+        return diffSec > -30; // 預測班次寬容 30 秒
+      }
+    }).toList();
+  }
 
 
   /// 切換運營公司
   void _onCompanyChanged(String company) {
     if (company == _selectedCompany) return;
-    
+
     setState(() {
       _selectedCompany = company;
+      _resetExpandedEtaTracking(clearEtaCache: true);
     });
-    
-    // 重新獲取數據
+
     _fetchData();
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -947,6 +1259,15 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       company: _selectedCompany,
     );
 
+    // 🔍 DEBUG: Track stops data
+    debugPrint('🔍 _buildListView: stops length=${stops.length}, type=${stops.runtimeType}');
+    if (stops.isNotEmpty) {
+      debugPrint('🔍 _buildListView: first stop type=${stops.first.runtimeType}, value=${stops.first}');
+      if (stops.first is Map) {
+        debugPrint('🔍 _buildListView: first stop keys=${(stops.first as Map).keys.toList()}');
+      }
+    }
+
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
@@ -956,8 +1277,32 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) {
-              final stop = stops[index]; // ✅ 不再需要 as Map cast
-              return _buildStopCard(stop, index, isEnglish);
+              // 🔍 DEBUG: Track index access
+              try {
+                debugPrint('🔍 SliverChildBuilderDelegate: index=$index (type=${index.runtimeType}), stops.length=${stops.length}');
+                if (index < 0 || index >= stops.length) {
+                  debugPrint('❌ Index out of bounds: index=$index, length=${stops.length}');
+                  return const SizedBox.shrink();
+                }
+                final stop = stops[index];
+                debugPrint('🔍 Accessed stop at index=$index: type=${stop.runtimeType}');
+                if (stop is! Map<String, dynamic>) {
+                  debugPrint('❌ Stop is not Map<String, dynamic>: ${stop.runtimeType} = $stop');
+                  return const SizedBox.shrink();
+                }
+                return _buildStopCard(stop, index.toString(), isEnglish);
+              } catch (e, stackTrace) {
+                debugPrint('❌ Error accessing stops[$index]: $e');
+                debugPrint('❌ Stack trace: $stackTrace');
+                return Card(
+                  margin: const EdgeInsets.all(8),
+                  color: Colors.red.shade100,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text('Error at index $index: $e'),
+                  ),
+                );
+              }
             },
             childCount: stops.length,
           ),
@@ -1071,207 +1416,243 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     );
   }
 
-  Widget _buildStopCard(Map<String, dynamic> stop, int index, bool isEnglish) {
+  Widget _buildStopCard(Map<String, dynamic> stop, String index, bool isEnglish) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final companyProv = context.read<CompanyProvider>();
+
     final stopId = stop['stop']?.toString() ?? '';
-    final seq = stop['seq']?.toString() ?? '${index + 1}';
+    final seq = stop['seq']?.toString() ?? '';
+    final fare = stop['fare']?.toString() ?? '';
+
     final name = isEnglish
-        ? (stop['name_en'] ?? stop['name_tc'] ?? stopId)
-        : (stop['name_tc'] ?? stop['name_en'] ?? stopId);
-    final etas = _etaByStopId[stopId] ?? [];
+    ? (stop['name_en'].toString().toTitleCase() ?? stop['name_tc'] ?? stopId)
+    : (stop['name_tc'] ?? stop['name_en'].toString().toTitleCase() ?? stopId);
+
+
+    final etas = _etaByStopId[stopId] ?? <UnifiedEta>[];
     final etaLoading = _etaLoadingByStopId.contains(stopId);
+    final isNearby = _isNearbyStop(stopId);
+    final isHighlighted = _highlightedStopId == stopId;
 
-    // 檢查是否為附近站點
-    final lat = stop['lat']?.toString();
-    final lng = stop['long']?.toString() ?? stop['lng']?.toString();
-    final isNearby = _userPosition != null && lat != null && lng != null
-        ? _isNearbyStop(lat, lng)
-        : false;
+    final nearbyDistStr = isNearby && _nearestDistanceM != null
+        ? '${_nearestDistanceM!.round()}m'
+        : null;
 
-    // 檢查是否應自動展開
-    final shouldAutoExpand = (widget.autoExpandSeq != null && seq == widget.autoExpandSeq) ||
+    final shouldAutoExpand =
+        (widget.autoExpandSeq != null && seq == widget.autoExpandSeq) ||
         (widget.autoExpandStopId != null && stopId == widget.autoExpandStopId);
 
-    // 自動展開時，需在首次建構後觸發 ETA 載入（onExpansionChanged 可能不會在 initiallyExpanded 時觸發）
-    if (shouldAutoExpand && !_etaByStopId.containsKey(stopId) && !_etaLoadingByStopId.contains(stopId)) {
+    if (shouldAutoExpand && !_expandedStopsById.containsKey(stopId)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _fetchEtaForSingleStop(stop);
+        if (!mounted) return;
+        _handleStopExpansionChange(stop, true);
       });
     }
 
-    return Card(
+
+    return AnimatedContainer(
       key: _stopKeys.putIfAbsent(stopId, () => GlobalKey()),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
       margin: const EdgeInsets.symmetric(vertical: 4),
-      elevation: isNearby ? 4 : 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: isNearby
-            ? BorderSide(color: Theme.of(context).colorScheme.primary, width: 2)
-            : BorderSide.none,
-      ),
-      child: ExpansionTile(
-        initiallyExpanded: shouldAutoExpand,
-        onExpansionChanged: (isExpanded) {
-          if (isExpanded && !_etaByStopId.containsKey(stopId) && !_etaLoadingByStopId.contains(stopId)) {
-            _fetchEtaForSingleStop(stop);
-          }
-        },
-        leading: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
+      child: Card(
+        elevation: isHighlighted ? 4 : (isNearby ? 2 : 0),
+        shadowColor: isNearby
+            ? cs.tertiary.withValues(alpha: 0.20)
+            : theme.shadowColor.withValues(alpha: 0.08),
+        clipBehavior: Clip.antiAlias,
+        color: isNearby
+            ? cs.tertiaryContainer.withValues(alpha: 0.42)
+            : isHighlighted
+                ? cs.primaryContainer.withValues(alpha: 0.22)
+                : cs.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(
             color: isNearby
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.primaryContainer,
-            shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Text(
-              seq,
-              style: TextStyle(
-                color: isNearby
-                    ? Theme.of(context).colorScheme.onPrimary
-                    : Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
+                ? cs.tertiary
+                : isHighlighted
+                    ? cs.primary.withValues(alpha: 0.35)
+                    : Colors.transparent,
+            width: (isNearby || isHighlighted) ? 1.4 : 1,
           ),
         ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                name,
-                style: TextStyle(
-                  fontWeight: isNearby ? FontWeight.bold : FontWeight.normal,
-                ),
+        child: Theme(
+          data: theme.copyWith(
+            dividerColor: Colors.transparent,
+            splashColor: cs.primary.withValues(alpha: 0.08),
+            highlightColor: Colors.transparent,
+          ),
+          child: ExpansionTile(
+            initiallyExpanded: shouldAutoExpand,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            childrenPadding: EdgeInsets.zero,
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            // ✅ 新版 — 統一走 _handleStopExpansionChange
+            onExpansionChanged: (isExpanded) =>
+              _handleStopExpansionChange(stop, isExpanded),
+
+            leading: _buildStopLeading(
+              seq: seq,
+              isNearby: isNearby,
+              isHighlighted: isHighlighted,
+              colorScheme: cs,
+              theme: theme,
+            ),
+            title: Text(
+              name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: isNearby ? FontWeight.w800 : FontWeight.w600,
+                color: cs.onSurface,
+                height: 1.2,
               ),
             ),
-            if (isNearby)
-              Container(
-                margin: const EdgeInsets.only(left: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  isEnglish ? 'Nearby' : '附近',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onPrimary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        subtitle: etaLoading
-            ? Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(isEnglish ? 'Loading...' : '載入中...', style: const TextStyle(fontSize: 12)),
-              )
-            : etas.isNotEmpty
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(_formatEtaList(etas)),
-                  )
-                : null,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (etaLoading)
-              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-            else if (etas.isNotEmpty)
-              const Icon(Icons.access_time, size: 16),
-            if (lat != null && lng != null) ...[
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.map, size: 20),
-                tooltip: isEnglish ? 'Show on map' : '在地圖上顯示',
-                onPressed: () => _jumpToMapLocation(
-                  double.parse(lat),
-                  double.parse(lng),
-                  stopId: stopId,
-                ),
+            subtitle: _buildStopSubtitle(
+              isEnglish: isEnglish,
+              fare: fare,
+              isNearby: isNearby,
+              nearbyDistStr: nearbyDistStr,
+              etaPreview: etas.isNotEmpty ? _formatEtaList(etas) : null,
+              colorScheme: cs,
+              theme: theme,
+            ),
+            children: [
+              _buildExpandedStopContent(
+                stopId: stopId,
+                isEnglish: isEnglish,
+                etaLoading: etaLoading,
+                etas: etas,
+                companyProv: companyProv,
+                colorScheme: cs,
+                theme: theme,
               ),
             ],
-          ],
+          ),
         ),
-        children: [
-          // 展開後顯示詳細信息
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Divider(),
-                // 載入中
-                if (etaLoading)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Row(
-                      children: [
-                        const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                        const SizedBox(width: 12),
-                        Text(isEnglish ? 'Loading ETA...' : '載入到站時間...', style: const TextStyle(fontSize: 14)),
-                      ],
-                    ),
-                  )
-                // 顯示所有公司的 ETA
-                else if (widget.companies.length > 1) ...[
-                  Text(
-                    isEnglish ? 'All Operators:' : '所有營運商：',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.secondary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...widget.companies.map((co) {
-                    // 從已載入的 ETAs 中過濾出該公司的 ETA
-                    final allEtas = _etaByStopId[stopId] ?? <UnifiedEta>[];
-                    final coEtas = allEtas.where((eta) => eta.company.toLowerCase() == co.toLowerCase()).toList();
+      ),
+    );
+  }
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: context.read<CompanyProvider>().getBadgeBorderColor(co, context),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            context.read<CompanyProvider>().getName(co, isEnglish),
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              coEtas.isNotEmpty ? _formatEtaList(coEtas) : '--',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-                // 站點 ID 信息
-                const SizedBox(height: 8),
-                Text(
-                  '${isEnglish ? 'Stop ID' : '站點 ID'}: $stopId',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+  Widget _buildStopLeading({
+    required String seq,
+    required bool isNearby,
+    required bool isHighlighted,
+    required ColorScheme colorScheme,
+    required ThemeData theme,
+  }) {
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: isNearby
+            ? colorScheme.tertiary
+            : isHighlighted
+                ? colorScheme.primaryContainer
+                : colorScheme.primary,
+      ),
+      child: Center(
+        child: Text(
+          seq,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: isNearby
+                ? colorScheme.onTertiary
+                : isHighlighted
+                    ? colorScheme.onPrimaryContainer
+                    : colorScheme.onPrimary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStopSubtitle({
+    required bool isEnglish,
+    required String fare,
+    required bool isNearby,
+    required String? nearbyDistStr,
+    required String? etaPreview,
+    required ColorScheme colorScheme,
+    required ThemeData theme,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (isNearby)
+                _buildInfoChip(
+                  label: nearbyDistStr != null
+                      ? (isEnglish
+                          ? 'Nearby · $nearbyDistStr'
+                          : '附近 · $nearbyDistStr')
+                      : (isEnglish ? 'Nearby' : '附近'),
+                  backgroundColor: colorScheme.tertiary,
+                  foregroundColor: colorScheme.onTertiary,
+                  icon: Icons.near_me_rounded,
+                  theme: theme,
                 ),
-              ],
+              if (fare.isNotEmpty)
+                _buildInfoChip(
+                  label: '\$$fare',
+                  backgroundColor: colorScheme.secondaryContainer,
+                  foregroundColor: colorScheme.onSecondaryContainer,
+                  icon: Icons.payments_outlined,
+                  theme: theme,
+                ),
+            ],
+          ),
+          if (etaPreview != null && etaPreview.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              etaPreview,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoChip({
+    required String label,
+    required Color backgroundColor,
+    required Color foregroundColor,
+    required ThemeData theme,
+    IconData? icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 12, color: foregroundColor),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: foregroundColor,
+              fontWeight: FontWeight.w700,
+              height: 1.0,
             ),
           ),
         ],
@@ -1279,22 +1660,141 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     );
   }
 
-  /// 檢查站點是否在附近（約 500 米內）
-  bool _isNearbyStop(String lat, String lng) {
-    if (_userPosition == null) return false;
-    try {
-      final stopLat = double.parse(lat);
-      final stopLng = double.parse(lng);
-      final distance = Geolocator.distanceBetween(
-        _userPosition!.latitude,
-        _userPosition!.longitude,
-        stopLat,
-        stopLng,
+  Widget _buildExpandedStopContent({
+    required String stopId,
+    required bool isEnglish,
+    required bool etaLoading,
+    required List<UnifiedEta> etas,
+    required CompanyProvider companyProv,
+    required ColorScheme colorScheme,
+    required ThemeData theme,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Divider(
+            height: 18,
+            color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+          ),
+          if (etaLoading)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2.2),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    isEnglish ? 'Loading ETA...' : '載入到站時間...',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            )
+          else if (widget.companies.length > 1) ...[
+            Text(
+              isEnglish ? 'All Operators' : '所有營運商',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: colorScheme.secondary,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...widget.companies.map(
+              (co) => _buildOperatorEtaRow(
+                company: co,
+                stopId: stopId,
+                isEnglish: isEnglish,
+                companyProv: companyProv,
+                theme: theme,
+                colorScheme: colorScheme,
+              ),
+            ),
+          ] else ...[
+            Text(
+              etas.isNotEmpty ? _formatEtaList(etas) : 'No Services',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Text(
+            '${isEnglish ? 'Stop ID' : '站點 ID'}: $stopId',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOperatorEtaRow({
+    required String company,
+    required String stopId,
+    required bool isEnglish,
+    required CompanyProvider companyProv,
+    required ThemeData theme,
+    required ColorScheme colorScheme,
+  }) {
+    final allEtas = _etaByStopId[stopId] ?? <UnifiedEta>[];
+    final coEtas = _filterValidEtas(
+        allEtas
+        .where((eta) => eta.company.toLowerCase() == company.toLowerCase())
+        .toList(),
       );
-      return distance < 500; // 500 米內視為附近
-    } catch (_) {
-      return false;
-    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            margin: const EdgeInsets.only(top: 4),
+            decoration: BoxDecoration(
+              color: companyProv.getBadgeBorderColor(company, context),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 72,
+            child: Text(
+              companyProv.getName(company, isEnglish),
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              coEtas.isNotEmpty ? _formatEtaList(coEtas) : 'No Services',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+
+  /// 檢查站點是否在附近（約 150 米內）
+  bool _isNearbyStop(String stopId) {
+    return _nearestStopId == stopId &&
+        (_nearestDistanceM ?? double.infinity) < _nearbyBadgeRange;
   }
 
   /// 跳轉到地圖位置
@@ -1344,10 +1844,14 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     final lang = context.read<LanguageProvider>();
     final isEnglish = lang.isEnglish;
 
-    // 只顯示前 2 個 ETA
-    final firstTwo = etas.take(2).toList();
-    return firstTwo.map((eta) => eta.formatDisplay(isEnglish)).join(' · ');
+    final valid = _filterValidEtas(etas);
+    if (valid.isEmpty) {
+      return isEnglish ? 'No upcoming buses' : '暫無班次';
+    }
+
+    return valid.take(2).map((eta) => eta.formatDisplay(isEnglish)).join(' · ');
   }
+
 
   Widget _buildMapView() {
     // TODO: 實現地圖視圖

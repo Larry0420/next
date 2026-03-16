@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:auto_size_text/auto_size_text.dart';
-import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
@@ -112,6 +111,57 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
   final bool _enablePageLevelEtaAutoRefresh = false;
   
 
+  List<Map<String, dynamic>> _filterDedupSortStopsForCachedMap(
+    List<Map<String, dynamic>> entries,
+  ) {
+    // Inline _normChar logic
+    final selectedBoundChar = () {
+      if (_selectedDirection == null) return null;
+      final s = _selectedDirection!.trim().toUpperCase();
+      if (s.isEmpty) return null;
+      final c = s[0];
+      return (c == 'I' || c == 'O') ? c : null;
+    }();
+    
+    final selectedService = _selectedServiceType;
+    final currentRoute = widget.route.trim().toUpperCase();
+
+    final uniqueStopsMap = <String, Map<String, dynamic>>{};
+    for (final e in entries) {
+      if (!e.containsKey('seq')) continue;
+
+      final entryRoute = e['route']?.toString().trim().toUpperCase();
+      if (entryRoute != null && entryRoute.isNotEmpty && entryRoute != currentRoute) continue;
+
+      final seq = e['seq']?.toString() ?? '';
+      if (seq.isEmpty) continue;
+
+      if (selectedBoundChar != null) {
+        final v = e['bound']?.toString().trim().toUpperCase() ?? '';
+        final char = (v.isNotEmpty && (v[0] == 'I' || v[0] == 'O')) ? v[0] : null;
+
+        if (char != selectedBoundChar) continue;
+      }
+
+
+      if (selectedService != null) {
+        final entryServiceType =
+            e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
+        if (entryServiceType != selectedService) continue;
+      }
+
+      uniqueStopsMap.putIfAbsent(seq, () => e);
+    }
+
+    final stops = uniqueStopsMap.values.toList();
+    stops.sort((a, b) {
+      final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
+      final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
+      return ai.compareTo(bi);
+    });
+    return stops;
+  }
+
   
   // Method to jump to a specific location on the map with animated highlight
   void _jumpToMapLocation(double latitude, double longitude, {String? stopId}) {
@@ -212,11 +262,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
 
         // ACCURATE: Get current position in background
         final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.best,
-          timeLimit: const Duration(seconds: 5),
-        ).timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => throw TimeoutException('Location request timed out'),
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            timeLimit: Duration(seconds: 5),
+          ),
         );
         if (mounted) {
           setState(() {
@@ -476,7 +525,24 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         // Enrich stop entries with metadata off the main isolate to avoid jank
         try {
           final stopMap = await Kmb.buildStopMap();
-          final enriched = await compute(_enrichEntriesForStopMap, {'entries': entries, 'stopMap': stopMap});
+          // ✅ Direct enrichment, no compute (consistent with CTB)
+          final enriched = <Map<String, dynamic>>[];
+          for (final e in entries) {
+            final stopId = e['stop']?.toString() ?? '';
+            final meta = stopMap[stopId];
+            
+            // Inject stop metadata directly
+            enriched.add({
+              ...e,
+              if (meta != null) ...{
+                'nameen': meta['nameen'] ?? meta['name_en'],
+                'nametc': meta['nametc'] ?? meta['name_tc'],
+                'lat': meta['lat'] ?? meta['latitude'],
+                'long': meta['long'] ?? meta['lng'] ?? meta['longitude'],
+              }
+            });
+          }
+          
           if (mounted) {
             setState(() {
               data = {
@@ -521,7 +587,24 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         });
         try {
           final stopMap = await Kmb.buildStopMap();
-          final enriched = await compute(_enrichEntriesForStopMap, {'entries': entries, 'stopMap': stopMap});
+          // ✅ Direct enrichment, no compute (consistent with CTB)
+          final enriched = <Map<String, dynamic>>[];
+          for (final e in entries) {
+            final stopId = e['stop']?.toString() ?? '';
+            final meta = stopMap[stopId];
+            
+            // Inject stop metadata directly
+            enriched.add({
+              ...e,
+              if (meta != null) ...{
+                'nameen': meta['nameen'] ?? meta['name_en'],
+                'nametc': meta['nametc'] ?? meta['name_tc'],
+                'lat': meta['lat'] ?? meta['latitude'],
+                'long': meta['long'] ?? meta['lng'] ?? meta['longitude'],
+              }
+            });
+          }
+          
           if (mounted) {
             setState(() {
               data = {
@@ -748,7 +831,27 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     );
   }
 
-    /// Build the list view using Slivers for better performance and flexibility
+  /// Build the list view using Slivers for better performance and flexibility
+  // ✅ 統一的 Loading Widget Helper (加喺這裡)
+  SliverToBoxAdapter _sliverLoading({Key? key, Color? color}) {
+    return SliverToBoxAdapter(
+      key: key,
+      child: Card(
+        margin: const EdgeInsets.all(12),
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Center(
+            child: LinearProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(
+                color ?? Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildListView(DeveloperSettingsProvider devSettings) {
     final bottomPadding = devSettings.useFloatingRouteToggles ? 250.0 : 12.0;
 
@@ -782,7 +885,6 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
                 valueColor: AlwaysStoppedAnimation<Color>(
                   Theme.of(context).colorScheme.primary,
                 ),
-                
               ),
             ),
           )
@@ -811,19 +913,10 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
             SliverToBoxAdapter(child: _buildSelectorsCard()),
 
           // 4. Combined Data Loading/Error Indicators
-          if (_combinedLoading)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: UIConstants.cardPadding,
-                child: Center(
-                  child: LinearProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Theme.of(context).colorScheme.secondary,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          // ✅ 只有當 "非主畫面載入中" 時，才顯示次要 loading
+          if (_combinedLoading && !loading)
+            _sliverLoading(key: const ValueKey('combined_loading'), color: Theme.of(context).colorScheme.secondary),
+          
           if (_combinedError != null)
             SliverToBoxAdapter(
               child: Padding(
@@ -842,170 +935,71 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     );
   }
 
-  /// Helper to build the correct SliverList based on data source (Variant or Cached)
-  Widget _buildSliverStationList(double bottomPadding) {
-    // A. Priority: Use Variant Stops (Route-Stop API) if available
-    if (_variantStops != null && _selectedDirection != null && _selectedServiceType != null) {
-      return _buildSliverVariantList(_variantStops!, bottomPadding);
-    }
-
-    // Variant loading state
-    if (_variantStopsLoading) {
-      return const SliverToBoxAdapter(
-        child: Card(
-          margin: EdgeInsets.all(12),
-          child: Padding(
-            padding: EdgeInsets.all(24.0),
-            child: Center(child: LinearProgressIndicator()),
-          ),
+  SliverToBoxAdapter _sliverMessage(String text, {Key? key}) {
+    return SliverToBoxAdapter(
+      key: key,
+      child: Card(
+        margin: const EdgeInsets.all(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Text(text),
         ),
-      );
-    }
-
-    // Variant error state
-    if (_variantStopsError != null) {
-      return SliverToBoxAdapter(
-        child: Card(
-          margin: const EdgeInsets.all(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Text(
-              'Error loading route stops: $_variantStopsError',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        ),
-      );
-    }
-
-    // B. Fallback: Use Cached Route-To-Stops Map
-    return FutureBuilder<List<dynamic>>(
-      future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const SliverToBoxAdapter(
-            child: Card(
-              margin: EdgeInsets.all(12),
-              child: Padding(
-                padding: EdgeInsets.all(24.0),
-                child: Center(child: LinearProgressIndicator()),
-              ),
-            ),
-          );
-        }
-
-        if (snap.hasError) {
-          return SliverToBoxAdapter(
-            child: Card(
-              margin: const EdgeInsets.all(12),
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Text(
-                  'Error loading maps: ${snap.error}',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
-            ),
-          );
-        }
-
-        // Process cached data
-        final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
-        final stopMap = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
-
-        final r = widget.route.trim().toUpperCase();
-        final base = RegExp(r'^(\d+)').firstMatch(r)?.group(1) ?? r;
-        final entries = routeMap[r] ?? routeMap[base] ?? [];
-
-        if (entries.isEmpty) {
-          return const SliverToBoxAdapter(
-            child: Card(
-              margin: EdgeInsets.all(12),
-              child: Padding(
-                padding: EdgeInsets.all(12.0),
-                child: Text('No stop data for route'),
-              ),
-            ),
-          );
-        }
-
-        // Filter and Deduplicate Logic
-        final lang = context.watch<LanguageProvider>();
-        final isEnglish = lang.isEnglish;
-
-        String? normChar(dynamic v) {
-          if (v == null) return null;
-          final s = v.toString().trim().toUpperCase();
-          if (s.isEmpty) return null;
-          final c = s[0];
-          return (c == 'I' || c == 'O') ? c : null;
-        }
-
-        final selectedBoundChar = normChar(_selectedDirection);
-        final selectedService = _selectedServiceType;
-        final uniqueStopsMap = <String, Map<String, dynamic>>{};
-
-        for (final e in entries) {
-          if (!e.containsKey('seq')) continue;
-          
-          final entryRoute = e['route']?.toString().trim().toUpperCase();
-          final currentRoute = widget.route.trim().toUpperCase();
-          if (entryRoute != null && entryRoute.isNotEmpty && entryRoute != currentRoute) continue;
-
-          final seq = e['seq']?.toString() ?? '';
-          if (seq.isEmpty) continue;
-
-          if (selectedBoundChar != null && normChar(e['bound']) != selectedBoundChar) continue;
-          
-          if (selectedService != null) {
-            final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
-            if (entryServiceType != selectedService) continue;
-          }
-
-          if (!uniqueStopsMap.containsKey(seq)) {
-            uniqueStopsMap[seq] = e;
-          }
-        }
-
-        final stops = uniqueStopsMap.values.toList();
-        stops.sort((a, b) {
-          final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
-          final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
-          return ai.compareTo(bi);
-        });
-
-        // ETA Loading State
-        if (_routeEtaLoading) {
-           return SliverToBoxAdapter(
-             child: Card(
-               margin: const EdgeInsets.all(12),
-               child: Padding(
-                 padding: const EdgeInsets.all(24.0),
-                 child: Center(
-                   child: LinearProgressIndicator(
-                     valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
-                   ),
-                 ),
-               ),
-             ),
-           );
-        }
-
-        // Auto-scroll logic
-        final variantKey = '${r}_${selectedBoundChar}_${selectedService}_cached';
-        if (_lastAutoScrollVariantKey != variantKey) {
-          _lastAutoScrollVariantKey = variantKey;
-          if (_userPosition != null && !_locationLoading && stops.isNotEmpty) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _getUserLocationAndScrollToNearest(stops);
-            });
-          }
-        }
-
-        return _buildSliverListDelegate(stops, stopMap, bottomPadding);
-      },
+      ),
     );
   }
+
+  SliverToBoxAdapter _sliverError(String text, {Key? key}) {
+    return SliverToBoxAdapter(
+      key: key,
+      child: Card(
+        margin: const EdgeInsets.all(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Text(text, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        ),
+      ),
+    );
+  }
+
+  /// Helper to build the correct SliverList based on data source (Variant or Cached)
+  Widget _buildSliverStationList(double bottomPadding) {
+  if (_variantStops != null && _selectedDirection != null && _selectedServiceType != null) {
+    return _buildSliverVariantList(_variantStops!, bottomPadding);
+  }
+
+  if (loading) {
+    return const SliverToBoxAdapter(child: SizedBox.shrink()); // 主 loading 已經喺 _buildListView 顯示
+  }
+
+  if (_variantStopsLoading) return _sliverLoading(key: const ValueKey('variant_stops_loading'));
+  if (_variantStopsError != null) return _sliverError('Error loading route stops: $_variantStopsError');
+
+  return FutureBuilder<List<dynamic>>(
+    future: Future.wait([Kmb.buildRouteToStopsMap(), Kmb.buildStopMap()]),
+    builder: (context, snap) {
+      if (snap.connectionState == ConnectionState.waiting) {
+        return _sliverLoading(key: const ValueKey('cached_stops_loading'));
+      }
+      if (snap.hasError) return _sliverError('Error loading maps: ${snap.error}');
+
+      final routeMap = (snap.data?[0] as Map<String, List<Map<String, dynamic>>>?) ?? {};
+      final stopMap  = (snap.data?[1] as Map<String, Map<String, dynamic>>?) ?? {};
+
+      final r = widget.route.trim().toUpperCase();
+      final base = RegExp(r'^(\\d+)').firstMatch(r)?.group(1) ?? r;
+      final entries = routeMap[r] ?? routeMap[base] ?? [];
+
+      if (entries.isEmpty) return _sliverMessage('No stop data for route');
+
+      final stops = _filterDedupSortStopsForCachedMap(entries); // ✅ 抽出去做共用（list / map 同用）
+      if (stops.isEmpty) return _sliverMessage('No stop data for current filters');
+
+      if (_routeEtaLoading) return _sliverLoading(key: const ValueKey('eta_loading'));
+
+      return _buildSliverListDelegate(stops, stopMap, bottomPadding);
+    },
+  );
+}
 
   /// Reusable SliverList builder for both Variant and Cached data
   Widget _buildSliverVariantList(List<Map<String, dynamic>> stops, double bottomPadding) {
@@ -1025,17 +1019,8 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
     });
 
     // Variant Loading Check
-    if (_routeEtaLoading) {
-      return SliverToBoxAdapter(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: LinearProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
-            ),
-          ),
-        ),
-      );
+    if (_routeEtaLoading && !loading) {
+      return _sliverLoading(key: const ValueKey('variant_eta_loading'));
     }
 
     // Auto-scroll
@@ -1117,118 +1102,6 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
       ),
     );
   }
-
-  /*/// Build the list view showing route details and stops
-  Widget _buildListView(DeveloperSettingsProvider devSettings) {
-    return Column(
-      children: [
-        //This is to show DEST to the TOP - Fixed Route Destination (like AppBar) - always visible at top
-        /*RouteDestinationWidget(
-          route: widget.route,
-          direction: _selectedDirection,
-          serviceType: _selectedServiceType,
-          cachedRouteData: _routeDetails,
-        ),
-        */
-
-        // ✅ 只在 floating bar 關閉時顯示
-        if (!devSettings.useFloatingRouteToggles) ...[
-          RouteDestinationWidget(
-            route: widget.route,
-            direction: _selectedDirection,
-            serviceType: _selectedServiceType,
-            cachedRouteData: _routeDetails,
-          ),
-          const SizedBox(height: 8),
-        ],
-
-        // Show route details card independently (even while loading stops)
-        //if (_routeDetails != null && !devSettings.useFloatingRouteToggles)
-        //  _buildRouteDetailsCard(),
-        //if (_routeDetails != null && devSettings.useFloatingRouteToggles)
-        //  _buildRouteDetailsCard(),
-        
-        // Show stop list or loading state with smooth animations
-        Expanded(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 400),
-            switchInCurve: Easing.emphasizedDecelerate,
-            switchOutCurve: Easing.emphasizedAccelerate,
-            transitionBuilder: (child, animation) {
-              return FadeTransition(
-                opacity: animation,
-                child: ScaleTransition(
-                  scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                    CurvedAnimation(parent: animation, curve: Easing.emphasizedDecelerate),
-                  ),
-                  child: child,
-                ),
-              );
-            },
-            child: loading
-                ? Center(
-                    key: const ValueKey('loading'),
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3.0,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                  )
-                : (error != null
-                    ? Center(
-                        key: const ValueKey('error'),
-                        child: Text(
-                          'Error: $error',
-                          style: TextStyle(color: Theme.of(context).colorScheme.error),
-                        ),
-                      )
-                    : (data == null
-                        ? Center(
-                            key: const ValueKey('no_data'),
-                            child: Text('No data'),
-                          )
-                        : Column(
-                            key: const ValueKey('content'),
-                            children: [
-                              if (_combinedLoading)
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 250),
-                                  child: Padding(
-                                    key: const ValueKey('combined_loading'),
-                                    padding: UIConstants.cardPadding,
-                                    child: Center(
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        valueColor: AlwaysStoppedAnimation<Color>(
-                                          Theme.of(context).colorScheme.secondary,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              if (_combinedError != null)
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 250),
-                                  child: Padding(
-                                    key: const ValueKey('combined_error'),
-                                    padding: UIConstants.cardPadding,
-                                    child: Text(
-                                      'Combined error: $_combinedError',
-                                      style: TextStyle(
-                                        color: Theme.of(context).colorScheme.error,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              Expanded(child: _buildStructuredView()),
-                            ],
-                          ))),
-          ),
-        ),
-      ],
-    );
-  }*/
 
   Widget _buildFloatingBottomBar() {
     final lang = context.watch<LanguageProvider>();
@@ -2118,7 +1991,11 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         return;
       }
       
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+        ),
+      );
       setState(() => _userPosition = pos);
       
       // Find nearest stop
@@ -2712,37 +2589,55 @@ class _KmbRouteStatusPageState extends State<KmbRouteStatusPage> {
         }
 
         // Filter by selected direction and service type
-        entries = List<Map<String, dynamic>>.from(
-          entries.where((e) {
-            if (!e.containsKey('seq')) return false;
-            if (_selectedDirection != null) {
-              final bound = e['bound']?.toString().trim().toUpperCase() ?? '';
-              if (bound.isNotEmpty && _selectedDirection!.isNotEmpty && bound[0] != _selectedDirection![0]) return false;
-            }
-            if (_selectedServiceType != null) {
-              final st = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
-              if (st != _selectedServiceType) return false;
-            }
-            return true;
-          }),
-        );
+        // ✅ 統一使用同 ListView 完全一樣嘅 Filter & Deduplicate 邏輯
+        String? normChar(dynamic v) {
+          if (v == null) return null;
+          final s = v.toString().trim().toUpperCase();
+          if (s.isEmpty) return null;
+          final c = s[0];
+          return (c == 'I' || c == 'O') ? c : null;
+        }
 
-        // ADD DEDUPLICATION HERE - before sorting
+        final selectedBoundChar = normChar(_selectedDirection);
+        final selectedService = _selectedServiceType;
         final uniqueStopsMap = <String, Map<String, dynamic>>{};
+
         for (final e in entries) {
+          if (!e.containsKey('seq')) continue;
+          
+          // 1. Route Guard (防止 base fallback 混入其他字母結尾嘅特別班次)
+          final entryRoute = e['route']?.toString().trim().toUpperCase();
+          final currentRoute = widget.route.trim().toUpperCase();
+          if (entryRoute != null && entryRoute.isNotEmpty && entryRoute != currentRoute) continue;
+
+          // 2. Seq 檢查
           final seq = e['seq']?.toString() ?? '';
-          if (seq.isNotEmpty && !uniqueStopsMap.containsKey(seq)) {
+          if (seq.isEmpty) continue;
+
+          // 3. Direction (Bound) 檢查
+          if (selectedBoundChar != null && normChar(e['bound']) != selectedBoundChar) continue;
+          
+          // 4. Service Type 檢查
+          if (selectedService != null) {
+            final entryServiceType = e['service_type']?.toString() ?? e['servicetype']?.toString() ?? '';
+            if (entryServiceType != selectedService) continue;
+          }
+
+          // 5. 去重 (Deduplication)
+          if (!uniqueStopsMap.containsKey(seq)) {
             uniqueStopsMap[seq] = e;
           }
         }
+
         entries = uniqueStopsMap.values.toList();
         
-        // Sort after deduplication
+        // 6. 排序 (Sort)
         entries.sort((a, b) {
           final ai = int.tryParse(a['seq']?.toString() ?? '') ?? 0;
           final bi = int.tryParse(b['seq']?.toString() ?? '') ?? 0;
           return ai.compareTo(bi);
         });
+
 
         // Build markers for stops
         final List<Marker> markers = [];

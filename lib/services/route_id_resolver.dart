@@ -18,6 +18,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import '../kmb/api/gmb.dart';
 
 /// 解析後的路線 ID 信息
 class ResolvedRouteIds {
@@ -330,19 +331,16 @@ class RouteIdResolver {
   ///
   /// 從 GMB route-stops 數據中查找 route number 對應的 route_id
   Future<Map<String, dynamic>?> _resolveGmbRouteId(String routeNumber) async {
-    if (_gmbRouteStopsCache == null) return null;
-
-    // 構建索引（如果尚未構建）
+    // 策略 1：從 prebuilt cache 查找（最快）
     if (_gmbRouteIndexCache == null) {
       await _buildGmbRouteIndex();
     }
 
-    // 從索引查找
     final normalizedRoute = routeNumber.toUpperCase().trim();
     final entry = _gmbRouteIndexCache?[normalizedRoute];
 
     if (entry != null) {
-      debugPrint('✅ GMB routeId resolved: $routeNumber -> ${entry['route_id']}');
+      debugPrint('✅ GMB routeId resolved from cache: $routeNumber -> ${entry['route_id']}');
       return {
         'route_id': entry['route_id'],
         'route_code': entry['route_code'],
@@ -350,7 +348,43 @@ class RouteIdResolver {
       };
     }
 
-    debugPrint('⚠️ GMB route not found: $routeNumber');
+    // 策略 2：prebuilt 找不到時，嘗試用 GMB API live 查詢
+    debugPrint('⚠️ GMB route not in prebuilt cache, trying live API: $routeNumber');
+    try {
+      for (final region in ['HKI', 'KLN', 'NT']) {
+        try {
+          final routes = await GMB.fetchRouteInfo(region, routeNumber);
+          if (routes.isNotEmpty) {
+            final first = routes.first;
+            final routeId = first['route_id'] is int
+                ? first['route_id'] as int
+                : int.tryParse(first['route_id']?.toString() ?? '');
+
+            if (routeId != null) {
+              debugPrint('✅ GMB routeId resolved via live API: $routeNumber -> $routeId ($region)');
+              // 寫入 index cache 備用
+              _gmbRouteIndexCache ??= {};
+              _gmbRouteIndexCache![normalizedRoute] = {
+                'route_id': routeId,
+                'route_code': routeNumber,
+                'region': region,
+              };
+              return {
+                'route_id': routeId,
+                'route_code': routeNumber,
+                'region': region,
+              };
+            }
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ GMB live API resolve failed: $e');
+    }
+
+    debugPrint('❌ GMB route not found anywhere: $routeNumber');
     return null;
   }
 

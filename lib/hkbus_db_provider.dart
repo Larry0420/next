@@ -1,8 +1,13 @@
+// hkbus_db_provider.dart 頂部
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart'  // 只在 non-web 有效
+    if (dart.library.html) 'package:hk_transport/stubs/path_provider_stub.dart';
+
 
 class UnifiedBusRoute {
   final String routeId;      // JSON 裡的 Key (例如 "101+1+KENNEDY TOWN+KWUN TONG")
@@ -53,10 +58,10 @@ class UnifiedBusRoute {
       case 'ctb': return isEnglish ? 'CTB' : '城巴';
       case 'lwb': return isEnglish ? 'LWB' : '龍運';
       case 'nlb': return isEnglish ? 'NLB' : '嶼巴';
-      case 'mtr': return isEnglish ? 'MTR Bus' : '港鐵巴士';
+      case 'mtr': return isEnglish ? 'MTR' : '港鐵';
       case 'lrtfeeder':
       case 'lrt_feeder':
-      case 'lrt-feeder': return isEnglish ? 'LRT Feeder' : '輕鐵接駁';
+      case 'lrt-feeder': return isEnglish ? 'LRT Feeder' : '港鐵接駁';
       case 'gmb':
       case 'greenminibus': return isEnglish ? 'GMB' : '專線小巴';
       // 鐵路服務
@@ -114,71 +119,182 @@ class HkbusDbProvider extends ChangeNotifier {
   /// 安全地从字段中提取字符串（处理字段可能是 Map 或 String 的情况）
   String? _extractStringFromField(dynamic field, String key) {
     if (field == null) return null;
-    
+
     if (field is Map) {
       return field[key]?.toString();
     }
-    
+
     if (field is String) {
       return field;
     }
-    
+
     return null;
   }
+
+  /// 將 stops 數據標準化為 Map<String, dynamic> 格式
+  /// 處理 stops 可能是 List、Map 或 String 的情況
+  Map<String, dynamic> _normalizeStopsMap(
+    dynamic stopsRaw,
+    List coList,
+    String routeId,
+  ) {
+    final primary = coList.isNotEmpty
+        ? coList.first.toString().toLowerCase().trim()
+        : 'kmb';
+
+    if (stopsRaw == null) return {};
+
+    if (stopsRaw is Map) {
+      return Map<String, dynamic>.from(stopsRaw);
+    }
+
+    if (stopsRaw is List) {
+      return {primary: List.from(stopsRaw)};
+    }
+
+    if (stopsRaw is String) {
+      try {
+        final decoded = jsonDecode(stopsRaw);
+        return _normalizeStopsMap(decoded, coList, routeId);
+      } catch (e) {
+        debugPrint('❌ Failed to parse stops string for $routeId: $e');
+        return {};
+      }
+    }
+
+    debugPrint('⚠️ Unexpected stops type for $routeId: ${stopsRaw.runtimeType}');
+    return {};
+  }
+
+  Map<String, dynamic> _normalizeBoundsMap(
+    dynamic boundRaw,
+    List coList,
+    String routeId,
+  ) {
+    final primary = coList.isNotEmpty
+        ? coList.first.toString().toLowerCase().trim()
+        : 'kmb';
+
+    if (boundRaw == null) return {};
+
+    if (boundRaw is Map) {
+      return Map<String, dynamic>.from(boundRaw);
+    }
+
+    if (boundRaw is String) {
+      return {primary: boundRaw};
+    }
+
+    if (boundRaw is List) {
+      return {primary: boundRaw.isNotEmpty ? boundRaw.first.toString() : ''};
+    }
+
+    debugPrint('⚠️ Unexpected bound type for $routeId: ${boundRaw.runtimeType}');
+    return {};
+  }
+
+
+
 
   /// 初始化：先讀 Cache，若無或過期則下載
   Future<void> initDb({bool forceUpdate = false}) async {
     try {
-      final file = await _getCacheFile();
-      
-      // 檢查 Cache 是否存在及是否過舊 (例如超過 12 小時)
-      bool needsUpdate = forceUpdate;
-      if (!file.existsSync()) {
-        needsUpdate = true;
+      String? jsonString;
+
+      if (kIsWeb) {
+        jsonString = await _loadFromPrefs(forceUpdate);
       } else {
-        final lastModified = file.lastModifiedSync();
-        if (DateTime.now().difference(lastModified).inHours > 12) {
-          needsUpdate = true;
-        }
+        jsonString = await _loadFromFile(forceUpdate);
       }
 
-      String jsonString;
-      if (needsUpdate) {
-        debugPrint('Downloading routeFareList.min.json from GitHub Pages...');
-        final response = await http.get(Uri.parse(dbUrl));
-        if (response.statusCode == 200) {
-          jsonString = response.body;
-          // 寫入本地 Cache
-          await file.writeAsString(jsonString);
-        } else {
-          // 下載失敗但有舊檔，讀取舊檔
-          jsonString = await file.readAsString();
-        }
-      } else {
-        debugPrint('Loading Bus DB from local cache...');
-        jsonString = await file.readAsString();
+      if (jsonString == null || jsonString.isEmpty) {
+        throw Exception('Failed to load hkbus DB: empty content');
       }
 
       final data = jsonDecode(jsonString);
-      if (data is! Map) {
-        throw Exception('Invalid hkbus DB root JSON type: ${data.runtimeType}');
-      }
+      if (data is! Map) throw Exception('Invalid hkbus DB root JSON type');
 
-      final routeListRaw = data['routeList'];
-      final stopListRaw = data['stopList'];
-      final stopMapRaw = data['stopMap'];
+      _routeList = data['routeList'] is Map ? Map.from(data['routeList']) : {};
+      _stopList  = data['stopList']  is Map ? Map.from(data['stopList'])  : {};
+      _stopMap   = data['stopMap']   is Map ? Map.from(data['stopMap'])   : {};
 
-      _routeList = routeListRaw is Map ? Map<String, dynamic>.from(routeListRaw) : <String, dynamic>{};
-      _stopList = stopListRaw is Map ? Map<String, dynamic>.from(stopListRaw) : <String, dynamic>{};
-      _stopMap = stopMapRaw is Map ? Map<String, dynamic>.from(stopMapRaw) : <String, dynamic>{};
-      
       _isReady = true;
       notifyListeners();
-      
+      debugPrint('✅ hkbus DB loaded: ${_routeList!.length} routes, ${_stopList!.length} stops');
+
     } catch (e) {
-      debugPrint('Error loading hkbus DB: $e');
+      debugPrint('❌ Error loading hkbus DB: $e');
     }
   }
+
+/// Web：用 SharedPreferences 做 cache
+Future<String?> _loadFromPrefs(bool forceUpdate) async {
+  final prefs = await SharedPreferences.getInstance();
+  const key   = 'hkbus_db_json';
+  const keyAt = 'hkbus_db_cached_at';
+
+  if (!forceUpdate) {
+    final cachedAt = prefs.getString(keyAt);
+    final cached   = prefs.getString(key);
+    if (cached != null && cachedAt != null) {
+      final age = DateTime.now().difference(DateTime.parse(cachedAt));
+      if (age.inHours < 12) {
+        debugPrint('💾 hkbus DB from SharedPreferences (${age.inMinutes}min old)');
+        return cached;
+      }
+    }
+  }
+
+  debugPrint('🌐 Downloading hkbus DB (web)...');
+  try {
+    final res = await http.get(Uri.parse(dbUrl));
+    if (res.statusCode == 200) {
+      await prefs.setString(key, res.body);
+      await prefs.setString(keyAt, DateTime.now().toIso8601String());
+      return res.body;
+    }
+  } catch (e) {
+    debugPrint('❌ Download failed: $e');
+  }
+  // 下載失敗，用舊 cache
+  return prefs.getString(key);
+}
+
+  /// Mobile/Desktop：用 File 做 cache
+  Future<String?> _loadFromFile(bool forceUpdate) async {
+    final dir  = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/routeFareList.min.json');
+
+    bool needsUpdate = forceUpdate || !file.existsSync();
+    if (!needsUpdate) {
+      final age = DateTime.now().difference(file.lastModifiedSync());
+      if (age.inHours > 12) needsUpdate = true;
+    }
+
+    if (needsUpdate) {
+      debugPrint('📥 Downloading hkbus DB (native)...');
+      try {
+        final res = await http.get(Uri.parse(dbUrl));
+        if (res.statusCode == 200) {
+          await file.writeAsString(res.body);
+          debugPrint('✅ hkbus DB saved to cache');
+          return res.body;
+        }
+      } catch (e) {
+        debugPrint('❌ Download failed: $e');
+      }
+      // 下載失敗，讀舊檔（如果有）
+      if (file.existsSync()) return file.readAsString();
+      return null;
+    }
+
+    debugPrint('📂 hkbus DB from file cache');
+    return file.readAsString();
+  }
+
+  Future<void> refresh() async => initDb(forceUpdate: true);
+    
+
 
   Future<File> _getCacheFile() async {
     final dir = await getApplicationDocumentsDirectory();
@@ -204,11 +320,9 @@ class HkbusDbProvider extends ChangeNotifier {
         serviceType = idParts[1];
       }
       
-      // stops/bound 必須為 Map，否則後續用 String 索引會拋 "String is not a subtype of int of 'index'"
-      final stopsRaw = data['stops'];
-      final boundRaw = data['bound'];
-      final stopsByCompany = stopsRaw is Map ? Map<String, dynamic>.from(stopsRaw) : <String, dynamic>{};
-      final boundsByCompany = boundRaw is Map ? Map<String, dynamic>.from(boundRaw) : <String, dynamic>{};
+      // 使用 normalize 方法處理 stops/bound，支持 List/Map/String 多種格式
+      final stopsByCompany = _normalizeStopsMap(data['stops'], coList, routeId.toString());
+      final boundsByCompany = _normalizeBoundsMap(data['bound'], coList, routeId.toString());
 
       list.add(UnifiedBusRoute(
         routeId: routeId,
@@ -283,10 +397,9 @@ class HkbusDbProvider extends ChangeNotifier {
     String? serviceType;
     final idParts = routeId.toString().split('+');
     if (idParts.length >= 2) serviceType = idParts[1];
-    final stopsRaw = data['stops'];
-    final boundRaw = data['bound'];
-    final stopsByCompany = stopsRaw is Map ? Map<String, dynamic>.from(stopsRaw) : <String, dynamic>{};
-    final boundsByCompany = boundRaw is Map ? Map<String, dynamic>.from(boundRaw) : <String, dynamic>{};
+    // 使用 normalize 方法處理 stops/bound，支持 List/Map/String 多種格式
+    final stopsByCompany = _normalizeStopsMap(data['stops'], coList, routeId);
+    final boundsByCompany = _normalizeBoundsMap(data['bound'], coList, routeId);
     return UnifiedBusRoute(
       routeId: routeId,
       routeNumber: data['route']?.toString() ?? '',
@@ -302,37 +415,41 @@ class HkbusDbProvider extends ChangeNotifier {
   }
 
   /// 根據路線號碼和方向獲取特定路線
-  UnifiedBusRoute? getRouteByNumber(String routeNumber, {String? direction, String? serviceType}) {
+  UnifiedBusRoute? getRouteByNumber(String routeNumber, {
+    String? direction, 
+    String? serviceType,
+    String? company,          // ← 新增參數
+  }) {
     final all = getAllRoutes();
     final matches = all.where((r) => r.routeNumber.toUpperCase() == routeNumber.toUpperCase());
-    
     if (matches.isEmpty) return null;
     if (matches.length == 1) return matches.first;
-    
-    // 有多個匹配時，根據方向和服務類型篩選
+
     for (final route in matches) {
       bool matchesDir = direction == null;
       bool matchesSvc = serviceType == null;
-      
+      bool matchesCo = company == null;    // ← 新增
+
+      // ✅ 新增：company 過濾
+      if (company != null) {
+        matchesCo = route.companies.any(
+          (c) => c.toString().toLowerCase() == company.toLowerCase()
+        );
+      }
+
       if (direction != null && route.boundsByCompany.isNotEmpty) {
         final bound = route.boundsByCompany.values.first?.toString().toUpperCase();
-        matchesDir = bound == direction.toUpperCase() ||
-                    (direction.toUpperCase().startsWith('I') && bound == 'I') ||
-                    (direction.toUpperCase().startsWith('O') && bound == 'O');
+        matchesDir = bound == direction.toUpperCase();
       }
-      
       if (serviceType != null) {
         matchesSvc = route.serviceType == serviceType;
       }
-      
-      if (matchesDir && matchesSvc) {
-        return route;
-      }
+
+      if (matchesDir && matchesSvc && matchesCo) return route;   // ← 加 matchesCo
     }
-    
-    // 返回第一個匹配
     return matches.first;
   }
+
 
   /// 透過 StopId 查站點名稱
   String getStopName(String stopId, {bool isEnglish = false}) {
@@ -404,60 +521,41 @@ class HkbusDbProvider extends ChangeNotifier {
   /// 安全地從 stopsMap 中提取站點列表
   /// 防止數據類型錯誤導致的崩潰（stopsMap 必須為 Map，不可為 List，否則 String 索引會拋錯）
   List<String> _safeExtractStopList(
-    Map<String, dynamic> stopsMap,
+    dynamic stopsMap, // 改為 dynamic，避免預設係 Map 但實質傳入 String
     String companyKey,
     String routeId,
   ) {
-    if (stopsMap is List) {
-      debugPrint('⚠️ _safeExtractStopList received List instead of Map for $routeId');
+    // 1. 確保傳入嘅 stopsMap 真係一個 Map
+    if (stopsMap is! Map) {
+      debugPrint('⚠️ _safeExtractStopList: stopsMap is not a Map for $routeId. Type: ${stopsMap.runtimeType}');
       return [];
     }
+
+    // 2. 取出該公司嘅資料
     final rawValue = stopsMap[companyKey];
 
-    // 如果值為 null，返回空列表
-    if (rawValue == null) {
-      return [];
+    if (rawValue == null) return [];
+
+    // 3. 如果係 List，直接轉
+    if (rawValue is List) {
+      return rawValue.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList();
     }
 
-    // 如果值是 String，嘗試解析為 JSON
+    // 4. 如果係 String，可能係 JSON string，試下 parse
     if (rawValue is String) {
       try {
         final parsed = jsonDecode(rawValue);
         if (parsed is List) {
-          final result = <String>[];
-          for (final item in parsed) {
-            final strValue = item?.toString();
-            if (strValue != null && strValue.isNotEmpty) {
-              result.add(strValue);
-            }
-          }
-          return result;
+          return parsed.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList();
         }
       } catch (e) {
         debugPrint('❌ Failed to parse string stops for $companyKey in route $routeId: $e');
-        return [];
       }
     }
 
-    // 如果值是 List，提取所有字符串元素
-    if (rawValue is List) {
-      final result = <String>[];
-      for (final item in rawValue) {
-        final strValue = item?.toString();
-        if (strValue != null && strValue.isNotEmpty) {
-          result.add(strValue);
-        }
-      }
-      return result;
-    }
-
-    // 不支持的類型
-    debugPrint(
-      '⚠️ Unexpected stops type for $companyKey in route $routeId: '
-      '${rawValue.runtimeType}',
-    );
     return [];
   }
+
 
   /// 獲取某條路線的「聯營 Stop Group」清單 (傳給 RouteStatusPage 用)
   /// 它會幫你把 KMB、CTB、GMB 和 NLB 的 StopId 對齊
@@ -466,17 +564,17 @@ class HkbusDbProvider extends ChangeNotifier {
     
     if (_routeList is! Map) return [];
     final routeData = (_routeList as Map)[routeId];
-    if (routeData == null) return [];
+    if (routeData == null || routeData is! Map) return [];
 
-    if (routeData is! Map) return [];
-    final stopsRaw = routeData['stops'];
-    // 必須是 Map：若為 List 會導致後續用 String 索引時拋出 "String is not a subtype of int of 'index'"
-    if (stopsRaw is! Map<String, dynamic>) {
-      debugPrint('❌ Invalid stops structure for route $routeId: expected Map, got ${stopsRaw.runtimeType}');
+    // 使用 normalize 方法處理 stops，支持 List/Map/String 多種格式
+    final coList = List.from(routeData['co'] ?? []);
+    final stopsMap = _normalizeStopsMap(routeData['stops'], coList, routeId.toString());
+
+    if (stopsMap.isEmpty) {
+      debugPrint('⚠️ No stops found for route $routeId after normalize');
       return [];
     }
-    final stopsMap = stopsRaw;
-    debugPrint('buildStopGroupsForRoute($routeId): stopsMap type = ${stopsMap.runtimeType}');
+    debugPrint('buildStopGroupsForRoute($routeId): stopsMap type = ${stopsMap.runtimeType}, keys=${stopsMap.keys}');
 
     // 獲取各公司的站點列表（使用安全的類型轉換）
     List<String> kmbStops = _safeExtractStopList(stopsMap, 'kmb', routeId);
@@ -490,6 +588,17 @@ class HkbusDbProvider extends ChangeNotifier {
       return [];
     }
 
+    // ✅ Extract fares (index-aligned with stops, same as JSON structure)
+    final rawFares = routeData['fares'];
+    final List<String> fares = rawFares is List
+        ? rawFares.map((e) => e?.toString() ?? '').toList()
+        : [];
+    final rawFaresHoliday = routeData['faresHoliday'];
+    final List<String>? faresHoliday = rawFaresHoliday is List
+        ? rawFaresHoliday.map((e) => e?.toString() ?? '').toList()
+        : null;
+
+
     // 以長度最長的陣列為基準跑迴圈
     int maxLength = [kmbStops.length, ctbStops.length, gmbStops.length, nlbStops.length]
         .reduce((a, b) => a > b ? a : b);
@@ -502,18 +611,39 @@ class HkbusDbProvider extends ChangeNotifier {
       String? cId = i < ctbStops.length ? ctbStops[i] : null;
       String? gId = i < gmbStops.length ? gmbStops[i] : null;
       String? nId = i < nlbStops.length ? nlbStops[i] : null;
+      
+      // ✅ AFTER – iterate [operator, stopId] pairs correctly
+      // Helper: resolve all operator IDs from a stopMap entry
+      Map<String, String> _resolveFromStopMap(dynamic key, Map stopMap) {
+        final result = <String, String>{};
+        final pairs = stopMap[key];
+        if (pairs is! List) return result;
+        for (final pair in pairs) {
+          if (pair is List && pair.length >= 2) {
+            final op  = pair[0]?.toString()?.toLowerCase();
+            final sid = pair[1]?.toString();
+            if (op != null && sid != null && sid.isNotEmpty) result[op] = sid;
+          }
+        }
+        return result;
+      }
 
-      // 如果兩間公司只出現其中一間，試著去 stopMap 查跨公司對照
-      if (kId != null && cId == null && stopMap.containsKey(kId)) {
-         final mapEntry = stopMap[kId] as List<dynamic>?;
-         if (mapEntry != null && mapEntry.isNotEmpty) {
-           cId = mapEntry.first['ctb']?.toString();
-         }
-      } else if (cId != null && kId == null && stopMap.containsKey(cId)) {
-         final mapEntry = stopMap[cId] as List<dynamic>?;
-         if (mapEntry != null && mapEntry.isNotEmpty) {
-           kId = mapEntry.first['kmb']?.toString();
-         }
+      // Inside the buildStopGroupsForRoute loop, replace the cross-reference block:
+      if (kId != null && stopMap.containsKey(kId)) {
+        final resolved = _resolveFromStopMap(kId, stopMap);
+        cId ??= resolved['ctb'];
+        gId ??= resolved['gmb'];
+        nId ??= resolved['nlb'];
+      } else if (cId != null && stopMap.containsKey(cId)) {
+        final resolved = _resolveFromStopMap(cId, stopMap);
+        kId ??= resolved['kmb'];
+        gId ??= resolved['gmb'];
+        nId ??= resolved['nlb'];
+      } else if (gId != null && stopMap.containsKey(gId)) {
+        final resolved = _resolveFromStopMap(gId, stopMap);
+        kId ??= resolved['kmb'];
+        cId ??= resolved['ctb'];
+        nId ??= resolved['nlb'];
       }
 
       // 選擇用於顯示站點名稱的 ID（優先順序：KMB > CTB > GMB > NLB）
@@ -527,6 +657,9 @@ class HkbusDbProvider extends ChangeNotifier {
         'nlb_stop_id': nId,
         'name_tc': getStopName(displayId, isEnglish: false),
         'name_en': getStopName(displayId, isEnglish: true),
+        'fare':         i < fares.length ? fares[i] : null,         // ✅
+        'fare_holiday': (faresHoliday != null && i < faresHoliday.length)
+                            ? faresHoliday[i] : null,
       });
     }
 
@@ -588,8 +721,5 @@ class HkbusDbProvider extends ChangeNotifier {
     return routes.map((r) => convertToDialerFormat(r)).toList();
   }
   
-  /// 強制刷新數據
-  Future<void> refresh() async {
-    await initDb(forceUpdate: true);
-  }
+
 }

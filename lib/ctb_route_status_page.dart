@@ -218,11 +218,10 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
 
         // ACCURATE: Get current position in background
         final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.best,
-          timeLimit: const Duration(seconds: 5),
-        ).timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => throw TimeoutException('Location request timed out'),
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            timeLimit: Duration(seconds: 5),
+          ),
         );
         if (mounted) {
           setState(() {
@@ -2538,7 +2537,11 @@ class _CtbRouteStatusPageState extends State<CtbRouteStatusPage> {
         return;
       }
       
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+        ),
+      );
       setState(() => _userPosition = pos);
       
       // Find nearest stop

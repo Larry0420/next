@@ -92,12 +92,13 @@ class _EtaCacheEntry {
 /// 用於傳遞路線的完整上下文，包括各公司特定的 ID
 class RouteContext {
   final String routeNumber;
-  final String? bound; // 'I' or 'O' for KMB/CTB
+  final String? bound;       // 'I' or 'O' for KMB/CTB
   final String? serviceType; // for KMB
-  final String? nlbRouteId; // NLB specific
-  final int? gmbRouteId; // GMB specific
-  final String? gmbRegion; // GMB region (HKI/KLN/NT)
-  final int? gmbRouteSeq; // GMB route sequence (1 or 2)
+  final String? nlbRouteId;  // NLB specific
+  final int? gmbRouteId;     // GMB specific
+  final String? gmbRegion;   // GMB region (HKI/KLN/NT)
+  final int? gmbRouteSeq;    // GMB route direction (1 or 2)
+  final int? gmbStopSeq;     // GMB stop sequence within the route (1-based)
 
   RouteContext({
     required this.routeNumber,
@@ -107,11 +108,36 @@ class RouteContext {
     this.gmbRouteId,
     this.gmbRegion,
     this.gmbRouteSeq = 1,
+    this.gmbStopSeq,         // nullable — only set per-stop during ETA fetch
   });
+
+  /// 建立一個只改部分欄位的副本，方便 per-stop ETA context override
+  RouteContext copyWith({
+    String? routeNumber,
+    String? bound,
+    String? serviceType,
+    String? nlbRouteId,
+    int? gmbRouteId,
+    String? gmbRegion,
+    int? gmbRouteSeq,
+    int? gmbStopSeq,
+  }) {
+    return RouteContext(
+      routeNumber: routeNumber ?? this.routeNumber,
+      bound: bound ?? this.bound,
+      serviceType: serviceType ?? this.serviceType,
+      nlbRouteId: nlbRouteId ?? this.nlbRouteId,
+      gmbRouteId: gmbRouteId ?? this.gmbRouteId,
+      gmbRegion: gmbRegion ?? this.gmbRegion,
+      gmbRouteSeq: gmbRouteSeq ?? this.gmbRouteSeq,
+      gmbStopSeq: gmbStopSeq ?? this.gmbStopSeq,
+    );
+  }
 
   @override
   String toString() {
-    return 'RouteContext(route: $routeNumber, bound: $bound, svc: $serviceType, nlb: $nlbRouteId, gmb: $gmbRouteId)';
+    return 'RouteContext(route: $routeNumber, bound: $bound, svc: $serviceType, '
+        'nlb: $nlbRouteId, gmb: $gmbRouteId/$gmbRegion seq=$gmbRouteSeq stopSeq=$gmbStopSeq)';
   }
 }
 
@@ -381,6 +407,7 @@ class UnifiedEtaService {
   ) async {
     final gmbRouteId = context.gmbRouteId;
     final gmbRouteSeq = context.gmbRouteSeq ?? 1;
+    final gmbStopSeq = context.gmbStopSeq; // per-stop seq，可能為 null
 
     if (gmbRouteId == null) {
       throw Exception('GMB routeId not provided in context');
@@ -393,71 +420,126 @@ class UnifiedEtaService {
 
     List<Map<String, dynamic>> rawEtas = [];
 
-    // 嘗試使用 routeSeq + stopSeq 獲取
-    try {
-      // 需要知道 stopSeq，從 stopId 查找
-      final result = await GMB.fetchRouteStopEtaByStopId(gmbRouteId, stopIdInt);
-      for (final item in result) {
-        if (item['enabled'] == true && item['eta'] is List) {
-          rawEtas.addAll(List<Map<String, dynamic>>.from(item['eta']));
-        }
-      }
-    } catch (e) {
-      debugPrint('GMB ETA fetch failed: $e');
-      // 嘗試備用方法：獲取站點的所有 ETA
+    // ── 策略 1：有 stopSeq → 用最精準的 route-stop/seq endpoint ──
+    if (gmbStopSeq != null && gmbStopSeq > 0) {
       try {
-        final stopEtas = await GMB.fetchStopEta(stopIdInt);
-        // 過濾當前路線
-        for (final item in stopEtas) {
-          if (item['route_id'] == gmbRouteId && item['enabled'] == true) {
-            if (item['eta'] is List) {
-              rawEtas.addAll(List<Map<String, dynamic>>.from(item['eta']));
-            }
-          }
+        final result = await GMB.fetchRouteStopEta(
+          gmbRouteId,
+          gmbRouteSeq,
+          gmbStopSeq,
+        );
+        if (result['enabled'] == true && result['eta'] is List) {
+          rawEtas = List<Map<String, dynamic>>.from(result['eta']);
         }
-      } catch (e2) {
-        debugPrint('GMB ETA fallback fetch also failed: $e2');
+        debugPrint(
+            '✅ GMB ETA via stopSeq: route=$gmbRouteId seq=$gmbRouteSeq stopSeq=$gmbStopSeq → ${rawEtas.length} ETAs');
+      } catch (e) {
+        debugPrint('⚠️ GMB ETA stopSeq fetch failed, falling back: $e');
+        rawEtas = []; // 清空確保 fallback 接手
       }
     }
 
-    // 排序並去重（按 eta_seq）
+    // ── 策略 2：無 stopSeq 或策略 1 失敗 → 用 route+stopId endpoint ──
+    if (rawEtas.isEmpty) {
+      try {
+        final results =
+            await GMB.fetchRouteStopEtaByStopId(gmbRouteId, stopIdInt);
+
+        for (final item in results) {
+          if (item['enabled'] == true && item['eta'] is List) {
+            rawEtas.addAll(
+              List<Map<String, dynamic>>.from(item['eta']),
+            );
+          }
+        }
+        debugPrint(
+            '✅ GMB ETA via stopId: route=$gmbRouteId stopId=$stopIdInt → ${rawEtas.length} ETAs');
+      } catch (e) {
+        debugPrint('⚠️ GMB ETA route+stopId fetch failed, trying stop-only: $e');
+      }
+    }
+
+    // ── 策略 3：最後 fallback → fetchStopEta 過濾當前路線 ──
+    if (rawEtas.isEmpty) {
+      try {
+        final stopEtas = await GMB.fetchStopEta(stopIdInt);
+        for (final item in stopEtas) {
+          final itemRouteId = item['route_id'] is int
+              ? item['route_id'] as int
+              : int.tryParse(item['route_id']?.toString() ?? '');
+
+          if (itemRouteId == gmbRouteId &&
+              item['enabled'] == true &&
+              item['eta'] is List) {
+            rawEtas.addAll(
+              List<Map<String, dynamic>>.from(item['eta']),
+            );
+          }
+        }
+        debugPrint(
+            '✅ GMB ETA via stopOnly: stopId=$stopIdInt filtered to route=$gmbRouteId → ${rawEtas.length} ETAs');
+      } catch (e) {
+        debugPrint('❌ GMB ETA all strategies failed: $e');
+      }
+    }
+
+    // ── Dedup by eta_seq（策略 2 可能有多個 occurrence 造成重複）──
     final seenSeqs = <int>{};
     final uniqueEtas = <Map<String, dynamic>>[];
     for (final eta in rawEtas) {
-      final seq = int.tryParse(eta['eta_seq']?.toString() ?? '0') ?? 0;
-      if (!seenSeqs.contains(seq)) {
-        seenSeqs.add(seq);
+      final seq = eta['eta_seq'] is int
+          ? eta['eta_seq'] as int
+          : int.tryParse(eta['eta_seq']?.toString() ?? '0') ?? 0;
+      if (seenSeqs.add(seq)) {
         uniqueEtas.add(eta);
       }
     }
     uniqueEtas.sort((a, b) {
-      final seqA = int.tryParse(a['eta_seq']?.toString() ?? '0') ?? 0;
-      final seqB = int.tryParse(b['eta_seq']?.toString() ?? '0') ?? 0;
+      final seqA = a['eta_seq'] is int
+          ? a['eta_seq'] as int
+          : int.tryParse(a['eta_seq']?.toString() ?? '0') ?? 0;
+      final seqB = b['eta_seq'] is int
+          ? b['eta_seq'] as int
+          : int.tryParse(b['eta_seq']?.toString() ?? '0') ?? 0;
       return seqA.compareTo(seqB);
     });
 
+    // ── 解析成 UnifiedEta ──
     return uniqueEtas.map((eta) {
-      final timestamp = eta['timestamp']?.toString();
-      final diff = int.tryParse(eta['diff']?.toString() ?? '');
-      DateTime? etaTime;
+      // diff 是 int（分鐘），GMB API spec 確認係 int 型態
+      final diff = eta['diff'] is int
+          ? eta['diff'] as int
+          : int.tryParse(eta['diff']?.toString() ?? '');
 
-      if (timestamp != null) {
-        etaTime = _parseTimestamp(timestamp);
+      final timestamp = eta['timestamp']?.toString();
+      DateTime etaTime;
+
+      if (timestamp != null && timestamp.isNotEmpty) {
+        etaTime = _parseTimestamp(timestamp) ?? DateTime.now().add(
+          Duration(minutes: diff ?? 0),
+        );
       } else if (diff != null) {
         etaTime = DateTime.now().add(Duration(minutes: diff));
+      } else {
+        return null; // 無法解析時間的 ETA 直接丟棄
       }
+
+      final seq = eta['eta_seq'] is int
+          ? eta['eta_seq'] as int
+          : int.tryParse(eta['eta_seq']?.toString() ?? '0') ?? 0;
 
       return UnifiedEta(
         company: 'gmb',
-        eta: etaTime ?? DateTime.now(),
+        eta: etaTime,
         diffMinutes: diff,
-        sequence: int.tryParse(eta['eta_seq']?.toString() ?? '0') ?? 0,
+        sequence: seq,
         remarkTc: eta['remarks_tc']?.toString(),
         remarkEn: eta['remarks_en']?.toString(),
         remarkSc: eta['remarks_sc']?.toString(),
-        isRealtime: diff != null, // 有 diff 表示實時數據
+        // diff != null 代表實時；diff == null 但有 timestamp 則為排班時間
+        isRealtime: diff != null,
       );
-    }).toList();
+    }).whereType<UnifiedEta>().toList();
   }
 
   // ===========================================================================

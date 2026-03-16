@@ -17,6 +17,7 @@ import 'package:http/http.dart' as http;
 import 'package:implicitly_animated_reorderable_list_2/implicitly_animated_reorderable_list_2.dart';
 import 'package:implicitly_animated_reorderable_list_2/transitions.dart';
 import 'package:intl/intl.dart';
+import 'package:lrt_next_train/hkbus_db_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -737,6 +738,8 @@ void main() async {
   // 測試API響應時間以優化自動刷新間隔
   await LrtApiService.testResponseTime();
   
+  
+
   // 初始化 KMB 預構建數據（在背景執行，不阻塞應用啟動）
   // 這會檢查並更新每日路線/站點數據
   Kmb.initializePrebuiltData(checkUpdate: true).catchError((e) {
@@ -765,7 +768,12 @@ class LrtApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MtrCatalogProvider()),
         ChangeNotifierProvider(create: (_) => MtrScheduleProvider()),
         ChangeNotifierProvider(create: (_) => CompanyProvider()), // Add here
+        ChangeNotifierProvider(
+          create: (_) => HkbusDbProvider()..initDb(),
+          lazy: false, // ✅ 關鍵：設為 false 代表 App 一開就馬上執行 initDb
+        ),
       ],
+      
       child: Consumer3<LanguageProvider, ThemeProvider, AccessibilityProvider>(
         builder: (context, lang, theme, accessibility, _) {
           return MediaQuery(
@@ -1966,20 +1974,20 @@ class ThemeProvider extends ChangeNotifier {
     static const String _showCacheStatusKey = 'show_cache_status';
     static const String _showMtrArrivalDetailsKey = 'show_mtr_arrival_details';
     static const String _mtrAutoLoadCachedSelectionKey = 'mtr_auto_load_cached_selection';
-  static const String _showKmbInNavKey = 'show_kmb_in_nav';
-  static const String _showSubNavKey = 'show_sub_nav';
-  static const String _useFloatingRouteTogglesKey = 'use_floating_route_toggles';
+    static const String _showKmbInNavKey = 'show_kmb_in_nav';
+    static const String _showSubNavKey = 'show_sub_nav';
+    static const String _useFloatingRouteTogglesKey = 'use_floating_route_toggles';
     static const String _showRankBadgeKey = 'use_show_rank_badge';
 
     bool _hideStationId = false;
     bool _showGridDebug = false;
     bool _showCacheStatus = false; // Default to hidden
-    bool _showMtrArrivalDetails = false; // Default to hidden for cleaner UI
+    bool _showMtrArrivalDetails = true; // Default to hidden for cleaner UI
     bool _mtrAutoLoadCachedSelection = true; // Default to true for convenience
-  bool _showKmbInNav = true; // Default to visible
-  bool _showSubNav = true; // Default to visible
-  bool _useFloatingRouteToggles = true; // Default to new floating UI
-  bool _showRankBadge = true;
+    bool _showKmbInNav = true; // Default to visible
+    bool _showSubNav = true; // Default to visible
+    bool _useFloatingRouteToggles = true; // Default to new floating UI
+    bool _showRankBadge = true;
     SharedPreferences? _prefs;
 
     bool get hideStationId => _hideStationId;
@@ -1987,11 +1995,11 @@ class ThemeProvider extends ChangeNotifier {
     bool get showCacheStatus => _showCacheStatus;
     bool get showMtrArrivalDetails => _showMtrArrivalDetails;
     bool get mtrAutoLoadCachedSelection => _mtrAutoLoadCachedSelection;
-  bool get showKmbInNav => _showKmbInNav;
-  bool get showSubNav => _showSubNav;
-  bool get useFloatingRouteToggles => _useFloatingRouteToggles;
+    bool get showKmbInNav => _showKmbInNav;
+    bool get showSubNav => _showSubNav;
+    bool get useFloatingRouteToggles => _useFloatingRouteToggles;
 
-  bool get showRankBadge => _showRankBadge;
+    bool get showRankBadge => _showRankBadge;
 
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
@@ -3675,278 +3683,242 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
     }
 
     return Scaffold(
-      // Enable extending body behind bars to achieve the floating iOS glass effect
+      // Keep true so content scrolls behind the floating bottom NavigationBar
       extendBody: true,
-      extendBodyBehindAppBar: true, 
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(76.0),
-        child: AnnotatedRegion<SystemUiOverlayStyle>(
-          value: Theme.of(context).brightness == Brightness.dark
-              ? SystemUiOverlayStyle.light
-              : SystemUiOverlayStyle.dark,
-          child: SafeArea(
-            bottom: false,
-            child: Container(
-              height: 60.0,
-              margin: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(25.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: Theme.of(context).shadowColor.withValues(alpha: 0.08),
-                    blurRadius: 25,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(25.0),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
-                          Theme.of(context).colorScheme.surface.withValues(alpha: 0.70),
-                        ],
-                      ),
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
-                        width: 1.0,
-                      ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Padding(
-                          // Nudge the icon slightly if needed (e.g., top: 2.0) to match the text baseline perfectly
-                          padding: const EdgeInsets.only(left: 16.0, right: 12.0, top: 2.0),
-                          child: SvgPicture.asset(
-                            'assets/icon/tram_icon_android.svg',
-                            width: 48,
-                            height: 48,
-                            fit: BoxFit.contain,
-                          ),
-                        ),
-                        Expanded(
-                          child: AnimatedSwitcher(
-                            duration: MotionConstants.contentTransition,
-                            switchInCurve: Easing.standard,
-                            child: AutoSizeText(
-                              lang.appTitle, 
-                              maxLines: 1,
-                              key: ValueKey(lang.isEnglish),
-                              // Removed the invalid 'alignment' parameter
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: -0.05,
-                                // These two properties strip out the uneven internal font padding
-                                // forcing the text to center perfectly alongside the 24px icon.
-                                height: 1.2, 
-                                leadingDistribution: TextLeadingDistribution.even, 
-                              ),
-                            ),
-                          ),
-                        ),
-                        Consumer<AccessibilityProvider>(
-                          builder: (context, accessibility, _) => IconButton(
-                            icon: Icon(Icons.translate, size: 24 * accessibility.iconScale),
-                            tooltip: lang.language,
-                            onPressed: lang.toggle,
-                            splashRadius: 24,
-                          ),
-                        ),
-
-                        Consumer2<AccessibilityProvider, ThemeProvider>(
-                          builder: (context, accessibility, themeProvider, _) => IconButton(
-                            icon: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 250),
-                              child: Icon(
-                                themeProvider.useSystemTheme
-                                  ? Icons.brightness_auto
-                                  : (themeProvider.isDarkMode ? Icons.brightness_2 : Icons.brightness_7),
-                                size: 24 * accessibility.iconScale,
-                                key: ValueKey(themeProvider.useSystemTheme.toString() + themeProvider.isDarkMode.toString()),
-                              ),
-                            ),
-                            tooltip: themeProvider.useSystemTheme
-                                ? (lang.isEnglish ? 'Auto Theme' : '自動主題')
-                                : (themeProvider.isDarkMode
-                                    ? (lang.isEnglish ? 'Dark Theme' : '深色主題')
-                                    : (lang.isEnglish ? 'Light Theme' : '淺色主題')),
-                            onPressed: () {
-                              if (themeProvider.useSystemTheme) {
-                                themeProvider.setUseSystemTheme(false);
-                                themeProvider.setDarkMode(false);
-                              } else {
-                                if (!themeProvider.isDarkMode) {
-                                  themeProvider.setDarkMode(true);
-                                } else {
-                                  themeProvider.setUseSystemTheme(true);
-                                }
-                              }
-                            },
-                            splashRadius: 24,
-                          ),
-                        ),
-                        Consumer<AccessibilityProvider>(
-                          builder: (context, accessibility, _) {
-                            final int mtrIndex = pages.indexWhere((p) => p is MtrSchedulePage);
-                            final bool isMtrPageVisible = (mtrIndex != -1) && (_pageIndex == mtrIndex);
-
-                            final schedInner = context.watch<ScheduleProvider>();
-                            final mtrSchedInner = context.watch<MtrScheduleProvider>();
-                            final stationProv = context.watch<StationProvider>();
-                            final connectivityInner = context.watch<ConnectivityProvider>();
-
-                            final bool active = isMtrPageVisible ? mtrSchedInner.isAutoRefreshActive : schedInner.isAutoRefreshActive;
-                            final String tooltip = isMtrPageVisible
-                                ? (mtrSchedInner.isAutoRefreshActive
-                                    ? 'MTR 自動刷新已啟用 (${mtrSchedInner.currentRefreshIntervalDescription})'
-                                    : lang.refresh)
-                                : (schedInner.isAutoRefreshActive
-                                    ? '自動刷新已啟用 (${schedInner.currentRefreshIntervalDescription})'
-                                    : lang.refresh);
-
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              if (active) {
-                                if (!_refreshAnimController.isAnimating) _refreshAnimController.repeat();
-                              } else {
-                                if (_refreshAnimController.isAnimating) _refreshAnimController.stop();
-                                _refreshAnimController.reset();
-                              }
-                            });
-
-                            return IconButton(
-                              icon: AnimatedContainer(
-                                duration: const Duration(milliseconds: 200),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: active
-                                      ? Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.14)
-                                      : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: active
-                                        ? Theme.of(context).colorScheme.outline.withValues(alpha: 0.28)
-                                        : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.20),
-                                    width: 1.5,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    RotationTransition(
-                                      turns: _rotationAnim,
-                                      child: Icon(
-                                        Icons.autorenew_rounded,
-                                        size: 15 * accessibility.iconScale,
-                                        color: Theme.of(context).colorScheme.secondary.withValues(alpha: active ? 0.9 : 0.6),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 5),
-                                    AnimatedSwitcher(
-                                      duration: const Duration(milliseconds: 220),
-                                      transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
-                                      child: Text(
-                                        active ? (lang.isEnglish ? 'AUTO' : '自動') : (lang.isEnglish ? 'OFF' : '關閉'),
-                                        key: ValueKey(active),
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: active ? 0.9 : 0.6),
-                                          letterSpacing: 0.5,
-                                        ),
-                                      ),
-                                    ),
-                                    AnimatedSwitcher(
-                                      duration: const Duration(milliseconds: 250),
-                                      transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: ScaleTransition(scale: animation, child: child)),
-                                      child: active
-                                          ? Padding(
-                                              key: const ValueKey('dot_on'),
-                                              padding: const EdgeInsets.only(left: 6.4),
-                                              child: FadeTransition(
-                                                opacity: _pulseOpacity,
-                                                child: ScaleTransition(
-                                                  scale: _pulseAnim,
-                                                  child: Container(
-                                                    width: 8,
-                                                    height: 8,
-                                                    decoration: BoxDecoration(
-                                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                                      shape: BoxShape.circle,
-                                                      boxShadow: [
-                                                        BoxShadow(
-                                                          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.18),
-                                                          blurRadius: 6,
-                                                          spreadRadius: 0.6,
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            )
-                                          : const SizedBox(key: ValueKey('dot_off'), width: 0, height: 0),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              tooltip: tooltip,
-                              onPressed: connectivityInner.isOnline
-                                  ? () async {
-                                      debugPrint('=== Manual refresh button pressed ===');
-                                      if (isMtrPageVisible) {
-                                        if (mtrSchedInner.isAutoRefreshActive) {
-                                          mtrSchedInner.stopAutoRefresh();
-                                          await mtrSchedInner.saveAutoRefreshPref(false);
-                                        } else {
-                                          final catalog = context.read<MtrCatalogProvider>();
-                                          if (catalog.hasSelection) {
-                                            mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
-                                            await mtrSchedInner.saveAutoRefreshPref(true);
-                                          } else {
-                                            await catalog.applyCachedSelection();
-                                            if (catalog.hasSelection) {
-                                              mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
-                                              await mtrSchedInner.saveAutoRefreshPref(true);
-                                            }
-                                          }
-                                        }
-                                      } else {
-                                        if (schedInner.isAutoRefreshActive) {
-                                          schedInner.stopAutoRefresh();
-                                          await schedInner.saveAutoRefreshPref(false);
-                                        } else {
-                                          schedInner.startAutoRefresh(stationProv.selectedStationId);
-                                          await schedInner.saveAutoRefreshPref(true);
-                                        }
-                                      }
-                                    }
-                                  : null,
-                              splashRadius: 24,
-                            );
-                          }
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+      // Set to false: The AppBar is now standard Material 3, so body should start below it
+      extendBodyBehindAppBar: false, 
+      
+      // Standard Material 3 AppBar
+      appBar: AppBar(
+        // Theming configuration
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        surfaceTintColor: Theme.of(context).colorScheme.surfaceTint,
+        // Optional: Set a small scrolledUnderElevation for the M3 color-shift effect on scroll
+        scrolledUnderElevation: 3.0, 
+        systemOverlayStyle: Theme.of(context).brightness == Brightness.dark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
+        
+        // Leading Icon
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 16.0), // Standard M3 leading padding
+          child: SvgPicture.asset(
+            'assets/icon/tram_icon_android.svg',
+            width: 32, // Adjusted down slightly to fit native AppBar height naturally
+            height: 32,
+            fit: BoxFit.contain,
+          ),
+        ),
+        
+        // Title
+        title: AnimatedSwitcher(
+          duration: MotionConstants.contentTransition,
+          switchInCurve: Easing.standard,
+          child: AutoSizeText(
+            lang.appTitle, 
+            maxLines: 1,
+            key: ValueKey(lang.isEnglish),
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.05,
+              height: 1.2, 
+              leadingDistribution: TextLeadingDistribution.even, 
             ),
           ),
         ),
+        centerTitle: false, // M3 standard aligns title to the left alongside leading icon
+        
+        // Actions
+        actions: [
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) => IconButton(
+              icon: Icon(Icons.translate, size: 24 * accessibility.iconScale),
+              tooltip: lang.language,
+              onPressed: lang.toggle,
+            ),
+          ),
+          Consumer2<AccessibilityProvider, ThemeProvider>(
+            builder: (context, accessibility, themeProvider, _) => IconButton(
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: Icon(
+                  themeProvider.useSystemTheme
+                    ? Icons.brightness_auto
+                    : (themeProvider.isDarkMode ? Icons.brightness_2 : Icons.brightness_7),
+                  size: 24 * accessibility.iconScale,
+                  key: ValueKey(themeProvider.useSystemTheme.toString() + themeProvider.isDarkMode.toString()),
+                ),
+              ),
+              tooltip: themeProvider.useSystemTheme
+                  ? (lang.isEnglish ? 'Auto Theme' : '自動主題')
+                  : (themeProvider.isDarkMode
+                      ? (lang.isEnglish ? 'Dark Theme' : '深色主題')
+                      : (lang.isEnglish ? 'Light Theme' : '淺色主題')),
+              onPressed: () {
+                if (themeProvider.useSystemTheme) {
+                  themeProvider.setUseSystemTheme(false);
+                  themeProvider.setDarkMode(false);
+                } else {
+                  if (!themeProvider.isDarkMode) {
+                    themeProvider.setDarkMode(true);
+                  } else {
+                    themeProvider.setUseSystemTheme(true);
+                  }
+                }
+              },
+            ),
+          ),
+          Consumer<AccessibilityProvider>(
+            builder: (context, accessibility, _) {
+              final int mtrIndex = pages.indexWhere((p) => p is MtrSchedulePage);
+              final bool isMtrPageVisible = (mtrIndex != -1) && (_pageIndex == mtrIndex);
+
+              final schedInner = context.watch<ScheduleProvider>();
+              final mtrSchedInner = context.watch<MtrScheduleProvider>();
+              final stationProv = context.watch<StationProvider>();
+              final connectivityInner = context.watch<ConnectivityProvider>();
+
+              final bool active = isMtrPageVisible ? mtrSchedInner.isAutoRefreshActive : schedInner.isAutoRefreshActive;
+              final String tooltip = isMtrPageVisible
+                  ? (mtrSchedInner.isAutoRefreshActive
+                      ? 'MTR 自動刷新已啟用 (${mtrSchedInner.currentRefreshIntervalDescription})'
+                      : lang.refresh)
+                  : (schedInner.isAutoRefreshActive
+                      ? '自動刷新已啟用 (${schedInner.currentRefreshIntervalDescription})'
+                      : lang.refresh);
+
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                if (active) {
+                  if (!_refreshAnimController.isAnimating) _refreshAnimController.repeat();
+                } else {
+                  if (_refreshAnimController.isAnimating) _refreshAnimController.stop();
+                  _refreshAnimController.reset();
+                }
+              });
+
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0), // End padding for M3 actions
+                child: IconButton(
+                  icon: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.14)
+                          : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: active
+                            ? Theme.of(context).colorScheme.outline.withValues(alpha: 0.28)
+                            : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.20),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        RotationTransition(
+                          turns: _rotationAnim,
+                          child: Icon(
+                            Icons.autorenew_rounded,
+                            size: 15 * accessibility.iconScale,
+                            color: Theme.of(context).colorScheme.secondary.withValues(alpha: active ? 0.9 : 0.6),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+                          child: Text(
+                            active ? (lang.isEnglish ? 'AUTO' : '自動') : (lang.isEnglish ? 'OFF' : '關閉'),
+                            key: ValueKey(active),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: active ? 0.9 : 0.6),
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 250),
+                          transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: ScaleTransition(scale: animation, child: child)),
+                          child: active
+                              ? Padding(
+                                  key: const ValueKey('dot_on'),
+                                  padding: const EdgeInsets.only(left: 6.4),
+                                  child: FadeTransition(
+                                    opacity: _pulseOpacity,
+                                    child: ScaleTransition(
+                                      scale: _pulseAnim,
+                                      child: Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.18),
+                                              blurRadius: 6,
+                                              spreadRadius: 0.6,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : const SizedBox(key: ValueKey('dot_off'), width: 0, height: 0),
+                        ),
+                      ],
+                    ),
+                  ),
+                  tooltip: tooltip,
+                  onPressed: connectivityInner.isOnline
+                      ? () async {
+                          debugPrint('=== Manual refresh button pressed ===');
+                          if (isMtrPageVisible) {
+                            if (mtrSchedInner.isAutoRefreshActive) {
+                              mtrSchedInner.stopAutoRefresh();
+                              await mtrSchedInner.saveAutoRefreshPref(false);
+                            } else {
+                              final catalog = context.read<MtrCatalogProvider>();
+                              if (catalog.hasSelection) {
+                                mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
+                                await mtrSchedInner.saveAutoRefreshPref(true);
+                              } else {
+                                await catalog.applyCachedSelection();
+                                if (catalog.hasSelection) {
+                                  mtrSchedInner.startAutoRefresh(catalog.selectedLine!.lineCode, catalog.selectedStation!.stationCode);
+                                  await mtrSchedInner.saveAutoRefreshPref(true);
+                                }
+                              }
+                            }
+                          } else {
+                            if (schedInner.isAutoRefreshActive) {
+                              schedInner.stopAutoRefresh();
+                              await schedInner.saveAutoRefreshPref(false);
+                            } else {
+                              schedInner.startAutoRefresh(stationProv.selectedStationId);
+                              await schedInner.saveAutoRefreshPref(true);
+                            }
+                          }
+                        }
+                      : null,
+                ),
+              );
+            }
+          ),
+        ],
       ),
+      
       body: Column(
         children: [
-          // Push down banners slightly so they don't hide immediately underneath the transparent appbar
-          SizedBox(height: MediaQuery.of(context).padding.top + 80), 
+          // REMOVED: SizedBox(height: MediaQuery.of(context).padding.top + 80) 
+          // Since extendBodyBehindAppBar is false, the body naturally starts below the AppBar.
+          
           AnimatedSwitcher(
             duration: MotionConstants.contentTransition,
             switchInCurve: Easing.standard,
@@ -3972,13 +3944,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                 transitionType: SharedAxisTransitionType.horizontal,
                 child: child,
               ),
-              // Use a MediaQuery reset or padding in your underlying pages if they get clipped
               child: pages[_pageIndex],
             ),
           ),
         ],
       ),
       // Floating iOS-style Navigation Bar
+            // Floating Material 3 Navigation Bar
       bottomNavigationBar: Builder(
         builder: (context) {
           final colorScheme = Theme.of(context).colorScheme;
@@ -3990,19 +3962,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
             child: Container(
               margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(32.0),
+                borderRadius: BorderRadius.circular(20.0),
                 boxShadow: [
+                  // Close shadow - defined and sharp for immediate elevation
                   BoxShadow(
-                    color: colorScheme.shadow.withValues(alpha: 0.08),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
+                    color: colorScheme.brightness == Brightness.dark
+                        ? colorScheme.surface.withValues(alpha: 0.35) // Lighter glow for visibility in dark mode
+                        : colorScheme.shadow.withValues(alpha: 0.20), // Stronger shadow for light mode
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                    spreadRadius: 0,
+                  ),
+                  // Distant shadow - soft and diffuse for depth
+                  BoxShadow(
+                    color: colorScheme.brightness == Brightness.dark
+                        ? colorScheme.surfaceVariant.withValues(alpha: 0.25) // Softer glow with variant tint in dark mode
+                        : colorScheme.shadow.withValues(alpha: 0.14), // Softer shadow in light mode
+                    blurRadius: 32,
+                    offset: const Offset(0, 12),
+                    spreadRadius: -4,
                   ),
                 ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(32.0),
+                borderRadius: BorderRadius.circular(20.0),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                   child: Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -4015,7 +4000,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                       ),
                       border: Border.all(
                         color: colorScheme.outlineVariant.withValues(alpha: 0.3),
-                        width: 1.0,
+                        strokeAlign: 1.0,
+                        width: 4.0,
                       ),
                     ),
                     child: Column(
@@ -4058,7 +4044,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                                                           color: selected 
                                                               ? colorScheme.secondaryContainer
                                                               : Colors.transparent,
-                                                          borderRadius: BorderRadius.circular(16),
+                                                          borderRadius: BorderRadius.circular(50),
                                                         ),
                                                         child: Row(
                                                           mainAxisAlignment: MainAxisAlignment.center,
@@ -4155,44 +4141,65 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
                           ),
                         ),
                         // Main Navigation Bar (Material 3 Standard)
-                        NavigationBar(
-                          backgroundColor: Colors.transparent, // Required to let the blur show through
-                          elevation: 0,
-                          height: 80,
-                          selectedIndex: _pageIndex,
-                          onDestinationSelected: _goTo,
-                          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                          destinations: [
-                            Consumer<AccessibilityProvider>(
-                              builder: (context, accessibility, _) => NavigationDestination(
-                                icon: Icon(Icons.directions_railway, size: 24 * accessibility.iconScale),
-                                label: lang.lrt,
-                                tooltip: lang.lrt,
-                              ),
-                            ),
-                            Consumer<AccessibilityProvider>(
-                              builder: (context, accessibility, _) => NavigationDestination(
-                                icon: Icon(Icons.train, size: 24 * accessibility.iconScale),
-                                label: lang.mtr,
-                                tooltip: lang.mtr,
-                              ),
-                            ),
-                            if (kmbShown)
+                        NavigationBarTheme(
+                          data: NavigationBarThemeData(
+                            // Keep the M3 pill indicator but ensure it looks good over the glass
+                            indicatorColor: colorScheme.secondaryContainer,
+                            labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                              final isSelected = states.contains(WidgetState.selected);
+                              return TextStyle(
+                                fontSize: 12,
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                color: isSelected ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
+                              );
+                            }),
+                          ),
+                          child: NavigationBar(
+                            backgroundColor: Colors.transparent, // Let the glass show through
+                            elevation: 0,
+                            height: 80,
+                            selectedIndex: _pageIndex,
+                            onDestinationSelected: _goTo,
+                            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                            // M3 Animation: The pill indicator glides between destinations natively
+                            animationDuration: const Duration(milliseconds: 500),
+                            destinations: [
                               Consumer<AccessibilityProvider>(
                                 builder: (context, accessibility, _) => NavigationDestination(
-                                  icon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
-                                  label: lang.bus,
-                                  tooltip: lang.bus,
+                                  // M3 compliance: Provide both outlined and filled icons for state changes
+                                  icon: Icon(Icons.directions_railway_outlined, size: 24 * accessibility.iconScale),
+                                  selectedIcon: Icon(Icons.directions_railway, size: 24 * accessibility.iconScale),
+                                  label: lang.lrt,
+                                  tooltip: lang.lrt,
                                 ),
                               ),
-                            Consumer<AccessibilityProvider>(
-                              builder: (context, accessibility, _) => NavigationDestination(
-                                icon: Icon(Icons.settings, size: 24 * accessibility.iconScale),
-                                label: lang.settings,
-                                tooltip: lang.settings,
+                              Consumer<AccessibilityProvider>(
+                                builder: (context, accessibility, _) => NavigationDestination(
+                                  icon: Icon(Icons.train_outlined, size: 24 * accessibility.iconScale),
+                                  selectedIcon: Icon(Icons.train, size: 24 * accessibility.iconScale),
+                                  label: lang.mtr,
+                                  tooltip: lang.mtr,
+                                ),
                               ),
-                            ),
-                          ],
+                              if (kmbShown)
+                                Consumer<AccessibilityProvider>(
+                                  builder: (context, accessibility, _) => NavigationDestination(
+                                    icon: Icon(Icons.directions_bus_outlined, size: 24 * accessibility.iconScale),
+                                    selectedIcon: Icon(Icons.directions_bus, size: 24 * accessibility.iconScale),
+                                    label: lang.bus,
+                                    tooltip: lang.bus,
+                                  ),
+                                ),
+                              Consumer<AccessibilityProvider>(
+                                builder: (context, accessibility, _) => NavigationDestination(
+                                  icon: Icon(Icons.settings_outlined, size: 24 * accessibility.iconScale),
+                                  selectedIcon: Icon(Icons.settings, size: 24 * accessibility.iconScale),
+                                  label: lang.settings,
+                                  tooltip: lang.settings,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -4203,7 +4210,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Single
           );
         },
       ),
+
     );
+  
+  
   }
 
 

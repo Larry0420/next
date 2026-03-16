@@ -1,8 +1,10 @@
 import 'dart:async'; // For TimeoutException
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // ✅ 必須加入這行才能使用 HapticFeedback
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
+import 'package:lrt_next_train/hkbus_db_provider.dart';
 import 'package:lrt_next_train/kmb/company_name.dart';
 // Local project imports
 import 'package:lrt_next_train/optionalMarquee.dart';
@@ -10,10 +12,13 @@ import 'package:lrt_next_train/toTitleCase.dart';
 import 'package:provider/provider.dart';
 
 import '../ctb_route_status_page.dart';
+import '../gmb_route_status_page.dart';
 import '../kmb_route_status_page.dart';
 import '../main.dart' show LanguageProvider, EnhancedPageRoute;
 import '../nlb_route_status_page.dart';
+import '../route_status_page.dart';
 import 'api/citybus.dart';
+import 'api/gmb.dart';
 import 'api/kmb.dart';
 import 'api/nlb.dart';
 
@@ -50,6 +55,83 @@ class _KmbDialerState extends State<KmbDialer> {
     if (!mounted) return;
     setState(() { loading = true; error = null; });
     
+    try {
+      // 嘗試使用統一數據庫
+      if (_useUnifiedDb) {
+        final success = await _fetchRoutesFromUnifiedDb();
+        if (success) {
+          debugPrint('✅ 使用統一數據庫加載路線成功');
+          return;
+        }
+        debugPrint('⚠️ 統一數據庫不可用，回退到官方 API');
+      }
+      
+      // 回退到官方 API
+      await _fetchRoutesFromOfficialApi();
+      
+    } catch (e) {
+      if (mounted) setState(() => error = 'Error loading routes');
+      debugPrint('Error in _fetchRoutes: $e');
+    } finally {
+      if (mounted) setState(() { loading = false; });
+    }
+  }
+  
+  // 數據源選擇：true = 使用統一數據庫 (HkbusDbProvider)，false = 使用官方 API
+  bool _useUnifiedDb = false;
+  
+  /// 從 HkbusDbProvider 統一數據庫獲取路線數據
+  Future<bool> _fetchRoutesFromUnifiedDb() async {
+    try {
+      final hkbusDb = context.read<HkbusDbProvider>();
+      
+      // 等待數據庫就緒
+      if (!hkbusDb.isReady) {
+        debugPrint('⏳ 等待統一數據庫就緒...');
+        // 等待最多 10 秒
+        for (int i = 0; i < 20; i++) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (hkbusDb.isReady) break;
+        }
+        if (!hkbusDb.isReady) {
+          debugPrint('❌ 統一數據庫未就緒');
+          return false;
+        }
+      }
+      
+      // 獲取 Dialer 格式的路線數據
+      final dialerRoutes = hkbusDb.getAllRoutesForDialer();
+      
+      if (dialerRoutes.isEmpty) {
+        debugPrint('⚠️ 統一數據庫為空');
+        return false;
+      }
+      
+      // 提取所有路線號碼
+      final Set<String> routeNumbers = dialerRoutes
+          .map((r) => r['route'].toString())
+          .toSet();
+      final sortedRoutes = routeNumbers.toList()..sort(_compareRouteNumbers);
+      
+      if (mounted) {
+        setState(() {
+          routes = sortedRoutes;
+          allRoutesData = dialerRoutes;
+        });
+      }
+      
+      return true;
+      
+    } catch (e) {
+      debugPrint('❌ 從統一數據庫加載失敗: $e');
+      return false;
+    } finally {
+      if (mounted) setState(() { loading = false; });
+    }
+  }
+  
+  /// 從官方 API 獲取路線數據（原有邏輯）
+  Future<void> _fetchRoutesFromOfficialApi() async {
     try {
       final results = await Future.wait([
         // 1. Fetch Simple Route Lists (Strings)
@@ -106,23 +188,40 @@ class _KmbDialerState extends State<KmbDialer> {
         }
       }
 
-      // 3. Process NLB
-      if (indices[2].isNotEmpty) {
-        final nlbMap = indices[2];
-        // Structure: { "37": { "routeId_123": { ... } } }
-        nlbMap.forEach((routeNo, variants) {
-          final variantsMap = variants as Map;
-          variantsMap.forEach((routeId, data) {
-             final routeData = Map<String, dynamic>.from(data as Map);
-             routeData['route'] = routeNo;
-             routeData['routeId'] = routeId;
-             routeData['companyid'] = 'nlb';
-             routeData['companyname'] = 'NLB';
-             allDetailedRoutes.add(routeData);
-          });
-        });
-      }
+              // 3. Process NLB
+            if (indices[2].isNotEmpty) {
+              final nlbMap = indices[2];
+              // Structure: { "37": { "routeId_123": { ... } } }
+              nlbMap.forEach((routeNo, variants) {
+                final variantsMap = variants as Map;
+                variantsMap.forEach((routeId, data) {
+                   final routeData = Map<String, dynamic>.from(data as Map);
+                   routeData['route'] = routeNo;
+                   routeData['routeId'] = routeId;
+                   routeData['companyid'] = 'nlb';
+                   routeData['companyname'] = 'NLB';
+                   allDetailedRoutes.add(routeData);
+                });
+              });
+            }
       
+            // 4. Process GMB from prebuilt data
+            try {
+              final gmbRouteMap = await _loadGmbRoutesFromPrebuilt();
+              for (final routeEntry in gmbRouteMap.entries) {
+                final routeNo = routeEntry.key;
+                final variants = routeEntry.value['variants'] as List<dynamic>? ?? [];
+                for (final variant in variants) {
+                  final routeData = Map<String, dynamic>.from(variant as Map);
+                  routeData['route'] = routeNo;
+                  routeData['companyid'] = 'gmb';
+                  routeData['companyname'] = 'GMB';
+                  allDetailedRoutes.add(routeData);
+                }
+              }
+            } catch (e) {
+              debugPrint('⚠️ Failed to load GMB routes: $e');
+            }      
       allDetailedRoutes.sort((a, b) {
         final cmp = _compareRouteNumbers((a['route'] ?? '').toString(), (b['route'] ?? '').toString());
         if (cmp != 0) return cmp;
@@ -170,6 +269,18 @@ class _KmbDialerState extends State<KmbDialer> {
     // Matches existing logic in your original file
   }
 
+  /// Load GMB routes from prebuilt assets
+  Future<Map<String, dynamic>> _loadGmbRoutesFromPrebuilt() async {
+    try {
+      final jsonString = await rootBundle.loadString('assets/prebuilt/gmb_route_stops.json');
+      final decoded = json.decode(jsonString) as Map<String, dynamic>;
+      return decoded;
+    } catch (e) {
+      debugPrint('Error loading GMB prebuilt data: $e');
+      return {};
+    }
+  }
+
   Future<void> _performSearch(String query) async {
     if (query.trim().isEmpty) {
       setState(() => searchResults = []);
@@ -186,10 +297,11 @@ class _KmbDialerState extends State<KmbDialer> {
       return matchesQuery && matchesCompany;
     }).toList();
 
-    // Deduplicate logic
+    // Deduplicate logic（統一 DB 用 companyid，API 用 company_id）
     final Map<String, Map<String, dynamic>> unique = {};
     for (final item in matches) {
-      final key = '${item['route']}_${item['bound']}_${item['service_type']}_${item['company_id']}';
+      final companyKey = item['company_id'] ?? item['companyid'];
+      final key = '${item['route']}_${item['bound']}_${item['service_type']}_$companyKey';
       unique[key] = item;
     }
     
@@ -229,7 +341,26 @@ class _KmbDialerState extends State<KmbDialer> {
     final lang = context.watch<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     final theme = Theme.of(context);
+    // 監聽 DbProvider 的狀態
+    final hkbusDb = context.watch<HkbusDbProvider>();
     
+    // 如果 JSON 還沒載入完，顯示一個全螢幕的 Loading
+    if (!hkbusDb.isReady) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Routes')),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('正在更新巴士資料庫...'),
+            ],
+          ),
+        ),
+      );
+    }
+
     // Apply filter to the main list if no search query
     List<Map<String, dynamic>> displayList;
     if (input.isEmpty) {
@@ -262,7 +393,7 @@ class _KmbDialerState extends State<KmbDialer> {
                         Text(
                           input.isEmpty ? (isEnglish? 'Typing_': '輸入路線_') : input, 
                           style: TextStyle(
-                            fontSize: 32, 
+                            fontSize: 26, 
                             fontWeight: FontWeight.bold,
                             color: input.isEmpty ? theme.colorScheme.outline.withValues(alpha: 0.5) : theme.colorScheme.onSurface
                           )
@@ -270,17 +401,93 @@ class _KmbDialerState extends State<KmbDialer> {
                       ],
                     ),
                   ),
-                  // Company Filter Toggles
+                  // Data Source Toggle & Company Filter Toggles
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // 數據源切換按鈕
+                      Tooltip(
+                        message: _useUnifiedDb
+                            ? (isEnglish ? 'Using Unified DB (tap to use API)' : '使用統一數據庫（點擊切換到API）')
+                            : (isEnglish ? 'Using Official API (tap to use Unified DB)' : '使用官方API（點擊切換到統一數據庫）'),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              setState(() {
+                                _useUnifiedDb = !_useUnifiedDb;
+                              });
+                              // 重新加載路線
+                              _fetchRoutes();
+                              // 顯示提示
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    _useUnifiedDb
+                                        ? (isEnglish ? 'Switched to Unified Database' : '已切換到統一數據庫')
+                                        : (isEnglish ? 'Switched to Official API' : '已切換到官方API'),
+                                  ),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(20),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _useUnifiedDb
+                                    ? Colors.blue.shade100
+                                    : Colors.grey.shade200,
+                                border: Border.all(
+                                  color: _useUnifiedDb
+                                      ? Colors.blue.shade700
+                                      : Colors.grey.shade400,
+                                  width: 1.5,
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _useUnifiedDb ? Icons.storage_rounded : Icons.cloud_sync_rounded,
+                                    size: 14,
+                                    color: _useUnifiedDb
+                                        ? Colors.blue.shade900
+                                        : Colors.grey.shade700,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _useUnifiedDb
+                                        ? (isEnglish ? 'Unified' : '統一')
+                                        : (isEnglish ? 'API' : 'API'),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                      color: _useUnifiedDb
+                                          ? Colors.blue.shade900
+                                          : Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      
+                      const SizedBox(width: 8),
                       _buildFilterButton(isEnglish ? 'KMB' : '九巴', 'kmb', Colors.red),
                       const SizedBox(width: 8),
                       _buildFilterButton(isEnglish ? 'CityBus' : '城巴', 'ctb', Colors.amber),
                       const SizedBox(width: 8),
                       _buildFilterButton(isEnglish ? 'NLB' : '嶼巴', 'nlb', Colors.lightGreen),
+                      const SizedBox(width: 8),
+                      _buildFilterButton(isEnglish ? 'GMB' : '專線小巴', 'gmb', Colors.green),
                     ],
                   ),
+                
                 ],
               ),
             ),
@@ -621,12 +828,8 @@ class _KmbDialerState extends State<KmbDialer> {
       final companyId =
           (v['companyid'] ?? v['company_id'] ?? 'kmb').toString().toLowerCase();
 
-      // ⑤ switch expression (Dart 3+) — cleaner than if-else chain
-      final companyName = switch (companyId) {
-        'ctb' => isEnglish ? 'CTB' : '城巴',
-        'nlb' => isEnglish ? 'NLB' : '嶼巴',
-        _     => isEnglish ? 'KMB' : '九巴',
-      };
+      // ⑤ 使用 CompanyProvider 獲取公司名稱和顏色
+      final companyName = companyProv.getName(companyId, isEnglish);
 
       final orig = isEnglish
           ? (v['orig_en'] ?? v['orig_tc'] ?? '').toString().toTitleCase()
@@ -650,26 +853,49 @@ class _KmbDialerState extends State<KmbDialer> {
             : (isEnglish ? 'Outbound' : '出站');
       }
 
-      final badgeBgColor     = companyProv.getBadgeBgColor(companyId, context);
-      final badgeBorderColor = companyProv.getBadgeBorderColor(companyId, context);
-      final badgeTextColor   = companyProv.getBadgeTextColor(companyId, context);
+      // 獲取所有公司列表（支持聯營路線顯示多個標籤）
+      final companies = v['companies'] as List<dynamic>?;
+      final isJointOperation = v['isJointOperation'] == true || (companies != null && companies.length > 1);
+      final companiesToShow = isJointOperation && companies != null 
+          ? companies.cast<String>() 
+          : [companyId];
 
       tiles.add(
         ListTile(
           visualDensity: VisualDensity.compact,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
 
-          // ── Title row: route number + badges in same row ──────────────
+          // ── Title row: route number + company badges in same row ──────────────
           title: Row(
             children: [
               _buildHighlightedText(route, input, theme),
               const SizedBox(width: 8),
-              buildBadge(
-                label: companyName,
-                bg: badgeBgColor,
-                border: badgeBorderColor,
-                textColor: badgeTextColor,
-              ),
+              
+              // 顯示所有公司標籤（如果是聯營路線）
+              if (isJointOperation && companiesToShow.length > 1) ...[
+                ...companiesToShow.map((co) {
+                  final coLower = co.toString().toLowerCase();
+                  final coName = companyProv.getName(coLower, isEnglish);
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: buildBadge(
+                      label: coName,
+                      bg: companyProv.getBadgeBgColor(coLower, context),
+                      border: companyProv.getBadgeBorderColor(coLower, context),
+                      textColor: companyProv.getBadgeTextColor(coLower, context),
+                    ),
+                  );
+                }),
+              ] else ...[
+                // 單一公司標籤
+                buildBadge(
+                  label: companyName,
+                  bg: companyProv.getBadgeBgColor(companyId, context),
+                  border: companyProv.getBadgeBorderColor(companyId, context),
+                  textColor: companyProv.getBadgeTextColor(companyId, context),
+                ),
+              ],
+              
               if (hasService) ...[
                 const SizedBox(width: 6),
                 buildBadge(
@@ -720,10 +946,10 @@ class _KmbDialerState extends State<KmbDialer> {
             color: theme.colorScheme.outline,
           ),
 
-          onTap: () {
+          onTap: () async {
             final r = route.toUpperCase();
 
-            // ⑦ Normalise bound — collapsed into one pass
+            // Normalise bound
             String? bound = v['bound']?.toString();
             if (bound == null || bound.isEmpty) {
               final dir = v['direction']?.toString().trim().toLowerCase();
@@ -735,50 +961,109 @@ class _KmbDialerState extends State<KmbDialer> {
               bound = up.startsWith('I') ? 'I' : up.startsWith('O') ? 'O' : bound;
             }
 
-            debugPrint(
-              '🚌 route=$r bound=$bound serviceType=$serviceType company=$companyId',
-            );
+            // 檢查是否為聯營路線
+            final companies = v['companies'] as List<dynamic>?;
+            final isJointOperation = v['isJointOperation'] == true || (companies != null && companies.length > 1);
+            
+            debugPrint('🚌 route=$r bound=$bound serviceType=$serviceType company=$companyId isJoint=$isJointOperation');
 
-            if (companyId == 'ctb') {
+            // 如果是聯營路線，顯示選擇對話框
+            // ✅ 確保 companyId 永遠係小寫
+            String selectedCompany = (companyId ?? 'kmb').toLowerCase();
+
+
+            if (isJointOperation && companies != null && companies.length > 1) {
+              final result = await showDialog<String>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text(isEnglish ? 'Select Operator' : '選擇營運商'),
+                  content: Text(isEnglish 
+                      ? 'This is a joint operation route. Please select an operator to view:'
+                      : '這是聯營路線，請選擇要查看的營運商：'),
+                  actions: companies.map((co) {
+                    return TextButton(
+                      onPressed: () => Navigator.pop(context, co.toLowerCase()),
+                      child: Text(companyProv.getName(co, isEnglish)),
+                    );
+                  }).toList(),
+                ),
+              );
+              if (result == null) return; // 用戶取消
+              selectedCompany = result;
+            }
+            
+            // 導航到路線詳情頁
+            // 如果使用統一數據庫，導航到 UnifiedRouteStatusPage
+            // 否則根據公司導航到原有頁面
+            if (_useUnifiedDb) {
               Navigator.of(context).push(EnhancedPageRoute(
-                builder: (_) => CtbRouteStatusPage(
+                builder: (_) => UnifiedRouteStatusPage(
                   route: r,
+                  companies: companies?.cast<String>() ?? [selectedCompany],
+                  initialCompany: selectedCompany,
                   bound: bound,
                   serviceType: serviceType,
-                  companyId: companyId,
-                ),
-              ));
-            } else if (companyId == 'nlb') {
-              Navigator.of(context).push(EnhancedPageRoute(
-                builder: (_) => NlbRouteStatusPage(
-                  routeNo: r,
-                  initialRouteId: v['routeId'].toString(),
+                  initialRouteId: v['routeId']?.toString(),
+                  useUnifiedDb: true,
                 ),
               ));
             } else {
-              Navigator.of(context).push(EnhancedPageRoute(
-                builder: (_) => KmbRouteStatusPage(
-                  route: r,
-                  bound: bound,
-                  serviceType: serviceType,
-                  companyId: companyId,
-                ),
-              ));
+              // 使用原有頁面
+              if (selectedCompany == 'ctb') {
+                Navigator.of(context).push(EnhancedPageRoute(
+                  builder: (_) => CtbRouteStatusPage(
+                    route: r,
+                    bound: bound,
+                    serviceType: serviceType,
+                    companyId: selectedCompany,
+                  ),
+                ));
+              } else if (selectedCompany == 'nlb') {
+                Navigator.of(context).push(EnhancedPageRoute(
+                  builder: (_) => NlbRouteStatusPage(
+                    routeNo: r,
+                    initialRouteId: v['routeId']?.toString(),
+                  ),
+                ));
+              } else if (selectedCompany == 'gmb') {
+                final routeId = v['routeId'] is int ? v['routeId'] : int.tryParse(v['routeId']?.toString() ?? '');
+                final routeSeq = v['routeSeq'] is int ? v['routeSeq'] : (v['routeSeq'] as int? ?? 1);
+                final region = v['region']?.toString();
+                Navigator.of(context).push(EnhancedPageRoute(
+                  builder: (_) => GmbRouteStatusPage(
+                    routeNo: r,
+                    initialRouteId: routeId,
+                    initialRouteSeq: routeSeq,
+                    region: region,
+                  ),
+                ));
+              } else {
+                Navigator.of(context).push(EnhancedPageRoute(
+                  builder: (_) => KmbRouteStatusPage(
+                    route: r,
+                    bound: bound,
+                    serviceType: serviceType,
+                    companyId: selectedCompany,
+                  ),
+                ));
+              }
             }
+            
             widget.onRouteSelected?.call(r);
           },
         ),
       );
-
-      if (flattened.last != v) {
-        tiles.add(const Divider(
-          height: 1, indent: 16, endIndent: 16, thickness: 0.5,
-        ));
-      }
+    
+    // Add divider between variants
+    if (flattened.last != v) {
+      tiles.add(const Divider(
+        height: 1, indent: 16, endIndent: 16, thickness: 0.5,
+      ));
     }
-
-    return Column(children: tiles);
   }
+
+  return Column(children: tiles);
+}
 
   // ── Helper: one origin/destination row with leading icon ────────────────────
   Widget _endpointRow({
