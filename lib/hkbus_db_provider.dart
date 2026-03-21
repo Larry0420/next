@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -194,7 +195,7 @@ class HkbusDbProvider extends ChangeNotifier {
   /// 初始化：先讀 Cache，若無或過期則下載
   Future<void> initDb({bool forceUpdate = false}) async {
     try {
-      String? jsonString = await _loadWithCache(forceUpdate);
+      final String? jsonString = await _loadWithCache(forceUpdate);
 
       if (jsonString == null || jsonString.isEmpty) {
         throw Exception('Failed to load hkbus DB: empty content');
@@ -220,8 +221,20 @@ class HkbusDbProvider extends ChangeNotifier {
     const key   = 'hkbus_db_json';
     const keyAt = 'hkbus_db_cached_at';
 
-    // Web 上跳過 localStorage cache，直接 fetch
-    // 因為 JSON 可能超過 localStorage 5MB 限制
+    // Web: 嘗試從預構建的 asset 加載（優先使用，速度快且支持離線）
+    if (kIsWeb) {
+      try {
+        final jsonString = await rootBundle.loadString('assets/prebuilt/routeFareList.min.json');
+        if (jsonString.isNotEmpty) {
+          debugPrint('📦 hkbus DB from prebuilt asset');
+          return jsonString;
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to load prebuilt asset: $e, falling back to network');
+      }
+    }
+
+    // Native: 使用 SharedPreferences cache（12小時 TTL）
     if (!kIsWeb) {
       if (!forceUpdate) {
         final cachedAt = prefs.getString(keyAt);

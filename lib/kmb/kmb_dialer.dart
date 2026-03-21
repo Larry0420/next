@@ -83,7 +83,7 @@ class _KmbDialerState extends State<KmbDialer> {
   }
   
   // 數據源選擇：true = 使用統一數據庫 (HkbusDbProvider)，false = 使用官方 API
-  bool _useUnifiedDb = false;
+  bool _useUnifiedDb = true;
   
   /// 從 HkbusDbProvider 統一數據庫獲取路線數據
   Future<bool> _fetchRoutesFromUnifiedDb() async {
@@ -389,111 +389,38 @@ class _KmbDialerState extends State<KmbDialer> {
             // --- Input & Filter Header ---
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Row(
+              child: Column( // 1. Changed Row to Column
+                crossAxisAlignment: CrossAxisAlignment.stretch, // Ensures children stretch to full width
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(isEnglish ? 'Route' : '路線', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w600)),
-                        Text(
-                          input.isEmpty ? (isEnglish? 'Typing_': '輸入路線_') : input, 
-                          style: TextStyle(
-                            fontSize: 26, 
-                            fontWeight: FontWeight.bold,
-                            color: input.isEmpty ? theme.colorScheme.outline.withValues(alpha: 0.5) : theme.colorScheme.onSurface
-                          )
-                        ),
-                      ],
-                    ),
+                  // Input Display
+                  _InputDisplay( // 2. Removed the Expanded widget
+                    input: input,
+                    isEnglish: isEnglish,
+                    theme: theme,
                   ),
-                  // Data Source Toggle & Company Filter Toggles
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // 數據源切換按鈕
-                      Tooltip(
-                        message: _useUnifiedDb
-                            ? (isEnglish ? 'Using Unified DB (tap to use API)' : '使用統一數據庫（點擊切換到API）')
-                            : (isEnglish ? 'Using Official API (tap to use Unified DB)' : '使用官方API（點擊切換到統一數據庫）'),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              setState(() {
-                                _useUnifiedDb = !_useUnifiedDb;
-                              });
-                              // 重新加載路線
-                              _fetchRoutes();
-                              // 顯示提示
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    _useUnifiedDb
-                                        ? (isEnglish ? 'Switched to Unified Database' : '已切換到統一數據庫')
-                                        : (isEnglish ? 'Switched to Official API' : '已切換到官方API'),
-                                  ),
-                                  duration: const Duration(seconds: 2),
-                                ),
-                              );
-                            },
-                            borderRadius: BorderRadius.circular(20),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: _useUnifiedDb
-                                    ? Colors.blue.shade100
-                                    : Colors.grey.shade200,
-                                border: Border.all(
-                                  color: _useUnifiedDb
-                                      ? Colors.blue.shade700
-                                      : Colors.grey.shade400,
-                                  width: 1.5,
-                                ),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _useUnifiedDb ? Icons.storage_rounded : Icons.cloud_sync_rounded,
-                                    size: 14,
-                                    color: _useUnifiedDb
-                                        ? Colors.blue.shade900
-                                        : Colors.grey.shade700,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _useUnifiedDb
-                                        ? (isEnglish ? 'Unified' : '統一')
-                                        : (isEnglish ? 'API' : 'API'),
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 11,
-                                      color: _useUnifiedDb
-                                          ? Colors.blue.shade900
-                                          : Colors.grey.shade700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                  const SizedBox(height: 12), // 3. Changed width to height for vertical spacing
+                  
+                  // Filters Row
+                  _FiltersRow(
+                    useUnifiedDb: _useUnifiedDb,
+                    onToggleDataSource: () {
+                      setState(() => _useUnifiedDb = !_useUnifiedDb);
+                      _fetchRoutes();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            _useUnifiedDb
+                                ? (isEnglish ? 'Switched to Unified Database' : '已切換到統一數據庫')
+                                : (isEnglish ? 'Switched to Official API' : '已切換到官方API'),
                           ),
+                          duration: const Duration(seconds: 2),
                         ),
-                      ),
-                      
-                      const SizedBox(width: 8),
-                      _buildFilterButton(isEnglish ? 'KMB' : '九巴', 'kmb', Colors.red),
-                      const SizedBox(width: 8),
-                      _buildFilterButton(isEnglish ? 'CityBus' : '城巴', 'ctb', Colors.amber),
-                      const SizedBox(width: 8),
-                      _buildFilterButton(isEnglish ? 'NLB' : '嶼巴', 'nlb', Colors.lightGreen),
-                      const SizedBox(width: 8),
-                      _buildFilterButton(isEnglish ? 'GMB' : '專線小巴', 'gmb', Colors.green),
-                    ],
+                      );
+                    },
+                    companyFilter: _companyFilter,
+                    onToggleFilter: _toggleCompanyFilter,
+                    isEnglish: isEnglish,
                   ),
-                
                 ],
               ),
             ),
@@ -603,6 +530,123 @@ class _KmbDialerState extends State<KmbDialer> {
           ),
         ),
       ),
+    );
+  }
+
+  // Input Display Widget
+  Widget _InputDisplay({
+    required String input,
+    required bool isEnglish,
+    required ThemeData theme,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          isEnglish ? 'Route' : '路線',
+          style: TextStyle(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        Text(
+          input.isEmpty
+              ? (isEnglish ? 'Typing_' : '輸入路線_')
+              : input,
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.bold,
+            color: input.isEmpty
+                ? theme.colorScheme.outline.withValues(alpha: 0.5)
+                : theme.colorScheme.onSurface,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Filters Row Widget
+  Widget _FiltersRow({
+    required bool useUnifiedDb,
+    required VoidCallback onToggleDataSource,
+    required String? companyFilter,
+    required Function(String?) onToggleFilter,
+    required bool isEnglish,
+  }) {
+    final theme = Theme.of(context);
+    final filters = [
+      (isEnglish ? 'KMB' : '九巴', 'kmb', Colors.red),
+      (isEnglish ? 'CityBus' : '城巴', 'ctb', Colors.amber),
+      (isEnglish ? 'NLB' : '嶼巴', 'nlb', Colors.lightGreen),
+      (isEnglish ? 'GMB' : '專線小巴', 'gmb', Colors.green),
+    ];
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Data Source Toggle Button
+        Tooltip(
+          message: useUnifiedDb
+              ? (isEnglish ? 'Using Unified DB (tap to use API)' : '使用統一數據庫（點擊切換到API）')
+              : (isEnglish ? 'Using Official API (tap to use Unified DB)' : '使用官方API（點擊切換到統一數據庫）'),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onToggleDataSource,
+              borderRadius: BorderRadius.circular(20),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: useUnifiedDb
+                      ? Colors.blue.shade100
+                      : Colors.grey.shade200,
+                  border: Border.all(
+                    color: useUnifiedDb
+                        ? Colors.blue.shade700
+                        : Colors.grey.shade400,
+                    width: 1.5,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      useUnifiedDb
+                          ? Icons.storage_rounded
+                          : Icons.cloud_sync_rounded,
+                      size: 14,
+                      color: useUnifiedDb
+                          ? Colors.blue.shade900
+                          : Colors.grey.shade700,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      useUnifiedDb
+                          ? (isEnglish ? 'Unified' : '統一')
+                          : (isEnglish ? 'API' : 'API'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        color: useUnifiedDb
+                            ? Colors.blue.shade900
+                            : Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Company Filter Buttons
+        ...filters.expand((filter) => [
+          const SizedBox(width: 8),
+          _buildFilterButton(filter.$1, filter.$2, filter.$3),
+        ]),
+      ],
     );
   }
 

@@ -2317,6 +2317,7 @@ class LanguageProvider extends ChangeNotifier {
   String get type => _isEnglish ? 'Special Service' : '特別班次';
   String get bus => _isEnglish ? 'Bus' : '巴士'; // KMB is a brand name, same in both languages
   String get to => _isEnglish ? 'To' : '往';
+  String get endEta => _isEnglish ? 'No Services' : '沒有服務班次';
 
   // New additions for consistency
   String get showListOnly => isEnglish ? 'Show list only' : '僅顯示列表';

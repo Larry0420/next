@@ -54,6 +54,7 @@ class UnifiedRouteStatusPage extends StatefulWidget {
 
 class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   static const String _mapViewPreferenceKey = 'unified_route_status_map_view_enabled';
+  static const String _NearByPreferenceKey = 'unified_route_status_nearby_enabled';
   final DraggableScrollableController _draggableController = DraggableScrollableController();
   final ScrollController _scrollController = ScrollController();
   final MapController _mapController = MapController();
@@ -62,6 +63,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   bool loading = false;
   String? error;
   Map<String, dynamic>? data;
+  bool get isEnglish => context.read<LanguageProvider>().isEnglish;
+  LanguageProvider get lang => context.read<LanguageProvider>();
   
   // 公司相關
   late String _selectedCompany;
@@ -69,6 +72,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
   // 地圖和位置
   bool _showMapView = false;
+  bool _toggleNearBy = false;
   Position? _userPosition;
   bool _locationLoading = false;
   String? _highlightedStopId;
@@ -78,7 +82,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   // Nearby logic（hkbus style）
   String? _nearestStopId;       // 唯一最近站點 ID（排序取第一）
   double? _nearestDistanceM;    // 最近站點距離（metres），用於 badge 顯示
-  static const double _nearbyBadgeRange = 200.0; // 200m 內才顯示 Nearby badge
+  static const double _nearbyBadgeRange = 150.0; // 200m 內才顯示 Nearby badge
 
   // ETA 相關（僅在展開時載入）
   final Map<String, Map<String, dynamic>> _expandedStopsById = {};
@@ -105,7 +109,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     super.initState();
     // 確保是單一公司代碼（避免 "kmb+ctb" 這樣的組合值）
     _selectedCompany = (widget.initialCompany ?? widget.companies.first).toLowerCase().split('+').first;  // ✅ fixed: ensure lowercase
-    _loadMapViewPreference();
+    _loadPreferences(); // Combined preference loader
     _initializeLocation();
     _initializeRouteContext();
     _fetchData();
@@ -168,13 +172,20 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     super.dispose();
   }
 
-  Future<void> _loadMapViewPreference() async {
+  Future<void> _loadPreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (mounted) {
         setState(() {
           _showMapView = prefs.getBool(_mapViewPreferenceKey) ?? false;
+          // Load the Nearby toggle state
+          _toggleNearBy = prefs.getBool(_NearByPreferenceKey) ?? false;
         });
+        
+        // If it was ON, trigger the search once
+        if (_toggleNearBy) {
+          _getUserLocationAndScrollToNearest(true);
+        }
       }
     } catch (_) {}
   }
@@ -209,7 +220,21 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   /// 獲取用戶位置，更新最近站點，並滾動到該站點
   /// 參考 hkbus/hk-independent-bus-eta RouteEtaPage.tsx 邏輯：
   /// 排序找距離最小者，而非固定閾值，Nearby badge 另外設 200m 範圍
-  Future<void> _getUserLocationAndScrollToNearest() async {
+  Future<void> _getUserLocationAndScrollToNearest(bool jump) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_NearByPreferenceKey, jump);
+
+    // 1. Handle the "Toggle Off" state immediately
+    if (!jump) {
+      setState(() {
+        _nearestStopId = null;     // Clear the nearby indicator
+        _nearestDistanceM = null;
+        _highlightedStopId = null; // Remove highlighting
+        _locationLoading = false;
+      });
+      return; // Stop here; don't fetch GPS or scroll
+    }
+
     if (!mounted) return;
     setState(() => _locationLoading = true);
 
@@ -220,11 +245,12 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           timeLimit: Duration(seconds: 5),
         ),
       );
+      
       if (!mounted) return;
       setState(() => _userPosition = pos);
+      
       if (_allStops.isEmpty) return;
 
-      // ✅ hkbus 風格：map → sort → 取第一，無固定距離閾值
       final ranked = _allStops
           .where((s) =>
               s is Map &&
@@ -233,8 +259,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
               s['stop'] != null)
           .map((s) {
             final lat = double.tryParse(s['lat'].toString());
-            final lng = double.tryParse(
-                (s['long'] ?? s['lng']).toString());
+            final lng = double.tryParse((s['long'] ?? s['lng']).toString());
             if (lat == null || lng == null) return null;
             final dist = Geolocator.distanceBetween(
               pos.latitude, pos.longitude, lat, lng,
@@ -249,7 +274,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
       final nearest = ranked.first;
 
-      // 更新最近站點狀態（_buildStopCard 用 _nearestStopId 判斷 isNearby）
       setState(() {
         _nearestStopId = nearest.stopId;
         _nearestDistanceM = nearest.distance;
@@ -261,7 +285,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         if (mounted) setState(() => _highlightedStopId = null);
       });
 
-      // ✅ 優先 ensureVisible（widget 已 build）；若 key 不存在則 index fallback
+      // Only scroll if the toggle is still active
       await _scrollToStop(nearest.stopId);
 
     } catch (e) {
@@ -1172,11 +1196,19 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Icon(_userPosition != null ? Icons.near_me : Icons.near_me_disabled),
-            tooltip: isEnglish ? 'Scroll to nearest stop' : '滾動至最近站點',
-            onPressed: _locationLoading || _allStops.isEmpty
-                ? null
-                : () => _getUserLocationAndScrollToNearest(),
+                : Icon(
+                    _toggleNearBy ? Icons.near_me : Icons.near_me_outlined,
+                    color: _toggleNearBy ? Colors.blue : null,
+                  ),
+            tooltip: (isEnglish ? 'Scroll to nearest stop' : '滾動至最近站點'),
+            onPressed: (_locationLoading || _allStops.isEmpty)
+                ? null 
+                : () {
+                    // Simply toggle and trigger the function
+                    final newState = !_toggleNearBy;
+                    setState(() => _toggleNearBy = newState);
+                    _getUserLocationAndScrollToNearest(newState);
+                  },
           ),
           
           // 地圖切換
@@ -1515,7 +1547,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
               fare: fare,
               isNearby: isNearby,
               nearbyDistStr: nearbyDistStr,
-              etaPreview: etas.isNotEmpty ? _formatEtaList(etas) : null,
+              etaPreview: null,//etas.isNotEmpty ? _formatEtaList(etas) : null,
               colorScheme: cs,
               theme: theme,
             ),
@@ -1717,7 +1749,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
             ),
           ] else ...[
             Text(
-              etas.isNotEmpty ? _formatEtaList(etas) : 'No Services',
+              etas.isNotEmpty ? _formatEtaList(etas) : lang.endEta,
               style: theme.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: colorScheme.onSurface,
@@ -1778,7 +1810,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              coEtas.isNotEmpty ? _formatEtaList(coEtas) : 'No Services',
+              coEtas.isNotEmpty ? _formatEtaList(coEtas) : lang.endEta,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
@@ -1849,7 +1881,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       return isEnglish ? 'No upcoming buses' : '暫無班次';
     }
 
-    return valid.take(2).map((eta) => eta.formatDisplay(isEnglish)).join(' · ');
+    return valid.take(3).map((eta) => eta.formatDisplay(isEnglish)).join(' · ');
   }
 
 
