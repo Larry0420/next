@@ -1186,8 +1186,9 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
   }
 
   Widget _buildEtaSection(ColorScheme cs) {
+    final lang = context.watch<LanguageProvider>();
+    final isEn = lang.isEnglish;
     final bool noSchedule = _hasNoScheduledBuses;
-    final isEn = widget.lang.isEnglish;
 
     Widget content;
     if (_loading) {
@@ -1207,7 +1208,7 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       content = Text(
         key: const ValueKey('empty'),
         noSchedule
-            ? (isEn ? 'No scheduled buses' : '暫無班次')
+            ? (lang.endEta)
             : (isEn ? 'Service not available' : '服務暫停'),
         style: TextStyle(
           color: noSchedule ? Colors.grey.shade600 : Colors.orange.shade700,

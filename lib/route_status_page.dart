@@ -1878,7 +1878,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
     final valid = _filterValidEtas(etas);
     if (valid.isEmpty) {
-      return isEnglish ? 'No upcoming buses' : '暫無班次';
+      return lang.endEta;
     }
 
     return valid.take(3).map((eta) => eta.formatDisplay(isEnglish)).join(' · ');

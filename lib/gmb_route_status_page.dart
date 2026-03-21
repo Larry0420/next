@@ -1010,6 +1010,7 @@ class _GmbStopCardState extends State<GmbStopCard> {
   }
 
   Widget _buildEtaList() {
+    final lang = context.watch<LanguageProvider>();
     if (_loading) {
       return const Padding(
         padding: EdgeInsets.all(16),
@@ -1020,7 +1021,7 @@ class _GmbStopCardState extends State<GmbStopCard> {
     if (_etas == null || _etas!.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(16),
-        child: Text(widget.isEnglish ? 'No upcoming minibuses' : '暫無班次'),
+        child: Text(lang.endEta),
       );
     }
 

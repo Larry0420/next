@@ -1969,7 +1969,7 @@ class ThemeProvider extends ChangeNotifier {
   /* ========================= Developer Settings Provider ========================= */
   
   class DeveloperSettingsProvider extends ChangeNotifier {
-    static const String _hideStationIdKey = 'hide_station_id';
+    static const String _showStationIdKey = 'show_station_id';
     static const String _showGridDebugKey = 'show_grid_debug';
     static const String _showCacheStatusKey = 'show_cache_status';
     static const String _showMtrArrivalDetailsKey = 'show_mtr_arrival_details';
@@ -1979,7 +1979,7 @@ class ThemeProvider extends ChangeNotifier {
     static const String _useFloatingRouteTogglesKey = 'use_floating_route_toggles';
     static const String _showRankBadgeKey = 'use_show_rank_badge';
 
-    bool _hideStationId = false;
+    bool _showStationId = false;
     bool _showGridDebug = false;
     bool _showCacheStatus = false; // Default to hidden
     bool _showMtrArrivalDetails = true; // Default to hidden for cleaner UI
@@ -1987,10 +1987,10 @@ class ThemeProvider extends ChangeNotifier {
     bool _showKmbInNav = true; // Default to visible
     bool _showSubNav = true; // Default to visible
     bool _useFloatingRouteToggles = true; // Default to new floating UI
-    bool _showRankBadge = true;
+    bool _showRankBadge = false;
     SharedPreferences? _prefs;
 
-    bool get hideStationId => _hideStationId;
+    bool get showStationId => _showStationId;
     bool get showGridDebug => _showGridDebug;
     bool get showCacheStatus => _showCacheStatus;
     bool get showMtrArrivalDetails => _showMtrArrivalDetails;
@@ -2003,7 +2003,7 @@ class ThemeProvider extends ChangeNotifier {
 
     Future<void> initialize() async {
       _prefs = await SharedPreferences.getInstance();
-      _hideStationId = _prefs!.getBool(_hideStationIdKey) ?? false;
+      _showStationId = _prefs!.getBool(_showStationIdKey) ?? false;
       _showGridDebug = _prefs!.getBool(_showGridDebugKey) ?? false;
       _showCacheStatus = _prefs!.getBool(_showCacheStatusKey) ?? false;
       _showMtrArrivalDetails = _prefs!.getBool(_showMtrArrivalDetailsKey) ?? false;
@@ -2011,7 +2011,7 @@ class ThemeProvider extends ChangeNotifier {
       _showKmbInNav = _prefs!.getBool(_showKmbInNavKey) ?? true;
       _showSubNav = _prefs!.getBool(_showSubNavKey) ?? true;
       _useFloatingRouteToggles = _prefs!.getBool(_useFloatingRouteTogglesKey) ?? true;
-      _showRankBadge = _prefs!.getBool(_showRankBadgeKey) ?? true;
+      _showRankBadge = _prefs!.getBool(_showRankBadgeKey) ?? false;
       notifyListeners();
     }
 
@@ -2023,10 +2023,10 @@ class ThemeProvider extends ChangeNotifier {
     }
 
 
-    Future<void> setHideStationId(bool hide) async {
-      _hideStationId = hide;
+    Future<void> setShowStationId(bool show) async {
+      _showStationId = show;
       _prefs ??= await SharedPreferences.getInstance();
-      await _prefs!.setBool(_hideStationIdKey, hide);
+      await _prefs!.setBool(_showStationIdKey, show);
       notifyListeners();
     }
     
@@ -2317,7 +2317,7 @@ class LanguageProvider extends ChangeNotifier {
   String get type => _isEnglish ? 'Special Service' : '特別班次';
   String get bus => _isEnglish ? 'Bus' : '巴士'; // KMB is a brand name, same in both languages
   String get to => _isEnglish ? 'To' : '往';
-  String get endEta => _isEnglish ? 'No Services' : '沒有服務班次';
+  String get endEta => _isEnglish ? 'No upcoming Buses' : '暫無班次';
 
   // New additions for consistency
   String get showListOnly => isEnglish ? 'Show list only' : '僅顯示列表';
@@ -8932,13 +8932,13 @@ class _SettingsPage extends StatelessWidget {
             context,
             icon: Icons.visibility_off,
             title: lang.isEnglish ? 'Hide Station ID' : '隱藏車站ID',
-            subtitle: devSettings.hideStationId 
-                ? (lang.isEnglish ? 'Station ID is hidden' : '車站ID已隱藏')
-                : (lang.isEnglish ? 'Station ID is visible' : '車站ID可見'),
+            subtitle: devSettings.showStationId 
+                ? (lang.isEnglish ? 'Station ID is visible' : '車站ID可見')
+                : (lang.isEnglish ? 'Station ID is hidden' : '車站ID已隱藏'),
             trailing: Switch(
-              value: devSettings.hideStationId,
+              value: devSettings.showStationId,
               onChanged: (value) {
-                devSettings.setHideStationId(value);
+                devSettings.setShowStationId(value);
               },
             ),
           ),
@@ -11792,7 +11792,7 @@ class _OptimizedStationSelectorState extends State<_OptimizedStationSelector>
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       // ✅ Optimize: Use selector to reduce rebuilds from DeveloperSettingsProvider
-                      if (!devSettings.hideStationId) ...[
+                      if (devSettings.showStationId) ...[
                         Container(
                           width: 24,
                           height: 24,
