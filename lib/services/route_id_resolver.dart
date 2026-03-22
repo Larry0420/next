@@ -198,14 +198,38 @@ class RouteIdResolver {
   Future<List<Map<String, dynamic>>> getGmbRouteVariants(String routeNumber) async {
     await initialize();
 
-    if (_gmbRouteIndexCache == null) await _buildGmbRouteIndex();
-    if (_gmbRouteIndexCache == null) return [];
+    if (_gmbRouteStopsCache == null) return [];
 
-    final entries = _gmbRouteIndexCache!.entries
-        .where((e) => e.key.toLowerCase() == routeNumber.toLowerCase())
-        .toList();
+    final normalizedRoute = routeNumber.toUpperCase().trim();
+    final variants = <Map<String, dynamic>>[];
 
-    return entries.map((e) => e.value as Map<String, dynamic>).toList();
+    // 查找匹配的 routeCode
+    if (_gmbRouteStopsCache!.containsKey(normalizedRoute)) {
+      final routeData = _gmbRouteStopsCache![normalizedRoute];
+      if (routeData is Map && routeData.containsKey('variants')) {
+        final variantList = routeData['variants'];
+        if (variantList is List) {
+          for (final variant in variantList) {
+            if (variant is Map) {
+              variants.add({
+                'route_id': variant['routeId'],
+                'route_code': normalizedRoute,
+                'region': variant['region'],
+                'route_seq': variant['routeSeq'],
+                'orig_tc': variant['orig_tc'],
+                'orig_en': variant['orig_en'],
+                'dest_tc': variant['dest_tc'],
+                'dest_en': variant['dest_en'],
+                'stops': variant['stops'],
+              });
+            }
+          }
+        }
+      }
+    }
+
+    debugPrint('🔍 getGmbRouteVariants($routeNumber): found ${variants.length} variants');
+    return variants;
   }
 
   /// 查找站點的跨公司映射

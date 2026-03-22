@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -15,7 +17,8 @@ import 'hkbus_db_provider.dart';
 import 'kmb/api/citybus.dart';
 import 'kmb/api/kmb.dart';
 import 'kmb/company_name.dart';
-import 'main.dart' show LanguageProvider, DeveloperSettingsProvider;
+import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, MotionConstants;
+import 'optionalMarquee.dart';
 import 'services/route_id_resolver.dart';
 import 'services/unified_eta_service.dart';
 
@@ -69,6 +72,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   // 公司相關
   late String _selectedCompany;
   List<Map<String, dynamic>> _allStops = [];
+  
+  // 路線變體相關
+  List<Map<String, dynamic>> _routeVariants = [];
 
   // 地圖和位置
   bool _showMapView = false;
@@ -161,6 +167,147 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       return routeData.boundsByCompany.values.first?.toString();
     }
     return widget.bound;
+  }
+
+  /// 從統一數據庫加載路線變體
+  Future<void> _loadRouteVariants() async {
+    if (!widget.useUnifiedDb) return;
+    
+    debugPrint('🔍 _loadRouteVariants: route=${widget.route}, company=$_selectedCompany');
+    
+    // 对于 GMB，使用 RouteIdResolver 获取所有变体（包括不同 region）
+    if (_selectedCompany.toLowerCase() == 'gmb') {
+      await _loadGmbVariantsWithRegion();
+      return;
+    }
+    
+    // 对于其他公司，使用现有逻辑
+    final hkbusDb = context.read<HkbusDbProvider>();
+    final allRoutes = hkbusDb.getAllRoutes();
+    
+    // 根据路线号和公司过滤
+    final matches = allRoutes.where((r) => 
+      r.routeNumber.toUpperCase() == widget.route.toUpperCase() &&
+      r.companies.any((c) => c.toLowerCase() == _selectedCompany.toLowerCase())
+    ).toList();
+    
+    debugPrint('🔍 Found ${matches.length} route matches');
+    
+    // 收集所有路线变体
+    final variants = <Map<String, dynamic>>[];
+    for (final route in matches) {
+      // 获取该路线的所有方向
+      for (final company in route.companies) {
+        final bound = route.boundsByCompany[company.toLowerCase()]?.toString().toUpperCase();
+        if (bound != null) {
+          final variant = {
+            'routeId': route.routeId,
+            'bound': bound,
+            'serviceType': route.serviceType ?? '1',
+            'orig_tc': route.origTc,
+            'orig_en': route.origEn,
+            'dest_tc': route.destTc,
+            'dest_en': route.destEn,
+            'company': company.toLowerCase(),
+          };
+          
+          debugPrint('  📍 Found variant: ${route.routeId}, bound=$bound, serviceType=${route.serviceType}');
+          variants.add(variant);
+        }
+      }
+    }
+    
+    // 去重（按 routeId）
+    final uniqueVariants = <String, Map<String, dynamic>>{};
+    for (final v in variants) {
+      uniqueVariants[v['routeId']] = v;
+    }
+    
+    if (mounted) {
+      setState(() {
+        _routeVariants = uniqueVariants.values.toList();
+        debugPrint('✅ Total unique variants: ${_routeVariants.length}');
+      });
+    }
+  }
+
+  /// 加载 GMB 变体并附加 region 信息
+  Future<void> _loadGmbVariantsWithRegion() async {
+    try {
+      final routeIdResolver = RouteIdResolver();
+      await routeIdResolver.initialize();
+      
+      final gmbVariants = await routeIdResolver.getGmbRouteVariants(widget.route);
+      
+      debugPrint('🔍 GMB variants for ${widget.route}: ${gmbVariants.length}');
+      
+      final variants = <Map<String, dynamic>>[];
+      final hkbusDb = context.read<HkbusDbProvider>();
+      
+      // 为每个 GMB 变体创建变体卡片数据
+      for (final gmbVariant in gmbVariants) {
+        final gmbRouteId = gmbVariant['route_id'];
+        final gmbRegion = gmbVariant['region'];
+        final origEn = gmbVariant['orig_en'];
+        final destEn = gmbVariant['dest_en'];
+        
+        // 尝试从 hkbus_db 中查找匹配的路线，确定 serviceType
+        String serviceType = '1';
+        String hkbusRouteId = '${widget.route}+1+$origEn+$destEn';
+        
+        // 检查 serviceType 1 是否存在
+        if (hkbusDb.getRouteById(hkbusRouteId) == null) {
+          // 尝试 serviceType 2
+          final hkbusRouteId2 = '${widget.route}+2+$origEn+$destEn';
+          if (hkbusDb.getRouteById(hkbusRouteId2) != null) {
+            serviceType = '2';
+            hkbusRouteId = hkbusRouteId2;
+          } else {
+            // 尝试 serviceType 3
+            final hkbusRouteId3 = '${widget.route}+3+$origEn+$destEn';
+            if (hkbusDb.getRouteById(hkbusRouteId3) != null) {
+              serviceType = '3';
+              hkbusRouteId = hkbusRouteId3;
+            } else {
+              // 尝试 serviceType 4
+              final hkbusRouteId4 = '${widget.route}+4+$origEn+$destEn';
+              if (hkbusDb.getRouteById(hkbusRouteId4) != null) {
+                serviceType = '4';
+                hkbusRouteId = hkbusRouteId4;
+              }
+            }
+          }
+        }
+        
+        // GMB 不使用 bound 概念，使用默认值
+        final bound = 'O';
+        
+        final variant = {
+          'routeId': hkbusRouteId, // 使用 hkbus_db 格式的 routeId（英文）
+          'gmbRouteId': gmbRouteId, // 保留 GMB API 的 routeId
+          'bound': bound,
+          'serviceType': serviceType,
+          'orig_tc': gmbVariant['orig_tc'],
+          'orig_en': origEn,
+          'dest_tc': gmbVariant['dest_tc'],
+          'dest_en': destEn,
+          'company': 'gmb',
+          'gmbRegion': gmbRegion,
+        };
+        
+        debugPrint('  📍 Added GMB variant: $gmbRouteId, region=$gmbRegion, bound=$bound, serviceType=$serviceType');
+        variants.add(variant);
+      }
+      
+      if (mounted) {
+        setState(() {
+          _routeVariants = variants;
+          debugPrint('✅ Total GMB variants: ${_routeVariants.length}');
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading GMB variants: $e');
+    }
   }
 
   @override
@@ -480,6 +627,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         };
         loading = false;
       });
+      await _loadRouteVariants(); // 加載路線變體（方向和服務類型）
       _preFillStopKeys(); // ✅ 新增
     }
   }
@@ -1127,6 +1275,231 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     _fetchData();
   }
 
+  /// 选择路线变体
+  void _onRouteVariantSelected(Map<String, dynamic> variant) {
+    final company = variant['company'] as String? ?? '';
+    
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UnifiedRouteStatusPage(
+          route: widget.route,
+          companies: widget.companies,
+          initialCompany: _selectedCompany,
+          bound: variant['bound'] as String?,
+          serviceType: variant['serviceType'] as String?,
+          initialRouteId: variant['routeId'] as String?,
+          useUnifiedDb: true,
+        ),
+      ),
+    );
+  }
+
+  /// 构建路线变体卡片
+  Widget _buildRouteVariantCard(Map<String, dynamic> variant, bool isEnglish) {
+    final theme = Theme.of(context);
+    final bound = variant['bound'] as String?;
+    final serviceType = variant['serviceType'] as String?;
+    final orig = isEnglish 
+        ? (variant['orig_en'] ?? variant['orig_tc'] ?? '') 
+        : (variant['orig_tc'] ?? variant['orig_en'] ?? '');
+    final dest = isEnglish 
+        ? (variant['dest_en'] ?? variant['dest_tc'] ?? '') 
+        : (variant['dest_tc'] ?? variant['dest_en'] ?? '');
+    
+    // 方向标签
+    String directionLabel = bound == 'O'
+        ? (isEnglish ? 'Outbound' : '去程')
+        : (bound == 'I' 
+            ? (isEnglish ? 'Inbound' : '回程')
+            : (bound ?? ''));
+    
+    // 服务类型标签（徽章样式）
+    String serviceTypeLabel = '普通';
+    final company = variant['company'] as String? ?? '';
+    Color serviceTypeBgColor = theme.colorScheme.secondaryContainer;
+    Color serviceTypeTextColor = theme.colorScheme.onSecondaryContainer;
+    
+    if (company.toLowerCase() == 'gmb') {
+      // GMB: 显示地区名称
+      final gmbRegion = variant['gmbRegion'] as String?;
+      serviceTypeLabel = _getGmbRegionName(gmbRegion, isEnglish);
+      serviceTypeBgColor = theme.colorScheme.tertiaryContainer;
+      serviceTypeTextColor = theme.colorScheme.onTertiaryContainer;
+    } else {
+      // 其他公司: 显示服务类型
+      switch (serviceType) {
+        case '1': 
+          serviceTypeLabel = isEnglish ? 'Ordinary' : '普通';
+          serviceTypeBgColor = theme.colorScheme.secondaryContainer;
+          serviceTypeTextColor = theme.colorScheme.onSecondaryContainer;
+          break;
+        case '2': 
+          serviceTypeLabel = isEnglish ? 'Express' : '特快';
+          serviceTypeBgColor = theme.colorScheme.primaryContainer;
+          serviceTypeTextColor = theme.colorScheme.onPrimaryContainer;
+          break;
+        case '3': 
+          serviceTypeLabel = isEnglish ? 'Holiday' : '假日';
+          serviceTypeBgColor = theme.colorScheme.errorContainer;
+          serviceTypeTextColor = theme.colorScheme.onErrorContainer;
+          break;
+        case '4': 
+          serviceTypeLabel = isEnglish ? 'Night' : '通宵';
+          serviceTypeBgColor = theme.colorScheme.surfaceVariant;
+          serviceTypeTextColor = theme.colorScheme.onSurfaceVariant;
+          break;
+      }
+    }
+    
+    // 检查是否是当前选中的变体
+    final isSelected = variant['routeId'] == widget.initialRouteId ||
+                       (bound == widget.bound && serviceType == widget.serviceType);
+    
+    return GestureDetector(
+      onTap: () => _onRouteVariantSelected(variant),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected 
+              ? theme.colorScheme.primaryContainer 
+              : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected 
+                ? theme.colorScheme.primary 
+                : theme.colorScheme.outline.withValues(alpha: 0.2),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            // 方向指示器
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                directionLabel,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 路线信息
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        orig,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          Icons.arrow_forward,
+                          size: 14,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      Text(
+                        dest,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  // 服务类型徽章
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: serviceTypeBgColor,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      serviceTypeLabel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: serviceTypeTextColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 选中指示器
+            if (isSelected)
+              Icon(
+                Icons.check_circle,
+                color: theme.colorScheme.primary,
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 判断是否应该显示路线变体切换器
+  bool _shouldShowVariantSwitcher() {
+    if (_routeVariants.isEmpty) return false;
+    
+    final firstCompany = _routeVariants.first['company'] as String? ?? '';
+    
+    if (firstCompany.toLowerCase() == 'gmb') {
+      // GMB: 检查是否有多个不同的地区
+      final regions = _routeVariants
+          .map((v) => v['gmbRegion'] as String?)
+          .whereType<String>()
+          .toSet();
+      return regions.length > 1;
+    } else {
+      // 其他公司: 检查是否有多个不同的方向或服务类型
+      final bounds = _routeVariants
+          .map((v) => v['bound'] as String?)
+          .whereType<String>()
+          .toSet();
+      final serviceTypes = _routeVariants
+          .map((v) => v['serviceType'] as String?)
+          .whereType<String>()
+          .toSet();
+      return bounds.length > 1 || serviceTypes.length > 1;
+    }
+  }
+
+  /// 获取 GMB 地区名称
+  String _getGmbRegionName(String? region, bool isEnglish) {
+    if (region == null) return 'GMB';
+    switch (region.toUpperCase()) {
+      case 'HKI':
+        return isEnglish ? 'Hong Kong Island' : '香港島';
+      case 'KLN':
+        return isEnglish ? 'Kowloon' : '九龍';
+      case 'NT':
+        return isEnglish ? 'New Territories' : '新界';
+      default:
+        return region;
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -1486,7 +1859,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     return AnimatedContainer(
       key: _stopKeys.putIfAbsent(stopId, () => GlobalKey()),
       duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
+      curve: MotionConstants.emphasizedEasing,
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Card(
         elevation: isHighlighted ? 4 : (isNearby ? 2 : 0),
@@ -1532,11 +1905,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
               colorScheme: cs,
               theme: theme,
             ),
-            title: Text(
-              name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleSmall?.copyWith(
+            title: OptionalMarquee(
+              text: name,
+              style: theme.textTheme.titleSmall!.copyWith(
                 fontWeight: isNearby ? FontWeight.w800 : FontWeight.w600,
                 color: cs.onSurface,
                 height: 1.2,
@@ -1701,7 +2072,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     required ColorScheme colorScheme,
     required ThemeData theme,
   }) {
-    return Padding(
+    final content = Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1748,12 +2119,20 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
               ),
             ),
           ] else ...[
-            Text(
-              etas.isNotEmpty ? _formatEtaList(etas) : lang.endEta,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: colorScheme.onSurface,
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: etas.isNotEmpty 
+                  ? _buildEtaList(etas, isEnglish)
+                  : [
+                      Text(
+                        lang.endEta,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
             ),
           ],
           const SizedBox(height: 10),
@@ -1766,6 +2145,20 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         ],
       ),
     );
+
+    // 添加 Material 3 弹跳效果
+    return content
+        .animate()
+        .slideY(
+          begin: -0.1,
+          end: 0,
+          duration: MotionConstants.contentTransition,
+          curve: MotionConstants.bounceInEasing,
+        )
+        .fadeIn(
+          duration: MotionConstants.contentTransition * 0.6,
+          curve: MotionConstants.fadeInEasing,
+        );
   }
 
   Widget _buildOperatorEtaRow({
@@ -1809,11 +2202,19 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              coEtas.isNotEmpty ? _formatEtaList(coEtas) : lang.endEta,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: coEtas.isNotEmpty 
+                  ? _buildEtaList(coEtas, isEnglish)
+                  : [
+                      Text(
+                        lang.endEta,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
             ),
           ),
         ],
@@ -1884,6 +2285,41 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     return valid.take(3).map((eta) => eta.formatDisplay(isEnglish)).join(' · ');
   }
 
+  /// 构建 ETA widget 列表（每行一个 ETA，remark 显示在同一行）
+  List<Widget> _buildEtaList(List<UnifiedEta> etas, bool isEnglish) {
+    if (etas.isEmpty) return [];
+
+    final lang = context.read<LanguageProvider>();
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    final valid = _filterValidEtas(etas);
+    if (valid.isEmpty) {
+      return [
+        Text(
+          lang.endEta,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: colorScheme.onSurface,
+          ),
+        ),
+      ];
+    }
+
+    return valid.take(3).map((eta) {
+      // 获取本地化的 remark
+      final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
+      
+      return Text(
+        eta.formatDisplay(isEnglish, remark: remark),
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: colorScheme.onSurface,
+        ),
+      );
+    }).toList();
+  }
+
 
   Widget _buildMapView() {
     // TODO: 實現地圖視圖
@@ -1901,6 +2337,14 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     final lang = context.read<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     final companyProv = context.read<CompanyProvider>();
+
+    // Get route origin and destination
+    final orig = isEnglish
+        ? (data?['orig_en'] ?? data?['orig_tc'] ?? '')
+        : (data?['orig_tc'] ?? data?['orig_en'] ?? '');
+    final dest = isEnglish
+        ? (data?['dest_en'] ?? data?['dest_tc'] ?? '')
+        : (data?['dest_tc'] ?? data?['dest_en'] ?? '');
 
     return DraggableScrollableSheet(
       controller: _draggableController,
@@ -1935,6 +2379,155 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
                   ),
                 ),
                 
+                // 方向指示器（路线起点和终点）
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: theme.colorScheme.outline.withValues(alpha: 0.15),
+                          width: 1.0,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: Row(
+                          children: [
+                            // 路线号和公司
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
+                              child: Row(
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 6.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          widget.route,
+                                          style: TextStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                        Text(
+                                          companyProv.getName(_selectedCompany, isEnglish),
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w500,
+                                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Icon(
+                                      Icons.directions_bus,
+                                      color: theme.colorScheme.primary,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            // 路线起点和终点
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // 起点
+                                  if (orig.isNotEmpty) ...[
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                                      textBaseline: TextBaseline.alphabetic,
+                                      children: [
+                                        Text(
+                                          '${isEnglish ? 'From' : '由'}:  ',
+                                          style: TextStyle(
+                                            letterSpacing: -0.05,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w400,
+                                            height: 1,
+                                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            orig,
+                                            style: TextStyle(
+                                              letterSpacing: -0.05,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              height: 1,
+                                              color: theme.colorScheme.onSurface,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  // 终点
+                                  if (dest.isNotEmpty) ...[
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                                      textBaseline: TextBaseline.alphabetic,
+                                      children: [
+                                        Text(
+                                          '${isEnglish ? 'To' : '往'}:  ',
+                                          style: TextStyle(
+                                            letterSpacing: -0.05,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w400,
+                                            height: 1,
+                                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            dest,
+                                            style: TextStyle(
+                                              letterSpacing: -0.05,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              height: 1,
+                                              color: theme.colorScheme.onSurface,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(height: 12),
+                
                 // 公司選擇器
                 Text(
                   isEnglish ? 'Operators' : '營運商',
@@ -1963,6 +2556,17 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
                     }).toList(),
                   ),
                 ),
+                
+                // 路线变体列表（如果存在多个变体）
+                if (_shouldShowVariantSwitcher()) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    isEnglish ? 'Route Variants' : '路線變體',
+                    style: theme.textTheme.labelMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  ..._routeVariants.map((variant) => _buildRouteVariantCard(variant, isEnglish)),
+                ],
               ],
             ),
           ),

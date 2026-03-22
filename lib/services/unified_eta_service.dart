@@ -51,24 +51,32 @@ class UnifiedEta {
     return diff.inMinutes;
   }
 
-  /// 格式化顯示（相對時間 + 絕對時間）
-  String formatDisplay(bool isEnglish) {
+  /// 格式化顯示（相對時間 + 絕對時間 + remark）
+  String formatDisplay(bool isEnglish, {String? remark}) {
     final abs = '${eta.hour.toString().padLeft(2, '0')}:${eta.minute.toString().padLeft(2, '0')}';
     final mins = relativeMinutes;
 
+    String timeText;
     if (mins < 1 && mins >= 0) {
-      return isEnglish ? 'Due ($abs)' : '即將到達 ($abs)';
+      timeText = isEnglish ? 'Due ($abs)' : '即將到達 ($abs)';
     } else if (mins < 0) {
-      return isEnglish ? 'Departed' : '已離開';
+      timeText = isEnglish ? 'Departed' : '已離開';
     } else if (mins < 60) {
-      return isEnglish ? '$mins min ($abs)' : '$mins分鐘 ($abs)';
+      timeText = isEnglish ? '$mins min ($abs)' : '$mins分鐘 ($abs)';
     } else {
       final h = mins ~/ 60;
       final m = mins % 60;
-      return isEnglish
+      timeText = isEnglish
           ? '${h}h${m > 0 ? ' ${m}m' : ''} ($abs)'
           : '$h小時${m > 0 ? '$m分' : ''} ($abs)';
     }
+
+    // 如果有 remark，使用點號分隔符追加
+    if (remark != null && remark.isNotEmpty) {
+      return '$timeText · $remark';
+    }
+
+    return timeText;
   }
 
   @override
