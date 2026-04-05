@@ -1385,7 +1385,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       // realtime: 必須 >10 秒才顯示
       // non-realtime / scheduled: 直接顯示（只過濾負數離站）
       if (eta.isRealtime) {
-        return diffSec > 45;
+        return diffSec > 15;
       } else {
         return diffSec > -30; // 預測班次寬容 30 秒
       }
@@ -2154,7 +2154,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     final sorted = List<UnifiedEta>.from(valid)
       ..sort((a, b) => a.sequence.compareTo(b.sequence));
 
-    return sorted.take(10).map((eta) {
+    return sorted.take(3).map((eta) {
       // 获取本地化的 remark
       final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
       
