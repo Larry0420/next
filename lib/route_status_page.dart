@@ -647,6 +647,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           'gmb_stop_id': group['gmb_stop_id'],
           'gmb_stop_seq': group['gmb_stop_seq'] ?? (seq0 + 1), // ← 新增
           'nlb_stop_id': group['nlb_stop_id'],
+          'lrtfeeder_stop_id': group['lrtfeeder_stop_id'],  // ✅ 新增 lrtfeeder stop ID
           'lat': coords?['lat'],
           'lng': coords?['lng'],
           'long': coords?['lng'],     // ✅ fixed: _buildStopCard reads 'long' first
@@ -681,16 +682,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   Future<void> _fetchFromCompanyApi() async {
     final company = _selectedCompany.toLowerCase();
     
-    // ✅ FIX: Redirect lrtfeeder to MTR Bus API for MTR Bus routes
-    // This handles the data integrity issue where MTR Bus routes are incorrectly marked as lrtfeeder
-    String effectiveCompany = company;
-    if (company == 'lrtfeeder' && MtrBus.isMtrBusRoute(widget.route)) {
-      effectiveCompany = 'lrtfeeder';
-      debugPrint('✅ Redirecting lrtfeeder route ${widget.route} to MTR Bus API');
-    }
     
     try {
-      switch (effectiveCompany) {
+      switch (company) {
         case 'kmb':
           await _fetchKmbData();
           break;
@@ -704,13 +698,13 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           await _fetchGmbData();
           break;
         case 'lrtfeeder':
-          await _fetchFromUnifiedDb();
+          await _fetchMtrBusData();  
           break;
         default:
-          throw Exception('Unsupported company: $effectiveCompany');
+          throw Exception('Unsupported company: $company');
       }
     } catch (e) {
-      debugPrint('Error fetching from $effectiveCompany API: $e');
+      debugPrint('Error fetching from $company API: $e');
       rethrow;
     }
   }
@@ -916,7 +910,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     await _processStopEntries(entries, 'gmb');
   }
 
-  Future<void> _fetchMtrData() async {
+  Future<void> _fetchMtrBusData() async {
     // MTR Bus API returns all stops for a route in one response
     // We need to fetch the schedule and extract stop data
     
@@ -1365,6 +1359,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
                     routeVariant: eta.routeVariant,
                   ))
               .toList();
+
         }).catchError((e) {
           debugPrint('❌ Failed to fetch ETA for $company: $e');
           companyEtasMap[company] = [];
@@ -1390,7 +1385,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       // realtime: 必須 >10 秒才顯示
       // non-realtime / scheduled: 直接顯示（只過濾負數離站）
       if (eta.isRealtime) {
-        return diffSec > 15;
+        return diffSec > 45;
       } else {
         return diffSec > -30; // 預測班次寬容 30 秒
       }
@@ -2050,8 +2045,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     );
 
     // 添加 Material 3 弹跳效果
-    return content
-        .animate()
+    return content;
+        /**.animate()
         .slideY(
           begin: -0.1,
           end: 0,
@@ -2062,6 +2057,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           duration: MotionConstants.contentTransition * 0.6,
           curve: MotionConstants.fadeInEasing,
         );
+        **/
   }
 
   Widget _buildOperatorEtaRow({
@@ -2158,7 +2154,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     final sorted = List<UnifiedEta>.from(valid)
       ..sort((a, b) => a.sequence.compareTo(b.sequence));
 
-    return sorted.take(3).map((eta) {
+    return sorted.take(10).map((eta) {
       // 获取本地化的 remark
       final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
       

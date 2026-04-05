@@ -610,14 +610,14 @@ class UnifiedEtaService {
       // Determine valid time to use
       int? validSeconds;
       
-      // Prefer arrival time if valid (positive and not 108000)
-      if (arrivalSeconds != null && arrivalSeconds > 0 && arrivalSeconds != 108000) {
-        validSeconds = arrivalSeconds;
+      // Prefer arrival time if valid (allow 0 for "Arriving / Departed" per MTR API spec)
+      if (arrivalSeconds != null && arrivalSeconds >= 0) {
+        validSeconds = arrivalSeconds;  // ✅ 修改：允許 0（Arriving / Departed）
       } 
       // Fallback to departure time if valid
-      else if (departureSeconds != null && departureSeconds > 0) {
-        validSeconds = departureSeconds;
-      }
+      //else if (departureSeconds != null && departureSeconds > 0) {
+      //  validSeconds = departureSeconds;
+      //}
       
       // Skip this bus if no valid time found
       if (validSeconds == null) {
@@ -628,21 +628,19 @@ class UnifiedEtaService {
       // Calculate ETA time
       final etaTime = DateTime.now().add(Duration(seconds: validSeconds));
       
-      // Only add if ETA is in the future (at least 1 second ahead)
-      if (!etaTime.isAfter(DateTime.now().add(const Duration(seconds: 1)))) {
-        debugPrint('⚠️ MTR Bus: Skipping bus ${bus['busId']} - ETA not in future: ${etaTime.toIso8601String()}');
-        continue;
-      }
+      // Note: arrivalTimeInSecond = 0 means "Arriving / Departed" per MTR API spec
+      // These buses should be included as they represent real-time arrivals
+      // No future-only check for "Arriving / Departed" cases
       
       // Check if scheduled (isScheduled = "1" means it's scheduled, not real-time GPS)
       final isScheduled = bus['isScheduled']?.toString() == '1';
       
-      // Get sequence from bus data or use stop sequence
-      final busId = bus['busId']?.toString() ?? '';
-      final sequence = int.tryParse(busId) ?? stopSeq;
-      
       // Extract remarks
       final busRemark = bus['busRemark']?.toString();
+      
+      // Use stop sequence for ordering (not busId!)
+      // ⚠️ Fix: busId is vehicle number (e.g., 804, 807, 819), not time order
+      final sequence = stopSeq;  // ✅ 修正：使用站點序號而非巴士編號
       
       validEtas.add(UnifiedEta(
         company: 'lrtfeeder',
@@ -654,7 +652,11 @@ class UnifiedEtaService {
         isRealtime: !isScheduled, // !scheduled = GPS real-time
       ));
     }
-    
+
+    // lrtfeeder 的 sequence 是 busId（車輛 ID），不是時間順序
+    // 需要按 eta 時間排序才能得到正確的班次順序
+    validEtas.sort((a, b) => a.eta.compareTo(b.eta));
+
     debugPrint('✅ MTR Bus: Found ${validEtas.length} valid ETAs for stop $stopId');
     return validEtas;
   }
