@@ -16,6 +16,7 @@ import '../kmb/api/kmb.dart';
 import '../kmb/api/citybus.dart';
 import '../kmb/api/nlb.dart';
 import '../kmb/api/gmb.dart';
+import '../kmb/api/mtr_bus.dart';
 
 /// 統一 ETA 數據模型
 /// 所有公司的 ETA 數據都會被轉換為此格式
@@ -221,6 +222,12 @@ class UnifiedEtaService {
         case 'gmb':
         case 'greenminibus':
           etas = await _fetchGmbEta(stopId, routeContext);
+          break;
+        case 'lrtfeeder':
+          etas = await _fetchMtrBusEta(stopId, routeNumber, routeContext);
+          break;
+        case 'mtr':
+          throw Exception('MTR heavy rail not yet supported');
           break;
         default:
           throw Exception('Unsupported company: $company');
@@ -548,6 +555,110 @@ class UnifiedEtaService {
         isRealtime: diff != null,
       );
     }).whereType<UnifiedEta>().toList();
+  }
+
+  /// MTR Bus ETA 獲取
+  ///
+  /// API: POST https://rt.data.gov.hk/v1/transport/mtr/bus/getSchedule
+  /// Stop ID: {route}-{direction}{sequence} (e.g., "K12-D010")
+  /// 
+  /// Note: MTR Bus API returns all stops for a route in one response
+  /// We need to find the specific stop and extract its ETA data
+  Future<List<UnifiedEta>> _fetchMtrBusEta(
+    String stopId,
+    String routeNumber,
+    RouteContext context,
+  ) async {
+    // Determine language from context or default to Chinese
+    final isEnglish = routeNumber.startsWith('en') || false;
+    final language = isEnglish ? 'en' : 'zh';
+
+    // Fetch schedule for the route
+    final schedule = await MtrBus.fetchSchedule(routeNumber, language);
+    
+    // Extract all stops from the schedule
+    final allStops = MtrBus.extractStops(schedule);
+    
+    // Find the matching stop
+    final matchingStop = allStops.firstWhere(
+      (stop) => stop['busStopId']?.toString() == stopId,
+      orElse: () => <String, dynamic>{},
+    );
+    
+    if (matchingStop.isEmpty) {
+      debugPrint('⚠️ MTR Bus stop not found: $stopId');
+      return [];
+    }
+    
+    // Extract bus data for this stop
+    final buses = matchingStop['bus'];
+    if (buses is! List) {
+      return [];
+    }
+    
+    // Get stop sequence
+    final stopSeq = MtrBus.getStopSequence(stopId);
+    
+    // Convert to UnifiedEta with proper validation
+    final validEtas = <UnifiedEta>[];
+    
+    for (final bus in buses.cast<Map<String, dynamic>>()) {
+      // Parse arrival and departure times
+      final arrivalSeconds = int.tryParse(bus['arrivalTimeInSecond']?.toString() ?? '');
+      final departureSeconds = int.tryParse(bus['departureTimeInSecond']?.toString() ?? '');
+      
+      // Determine valid time to use
+      int? validSeconds;
+      
+      // Prefer arrival time if valid (allow 0 for "Arriving / Departed" per MTR API spec)
+      if (arrivalSeconds != null && arrivalSeconds >= 0) {
+        validSeconds = arrivalSeconds;  // ✅ 修改：允許 0（Arriving / Departed）
+      } 
+      // Fallback to departure time if valid
+      //else if (departureSeconds != null && departureSeconds > 0) {
+      //  validSeconds = departureSeconds;
+      //}
+      
+      // Skip this bus if no valid time found
+      if (validSeconds == null) {
+        debugPrint('⚠️ MTR Bus: Skipping bus ${bus['busId']} - no valid ETA time');
+        continue;
+      }
+      
+      // Calculate ETA time
+      final etaTime = DateTime.now().add(Duration(seconds: validSeconds));
+      
+      // Note: arrivalTimeInSecond = 0 means "Arriving / Departed" per MTR API spec
+      // These buses should be included as they represent real-time arrivals
+      // No future-only check for "Arriving / Departed" cases
+      
+      // Check if scheduled (isScheduled = "1" means it's scheduled, not real-time GPS)
+      final isScheduled = bus['isScheduled']?.toString() == '1';
+      
+      // Extract remarks
+      final busRemark = bus['busRemark']?.toString();
+      
+      // Use stop sequence for ordering (not busId!)
+      // ⚠️ Fix: busId is vehicle number (e.g., 804, 807, 819), not time order
+      final sequence = stopSeq;  // ✅ 修正：使用站點序號而非巴士編號
+      
+      validEtas.add(UnifiedEta(
+        company: 'lrtfeeder',
+        eta: etaTime,
+        sequence: sequence,
+        remarkTc: busRemark,
+        remarkEn: busRemark,
+        remarkSc: busRemark,
+        isRealtime: !isScheduled, // !scheduled = GPS real-time
+      ));
+    }
+
+    // lrtfeeder 的 sequence 是 busId（車輛 ID），不是時間順序
+    // 需要按 eta 時間排序才能得到正確的班次順序
+    validEtas.sort((a, b) => a.eta.compareTo(b.eta));
+
+    debugPrint('✅ MTR Bus: Found ${validEtas.length} valid ETAs for stop $stopId');
+    return validEtas;
   }
 
   // ===========================================================================

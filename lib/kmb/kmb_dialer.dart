@@ -17,12 +17,89 @@ import '../gmb_route_status_page.dart';
 import '../kmb_route_status_page.dart';
 import '../main.dart' show LanguageProvider, EnhancedPageRoute;
 import '../nlb_route_status_page.dart';
+import '../providers/location_provider.dart';
 import '../route_status_page.dart';
+import 'package:geolocator/geolocator.dart';
 import 'api/citybus.dart';
 import 'api/gmb.dart';
 import 'api/kmb.dart';
 import 'api/nlb.dart';
 
+/// NLB／GMB 來回線在來源資料常無 [bound]，搜尋去重會誤併為一筆；載入後補 O／I。
+void assignSyntheticBoundsForBidirectionalOperators(List<Map<String, dynamic>> routes) {
+  for (final r in routes) {
+    final co = (r['companyid'] ?? r['company_id'] ?? '').toString().toLowerCase();
+    if (co != 'gmb') continue;
+    if ((r['bound']?.toString().trim() ?? '').isNotEmpty) continue;
+    final seq = r['routeSeq'] ?? r['route_seq'];
+    if (seq == null) continue;
+    final n = seq is int ? seq : int.tryParse(seq.toString()) ?? 1;
+    r['bound'] = n <= 1 ? 'O' : 'I';
+  }
+
+  final nlbByKey = <String, List<Map<String, dynamic>>>{};
+  for (final r in routes) {
+    if ((r['companyid'] ?? '').toString().toLowerCase() != 'nlb') continue;
+    final routeNo = (r['route'] ?? '').toString().toUpperCase();
+    final st = (r['service_type'] ?? 'Normal').toString();
+    nlbByKey.putIfAbsent('$routeNo|$st', () => []).add(r);
+  }
+
+  for (final list in nlbByKey.values) {
+    final unassigned = list
+        .where((r) => (r['bound']?.toString().trim() ?? '').isEmpty)
+        .toList();
+    if (unassigned.isEmpty) continue;
+    if (unassigned.length == 1) {
+      unassigned.first['bound'] = 'O';
+      continue;
+    }
+    unassigned.sort(
+      (a, b) => (a['routeId'] ?? a['route_id'] ?? '')
+          .toString()
+          .compareTo((b['routeId'] ?? b['route_id'] ?? '').toString()),
+    );
+    final paired = <String>{};
+    String keyOf(Map<String, dynamic> x) =>
+        '${x['route']}|${x['routeId'] ?? x['route_id']}';
+
+    String ep(Map<String, dynamic> m, bool orig) {
+      final en = orig ? (m['orig_en'] ?? '') : (m['dest_en'] ?? '');
+      final tc = orig ? (m['orig_tc'] ?? '') : (m['dest_tc'] ?? '');
+      final pick = en.toString().trim().isNotEmpty ? en : tc;
+      return pick.toString().trim().toUpperCase();
+    }
+
+    for (var i = 0; i < unassigned.length; i++) {
+      final a = unassigned[i];
+      if (paired.contains(keyOf(a))) continue;
+      final oa = ep(a, true);
+      final da = ep(a, false);
+      for (var j = i + 1; j < unassigned.length; j++) {
+        final b = unassigned[j];
+        if (paired.contains(keyOf(b))) continue;
+        final ob = ep(b, true);
+        final bd = ep(b, false);
+        if (oa.isNotEmpty && da.isNotEmpty && oa == bd && da == ob) {
+          final cmp = (a['routeId'] ?? a['route_id'] ?? '')
+              .toString()
+              .compareTo((b['routeId'] ?? b['route_id'] ?? '').toString());
+          a['bound'] = cmp <= 0 ? 'O' : 'I';
+          b['bound'] = cmp <= 0 ? 'I' : 'O';
+          paired.add(keyOf(a));
+          paired.add(keyOf(b));
+          break;
+        }
+      }
+    }
+    for (var k = 0; k < unassigned.length; k++) {
+      final r = unassigned[k];
+      if ((r['bound']?.toString().trim() ?? '').isEmpty) {
+        r['bound'] = k.isEven ? 'O' : 'I';
+      }
+    }
+  }
+}
 
 class KmbDialer extends StatefulWidget {
   final void Function(String route)? onRouteSelected;
@@ -226,7 +303,8 @@ class _KmbDialerState extends State<KmbDialer> {
               }
             } catch (e) {
               debugPrint('⚠️ Failed to load GMB routes: $e');
-            }      
+            }
+      assignSyntheticBoundsForBidirectionalOperators(allDetailedRoutes);
       allDetailedRoutes.sort((a, b) {
         final cmp = _compareRouteNumbers((a['route'] ?? '').toString(), (b['route'] ?? '').toString());
         if (cmp != 0) return cmp;
@@ -306,7 +384,8 @@ class _KmbDialerState extends State<KmbDialer> {
     final Map<String, Map<String, dynamic>> unique = {};
     for (final item in matches) {
       final companyKey = item['company_id'] ?? item['companyid'];
-      final key = '${item['route']}_${item['bound']}_${item['service_type']}_$companyKey';
+      final rid = item['routeId'] ?? item['route_id'] ?? '';
+      final key = '${item['route']}_${item['bound']}_${item['service_type']}_${rid}_$companyKey';
       unique[key] = item;
     }
     
@@ -1046,6 +1125,10 @@ class _KmbDialerState extends State<KmbDialer> {
             // 如果使用統一數據庫，導航到 UnifiedRouteStatusPage
             // 否則根據公司導航到原有頁面
             if (_useUnifiedDb) {
+              // ✅ OPTIMIZED: Read pre-fetched location from provider
+              final locationProvider = context.read<LocationProvider>();
+              final Position? userLocation = locationProvider.currentPosition;
+              
               Navigator.of(context).push(EnhancedPageRoute(
                 builder: (_) => UnifiedRouteStatusPage(
                   route: r,
@@ -1055,6 +1138,8 @@ class _KmbDialerState extends State<KmbDialer> {
                   serviceType: serviceType,
                   initialRouteId: v['routeId']?.toString(),
                   useUnifiedDb: true,
+                  // ✅ NEW: Pass pre-fetched location
+                  initialLocation: userLocation,
                 ),
               ));
             } else {

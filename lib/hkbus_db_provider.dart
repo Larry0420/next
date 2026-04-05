@@ -57,7 +57,7 @@ class UnifiedBusRoute {
       case 'mtr': return isEnglish ? 'MTR' : '港鐵';
       case 'lrtfeeder':
       case 'lrt_feeder':
-      case 'lrt-feeder': return isEnglish ? 'LRT Feeder' : '港鐵接駁';
+      case 'lrt-feeder': return isEnglish ? 'MTR Feeder' : '港鐵巴士';
       case 'gmb':
       case 'greenminibus': return isEnglish ? 'GMB' : '專線小巴';
       // 鐵路服務
@@ -384,6 +384,116 @@ class HkbusDbProvider extends ChangeNotifier {
     );
   }
 
+  /// 從資料庫 [bound] 欄位取出 'O' / 'I'；缺漏時回傳 null（供 NLB/GMB 等推斷）。
+  String? getExplicitBoundForCompany(UnifiedBusRoute route, String company) {
+    String? norm(dynamic v) {
+      if (v == null) return null;
+      final s = v.toString().trim();
+      if (s.isEmpty) return null;
+      final u = s.toUpperCase();
+      if (u.startsWith('I')) return 'I';
+      if (u.startsWith('O')) return 'O';
+      return null;
+    }
+
+    final co = company.toLowerCase();
+    final fromCo = norm(route.boundsByCompany[co]);
+    if (fromCo != null) return fromCo;
+    for (final v in route.boundsByCompany.values) {
+      final n = norm(v);
+      if (n != null) return n;
+    }
+    return null;
+  }
+
+  /// 單一公司在該路線變體上的站點 ID 列表（與 _safeExtractStopList 語意一致）。
+  List<String> stopIdsForCompany(UnifiedBusRoute route, String company) {
+    final raw = route.stopsByCompany[company.toLowerCase()];
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList();
+    }
+    if (raw is String) {
+      try {
+        final parsed = jsonDecode(raw);
+        if (parsed is List) {
+          return parsed.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  bool _stopsAreReverseOrder(List<String> a, List<String> b) {
+    if (a.length != b.length || a.length < 2) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[b.length - 1 - i]) return false;
+    }
+    return true;
+  }
+
+  bool _origDestSwapped(UnifiedBusRoute a, UnifiedBusRoute b) {
+    String ep(UnifiedBusRoute r, bool orig) {
+      final en = orig ? r.origEn : r.destEn;
+      final tc = orig ? r.origTc : r.destTc;
+      final s = (en.isNotEmpty ? en : tc).trim().toUpperCase();
+      return s;
+    }
+
+    final ao = ep(a, true);
+    final ad = ep(a, false);
+    final bo = ep(b, true);
+    final bd = ep(b, false);
+    if (ao.isEmpty || ad.isEmpty || bo.isEmpty || bd.isEmpty) return false;
+    return ao == bd && ad == bo;
+  }
+
+  /// 當 JSON 無 [bound] 時，在同號碼、同公司、同 serviceType 的變體間推斷 O/I（互逆站序或起終互換）。
+  String inferBoundForRoute(
+    UnifiedBusRoute route,
+    String company,
+    List<UnifiedBusRoute> sameRouteNumberRoutes,
+  ) {
+    final explicit = getExplicitBoundForCompany(route, company);
+    if (explicit != null) return explicit;
+
+    final co = company.toLowerCase();
+    final st = route.serviceType ?? '1';
+    final cohort = sameRouteNumberRoutes
+        .where(
+          (r) =>
+              r.companies.any((c) => c.toLowerCase() == co) &&
+              (r.serviceType ?? '1') == st,
+        )
+        .toList()
+      ..sort((a, b) => a.routeId.compareTo(b.routeId));
+
+    if (cohort.length <= 1) return 'O';
+
+    final myStops = stopIdsForCompany(route, co);
+    for (final other in cohort) {
+      if (other.routeId == route.routeId) continue;
+      final oStops = stopIdsForCompany(other, co);
+      if (_stopsAreReverseOrder(myStops, oStops)) {
+        return route.routeId.compareTo(other.routeId) <= 0 ? 'O' : 'I';
+      }
+    }
+    for (final other in cohort) {
+      if (other.routeId == route.routeId) continue;
+      if (_origDestSwapped(route, other)) {
+        return route.routeId.compareTo(other.routeId) <= 0 ? 'O' : 'I';
+      }
+    }
+
+    final ambiguous = cohort
+        .where((r) => getExplicitBoundForCompany(r, co) == null)
+        .toList()
+      ..sort((a, b) => a.routeId.compareTo(b.routeId));
+    final idx = ambiguous.indexWhere((r) => r.routeId == route.routeId);
+    if (idx >= 0) return idx.isEven ? 'O' : 'I';
+    return 'O';
+  }
+
   /// 根據路線號碼和方向獲取特定路線
   UnifiedBusRoute? getRouteByNumber(String routeNumber, {
     String? direction, 
@@ -391,7 +501,7 @@ class HkbusDbProvider extends ChangeNotifier {
     String? company,          // ← 新增參數
   }) {
     final all = getAllRoutes();
-    final matches = all.where((r) => r.routeNumber.toUpperCase() == routeNumber.toUpperCase());
+    final matches = all.where((r) => r.routeNumber.toUpperCase() == routeNumber.toUpperCase()).toList();
     if (matches.isEmpty) return null;
     if (matches.length == 1) return matches.first;
 
@@ -407,9 +517,15 @@ class HkbusDbProvider extends ChangeNotifier {
         );
       }
 
-      if (direction != null && route.boundsByCompany.isNotEmpty) {
-        final bound = route.boundsByCompany.values.first?.toString().toUpperCase();
-        matchesDir = bound == direction.toUpperCase();
+      if (direction != null) {
+        final want = direction.toUpperCase();
+        final co = (company ?? route.primaryCompany).toLowerCase();
+        final explicit = getExplicitBoundForCompany(route, co);
+        if (explicit != null) {
+          matchesDir = explicit == want;
+        } else {
+          matchesDir = inferBoundForRoute(route, co, matches) == want;
+        }
       }
       if (serviceType != null) {
         matchesSvc = route.serviceType == serviceType;
@@ -551,9 +667,10 @@ class HkbusDbProvider extends ChangeNotifier {
     List<String> ctbStops = _safeExtractStopList(stopsMap, 'ctb', routeId);
     List<String> gmbStops = _safeExtractStopList(stopsMap, 'gmb', routeId);
     List<String> nlbStops = _safeExtractStopList(stopsMap, 'nlb', routeId);
+    List<String> lrtfeederStops = _safeExtractStopList(stopsMap, 'lrtfeeder', routeId);
 
     // 驗證至少有一個公司有站點數據
-    if (kmbStops.isEmpty && ctbStops.isEmpty && gmbStops.isEmpty && nlbStops.isEmpty) {
+    if (kmbStops.isEmpty && ctbStops.isEmpty && gmbStops.isEmpty && nlbStops.isEmpty && lrtfeederStops.isEmpty) {
       debugPrint('⚠️ No stops found for route $routeId');
       return [];
     }
@@ -570,10 +687,14 @@ class HkbusDbProvider extends ChangeNotifier {
 
 
     // 以長度最長的陣列為基準跑迴圈
-    int maxLength = [kmbStops.length, ctbStops.length, gmbStops.length, nlbStops.length]
+    int maxLength = [kmbStops.length, ctbStops.length, gmbStops.length, nlbStops.length, lrtfeederStops.length]
         .reduce((a, b) => a > b ? a : b);
     
     final stopMap = _stopMap ?? {};
+    
+    // Check if this is a GMB-only route
+    final isGmbOnlyRoute = coList.length == 1 && coList.first.toString().toLowerCase() == 'gmb';
+    
     List<Map<String, dynamic>> stopGroups = [];
     
     for (int i = 0; i < maxLength; i++) {
@@ -581,7 +702,8 @@ class HkbusDbProvider extends ChangeNotifier {
       String? cId = i < ctbStops.length ? ctbStops[i] : null;
       String? gId = i < gmbStops.length ? gmbStops[i] : null;
       String? nId = i < nlbStops.length ? nlbStops[i] : null;
-      
+      String? lId = i < lrtfeederStops.length ? lrtfeederStops[i] : null;
+
       // ✅ AFTER – iterate [operator, stopId] pairs correctly
       // Helper: resolve all operator IDs from a stopMap entry
       Map<String, String> _resolveFromStopMap(dynamic key, Map stopMap) {
@@ -598,33 +720,38 @@ class HkbusDbProvider extends ChangeNotifier {
         return result;
       }
 
-      // Inside the buildStopGroupsForRoute loop, replace the cross-reference block:
-      if (kId != null && stopMap.containsKey(kId)) {
-        final resolved = _resolveFromStopMap(kId, stopMap);
-        cId ??= resolved['ctb'];
-        gId ??= resolved['gmb'];
-        nId ??= resolved['nlb'];
-      } else if (cId != null && stopMap.containsKey(cId)) {
-        final resolved = _resolveFromStopMap(cId, stopMap);
-        kId ??= resolved['kmb'];
-        gId ??= resolved['gmb'];
-        nId ??= resolved['nlb'];
-      } else if (gId != null && stopMap.containsKey(gId)) {
-        final resolved = _resolveFromStopMap(gId, stopMap);
-        kId ??= resolved['kmb'];
-        cId ??= resolved['ctb'];
-        nId ??= resolved['nlb'];
+      // Skip cross-reference for GMB-only routes to prevent incorrect GMB stop ID remapping
+      if (!isGmbOnlyRoute) {
+        // Inside the buildStopGroupsForRoute loop, replace the cross-reference block:
+        if (kId != null && stopMap.containsKey(kId)) {
+          final resolved = _resolveFromStopMap(kId, stopMap);
+          cId ??= resolved['ctb'];
+          gId ??= resolved['gmb'];
+          nId ??= resolved['nlb'];
+        } else if (cId != null && stopMap.containsKey(cId)) {
+          final resolved = _resolveFromStopMap(cId, stopMap);
+          kId ??= resolved['kmb'];
+          gId ??= resolved['gmb'];
+          nId ??= resolved['nlb'];
+        } else if (gId != null && stopMap.containsKey(gId)) {
+          final resolved = _resolveFromStopMap(gId, stopMap);
+          kId ??= resolved['kmb'];
+          cId ??= resolved['ctb'];
+          nId ??= resolved['nlb'];
+        }
       }
 
-      // 選擇用於顯示站點名稱的 ID（優先順序：KMB > CTB > GMB > NLB）
-      String displayId = kId ?? cId ?? gId ?? nId ?? '';
-      
+      // 選擇用於顯示站點名稱的 ID（優先順序：KMB > CTB > GMB > NLB > lrtfeeder）
+      String displayId = kId ?? cId ?? gId ?? nId ?? lId ?? '';
+
       stopGroups.add({
         'seq': i,
         'kmb_stop_id': kId,
         'ctb_stop_id': cId,
         'gmb_stop_id': gId,
+        'gmb_stop_seq': gId != null ? (i + 1) : null,  // 1-based sequence for GMB ETA API
         'nlb_stop_id': nId,
+        'lrtfeeder_stop_id': lId,
         'name_tc': getStopName(displayId, isEnglish: false),
         'name_en': getStopName(displayId, isEnglish: true),
         'fare':         i < fares.length ? fares[i] : null,         // ✅

@@ -54,7 +54,7 @@ class CompanyProvider extends ChangeNotifier {
       case CompanyType.lwb: return isEnglish ? 'LWB' : '龍運';
       case CompanyType.nlb: return isEnglish ? 'NLB' : '嶼巴';
       case CompanyType.mtr: return isEnglish ? 'MTR' : '港鐵';
-      case CompanyType.lrtfeeder: return isEnglish ? 'LRT Feeder' : '港鐵巴士';
+      case CompanyType.lrtfeeder: return isEnglish ? 'MTR Feeder' : '港鐵巴士';
       case CompanyType.lightRail: return isEnglish ? 'Light Rail' : '輕鐵';
       case CompanyType.gmb: return isEnglish ? 'GMB' : '專線小巴';
       case CompanyType.sunferry: return isEnglish ? 'Sun Ferry' : '新渡輪';

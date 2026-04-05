@@ -1,26 +1,25 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:lrt_next_train/toTitleCase.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'providers/location_provider.dart';
+
+import 'kmb/api/mtr_bus.dart';
+
 import 'hkbus_db_provider.dart';
-import 'kmb/api/citybus.dart';
-import 'kmb/api/kmb.dart';
 import 'kmb/company_name.dart';
 import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, MotionConstants;
 import 'optionalMarquee.dart';
 import 'services/route_id_resolver.dart';
 import 'services/unified_eta_service.dart';
+import 'widgets/route_sheet/draggable_route_sheet.dart';
 
 /// 統一路線狀態頁面
 /// 
@@ -37,6 +36,8 @@ class UnifiedRouteStatusPage extends StatefulWidget {
   final String? autoExpandStopId;
   final String? autoExpandSeq;
   final bool useUnifiedDb;
+  /// ✅ NEW: Accept pre-fetched location from navigation
+  final Position? initialLocation;
 
   const UnifiedRouteStatusPage({
     super.key,
@@ -49,6 +50,7 @@ class UnifiedRouteStatusPage extends StatefulWidget {
     this.autoExpandStopId,
     this.autoExpandSeq,
     this.useUnifiedDb = true,
+    this.initialLocation,
   });
 
   @override
@@ -57,7 +59,7 @@ class UnifiedRouteStatusPage extends StatefulWidget {
 
 class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   static const String _mapViewPreferenceKey = 'unified_route_status_map_view_enabled';
-  static const String _NearByPreferenceKey = 'unified_route_status_nearby_enabled';
+  static const String _nearbyPreferenceKey = 'unified_route_status_nearby_enabled';
   final DraggableScrollableController _draggableController = DraggableScrollableController();
   final ScrollController _scrollController = ScrollController();
   final MapController _mapController = MapController();
@@ -126,6 +128,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     try {
       await _routeIdResolver.initialize();
 
+      if (!mounted) return;
+
       final hkbusDb = context.read<HkbusDbProvider>();
       final routeData = widget.initialRouteId != null
           ? hkbusDb.getRouteById(widget.initialRouteId!)
@@ -142,6 +146,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           routeNumber: widget.route,
           companies: widget.companies,
         );
+
+        if (!mounted) return;
 
         // 構建 RouteContext
         _routeContext = RouteContext(
@@ -193,27 +199,25 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     
     debugPrint('🔍 Found ${matches.length} route matches');
     
-    // 收集所有路线变体
+    // 收集所有路线变体（NLB/GMB 等常缺 bound 欄位，需與 getRouteByNumber 一致推斷 O/I）
     final variants = <Map<String, dynamic>>[];
     for (final route in matches) {
-      // 获取该路线的所有方向
       for (final company in route.companies) {
-        final bound = route.boundsByCompany[company.toLowerCase()]?.toString().toUpperCase();
-        if (bound != null) {
-          final variant = {
-            'routeId': route.routeId,
-            'bound': bound,
-            'serviceType': route.serviceType ?? '1',
-            'orig_tc': route.origTc,
-            'orig_en': route.origEn,
-            'dest_tc': route.destTc,
-            'dest_en': route.destEn,
-            'company': company.toLowerCase(),
-          };
-          
-          debugPrint('  📍 Found variant: ${route.routeId}, bound=$bound, serviceType=${route.serviceType}');
-          variants.add(variant);
-        }
+        if (company.toLowerCase() != _selectedCompany.toLowerCase()) continue;
+        final bound = hkbusDb.inferBoundForRoute(route, company.toLowerCase(), matches);
+        final variant = {
+          'routeId': route.routeId,
+          'bound': bound,
+          'serviceType': route.serviceType ?? '1',
+          'orig_tc': route.origTc,
+          'orig_en': route.origEn,
+          'dest_tc': route.destTc,
+          'dest_en': route.destEn,
+          'company': company.toLowerCase(),
+        };
+
+        debugPrint('  📍 Found variant: ${route.routeId}, bound=$bound, serviceType=${route.serviceType}');
+        variants.add(variant);
       }
     }
     
@@ -236,11 +240,15 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     try {
       final routeIdResolver = RouteIdResolver();
       await routeIdResolver.initialize();
-      
+
+      if (!mounted) return;
+
       final gmbVariants = await routeIdResolver.getGmbRouteVariants(widget.route);
-      
+
+      if (!mounted) return;
+
       debugPrint('🔍 GMB variants for ${widget.route}: ${gmbVariants.length}');
-      
+
       final variants = <Map<String, dynamic>>[];
       final hkbusDb = context.read<HkbusDbProvider>();
       
@@ -279,12 +287,16 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           }
         }
         
-        // GMB 不使用 bound 概念，使用默认值
-        final bound = 'O';
-        
+        final routeSeqRaw = gmbVariant['route_seq'];
+        final routeSeq = routeSeqRaw is int
+            ? routeSeqRaw
+            : int.tryParse(routeSeqRaw?.toString() ?? '') ?? 1;
+        final bound = routeSeq <= 1 ? 'O' : 'I';
+
         final variant = {
           'routeId': hkbusRouteId, // 使用 hkbus_db 格式的 routeId（英文）
           'gmbRouteId': gmbRouteId, // 保留 GMB API 的 routeId
+          'gmbRouteSeq': routeSeq,
           'bound': bound,
           'serviceType': serviceType,
           'orig_tc': gmbVariant['orig_tc'],
@@ -326,7 +338,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         setState(() {
           _showMapView = prefs.getBool(_mapViewPreferenceKey) ?? false;
           // Load the Nearby toggle state
-          _toggleNearBy = prefs.getBool(_NearByPreferenceKey) ?? false;
+          _toggleNearBy = prefs.getBool(_nearbyPreferenceKey) ?? false;
         });
         
         // If it was ON, trigger the search once
@@ -342,56 +354,89 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     await prefs.setBool(_mapViewPreferenceKey, show);
   }
 
+  /// Initialize location from LocationProvider
+  /// 
+  /// Uses pre-fetched location from global provider instead of fetching again
   Future<void> _initializeLocation() async {
     try {
-      final status = await Permission.location.status;
-      if (status.isGranted) {
-        final last = await Geolocator.getLastKnownPosition();
-        if (mounted && last != null) {
-          setState(() => _userPosition = last);
-        }
-        
-        final current = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best,
-            timeLimit: Duration(seconds: 5),
-          ),
-        );
-        if (mounted) {
-          setState(() => _userPosition = current);
+      // ✅ Use passed location first (fastest)
+      if (widget.initialLocation != null) {
+        setState(() => _userPosition = widget.initialLocation);
+        debugPrint('✅ Using passed location from navigation');
+        return;
+      }
+      
+      // Fallback to provider
+      final locationProvider = context.read<LocationProvider>();
+      
+      // Use pre-fetched location from provider
+      if (locationProvider.hasLocation) {
+        setState(() => _userPosition = locationProvider.currentPosition);
+        debugPrint('✅ Using pre-fetched location from LocationProvider');
+      }
+      
+      // If no location available, try to refresh
+      if (_userPosition == null && locationProvider.hasPermission) {
+        await locationProvider.refreshLocation();
+        if (locationProvider.hasLocation) {
+          setState(() => _userPosition = locationProvider.currentPosition);
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('❌ Error initializing location from provider: $e');
+    }
   }
 
   /// 獲取用戶位置，更新最近站點，並滾動到該站點
   /// 參考 hkbus/hk-independent-bus-eta RouteEtaPage.tsx 邏輯：
   /// 排序找距離最小者，而非固定閾值，Nearby badge 另外設 200m 範圍
+  /// 
+  /// ✅ OPTIMIZED: Uses pre-fetched location from LocationProvider
+  /// instead of fetching location again
   Future<void> _getUserLocationAndScrollToNearest(bool jump) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_NearByPreferenceKey, jump);
+    await prefs.setBool(_nearbyPreferenceKey, jump);
 
     // 1. Handle the "Toggle Off" state immediately
     if (!jump) {
       setState(() {
-        _nearestStopId = null;     // Clear the nearby indicator
+        _nearestStopId = null;
         _nearestDistanceM = null;
-        _highlightedStopId = null; // Remove highlighting
+        _highlightedStopId = null;
         _locationLoading = false;
       });
-      return; // Stop here; don't fetch GPS or scroll
+      return;
     }
 
     if (!mounted) return;
     setState(() => _locationLoading = true);
 
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: Duration(seconds: 5),
-        ),
-      );
+      // ✅ OPTIMIZED: Use pre-fetched location from provider
+      final locationProvider = context.read<LocationProvider>();
+      Position? pos = locationProvider.currentPosition;
+      
+      // If no location available, try to refresh
+      if (pos == null && locationProvider.hasPermission) {
+        await locationProvider.refreshLocation();
+        pos = locationProvider.currentPosition;
+      }
+      
+      // Handle permission denied
+      if (pos == null && locationProvider.permissionDenied) {
+        if (mounted) {
+          setState(() => _locationLoading = false);
+        }
+        // Optionally show permission request dialog
+        return;
+      }
+      
+      if (pos == null) {
+        if (mounted) {
+          setState(() => _locationLoading = false);
+        }
+        return;
+      }
       
       if (!mounted) return;
       setState(() => _userPosition = pos);
@@ -400,7 +445,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
       final ranked = _allStops
           .where((s) =>
-              s is Map &&
               s['lat'] != null &&
               (s['long'] ?? s['lng']) != null &&
               s['stop'] != null)
@@ -408,8 +452,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
             final lat = double.tryParse(s['lat'].toString());
             final lng = double.tryParse((s['long'] ?? s['lng']).toString());
             if (lat == null || lng == null) return null;
+            // pos is guaranteed to be non-null at this point
             final dist = Geolocator.distanceBetween(
-              pos.latitude, pos.longitude, lat, lng,
+              pos!.latitude, pos!.longitude, lat, lng,
             );
             return (stopId: s['stop'].toString(), distance: dist);
           })
@@ -432,7 +477,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         if (mounted) setState(() => _highlightedStopId = null);
       });
 
-      // Only scroll if the toggle is still active
       await _scrollToStop(nearest.stopId);
 
     } catch (e) {
@@ -578,8 +622,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     } else {
       // 轉換為統一格式，並添加站點座標
       stops = stopGroups.map((group) {
-        final _co = _selectedCompany.toLowerCase();  // ✅ fixed: ensure lowercase key
-        final stopId = group['${_co}_stop_id'] ??
+        final coKey = _selectedCompany.toLowerCase();  // ✅ fixed: ensure lowercase key
+        final stopId = group['$coKey${'_stop_id'}'] ??
             group['kmb_stop_id'] ??
             group['ctb_stop_id'] ??
             group['gmb_stop_id'] ??
@@ -603,6 +647,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           'gmb_stop_id': group['gmb_stop_id'],
           'gmb_stop_seq': group['gmb_stop_seq'] ?? (seq0 + 1), // ← 新增
           'nlb_stop_id': group['nlb_stop_id'],
+          'lrtfeeder_stop_id': group['lrtfeeder_stop_id'],  // ✅ 新增 lrtfeeder stop ID
           'lat': coords?['lat'],
           'lng': coords?['lng'],
           'long': coords?['lng'],     // ✅ fixed: _buildStopCard reads 'long' first
@@ -614,11 +659,12 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
     if (mounted) {
       setState(() {
-        final normalizedStops = _normalizeStops(stops, company: _selectedCompany);
-        _allStops = normalizedStops;
+        // Stops from buildStopGroupsForRoute are already properly formatted
+        // No need to call _normalizeStops again (which was causing issues with circular routes)
+        _allStops = stops;
         data = {
           'route': widget.route,
-          'stops': normalizedStops,
+          'stops': stops,
           'companies': route.companies,
           'orig_tc': route.origTc,
           'orig_en': route.origEn,
@@ -636,6 +682,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   Future<void> _fetchFromCompanyApi() async {
     final company = _selectedCompany.toLowerCase();
     
+    
     try {
       switch (company) {
         case 'kmb':
@@ -648,7 +695,10 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           await _fetchNlbData();
           break;
         case 'gmb':
-          await _fetchGmbData();   // ← 新增
+          await _fetchGmbData();
+          break;
+        case 'lrtfeeder':
+          await _fetchMtrBusData();  
           break;
         default:
           throw Exception('Unsupported company: $company');
@@ -858,6 +908,90 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     }).toList();
 
     await _processStopEntries(entries, 'gmb');
+  }
+
+  Future<void> _fetchMtrBusData() async {
+    // MTR Bus API returns all stops for a route in one response
+    // We need to fetch the schedule and extract stop data
+    
+    debugPrint('🔍 _fetchMtrData: route=${widget.route}');
+    
+    // Determine language (default to Traditional Chinese)
+    final isEnglish = context.read<LanguageProvider>().isEnglish;
+    final language = isEnglish ? 'en' : 'zh';
+    
+    try {
+      // Fetch schedule from MTR Bus API
+      final schedule = await MtrBus.fetchSchedule(widget.route, language);
+      
+      // Extract all stops from the schedule
+      final allStops = MtrBus.extractStops(schedule);
+      
+      if (allStops.isEmpty) {
+        throw Exception('No MTR Bus stops found for route ${widget.route}');
+      }
+      
+      debugPrint('🔍 MTR Bus: found ${allStops.length} stops');
+      
+      // Convert to standard format
+      final stops = allStops.map((stop) {
+        final stopId = stop['busStopId']?.toString() ?? '';
+        final stopSeq = MtrBus.getStopSequence(stopId);
+        
+        // Extract direction from stop ID (D=downbound, U=upbound)
+        final direction = stopId.contains('-D') ? 'O' : 'I';
+        
+        return {
+          'seq': stopSeq,
+          'stop': stopId,
+          'name_tc': stop['busStopName_tc']?.toString(),
+          'name_en': stop['busStopName_en']?.toString(),
+          'lrtfeeder_stop_id': stopId,
+          'lat': stop['latitude']?.toString(),
+          'lng': stop['longitude']?.toString(),
+          'long': stop['longitude']?.toString(),
+          'fare': stop['fare']?.toString(),
+        };
+      }).toList();
+      
+      // Get route info from the schedule
+      final routeName = schedule['routeName']?.toString() ?? widget.route;
+      final routeStatus = schedule['routeStatus']?.toString() ?? '0';
+      
+      // Build origin/destination from first/last stop
+      String? origTc, origEn, destTc, destEn;
+      if (stops.isNotEmpty) {
+        final firstStop = stops.first;
+        final lastStop = stops.last;
+        
+        origTc = firstStop['name_tc']?.toString();
+        origEn = firstStop['name_en']?.toString();
+        destTc = lastStop['name_tc']?.toString();
+        destEn = lastStop['name_en']?.toString();
+      }
+      
+      if (mounted) {
+        setState(() {
+          _allStops = stops;
+          data = {
+            'route': widget.route,
+            'stops': stops,
+            'companies': ['lrtfeeder'],
+            'orig_tc': origTc,
+            'orig_en': origEn,
+            'dest_tc': destTc,
+            'dest_en': destEn,
+            'routeStatus': routeStatus,
+          };
+          loading = false;
+        });
+        _preFillStopKeys();
+        debugPrint('✅ MTR Bus data loaded: ${stops.length} stops');
+      }
+    } catch (e) {
+      debugPrint('❌ Error fetching MTR Bus data: $e');
+      rethrow;
+    }
   }
 
 
@@ -1071,11 +1205,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       };
     }).toList();
 
-    // ✅ 確保 _allStops 唔會含有 String 元素
-    assert(
-      enriched.every((e) => e is Map<String, dynamic>),
-      '_allStops contains non-map items',
-    );
     debugPrint('🔍 _processStopEntries: enriched=${enriched.length}');
     if (enriched.isNotEmpty) {
       debugPrint('🔍 _processStopEntries: first enriched=${enriched.first}');
@@ -1201,7 +1330,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       final companyStopId = stop[coKey]?.toString();
 
       if (companyStopId == null || companyStopId.isEmpty) {
-        debugPrint('⚠️ No ${company} stop ID in stop map (key=$coKey), skipping');
+        debugPrint('⚠️ No $company stop ID in stop map (key=$coKey), skipping');
         companyEtasMap[company] = [];
         continue;
       }
@@ -1230,6 +1359,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
                     routeVariant: eta.routeVariant,
                   ))
               .toList();
+
         }).catchError((e) {
           debugPrint('❌ Failed to fetch ETA for $company: $e');
           companyEtasMap[company] = [];
@@ -1255,7 +1385,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       // realtime: 必須 >10 秒才顯示
       // non-realtime / scheduled: 直接顯示（只過濾負數離站）
       if (eta.isRealtime) {
-        return diffSec > 15;
+        return diffSec > 45;
       } else {
         return diffSec > -30; // 預測班次寬容 30 秒
       }
@@ -1274,232 +1404,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
     _fetchData();
   }
-
-  /// 选择路线变体
-  void _onRouteVariantSelected(Map<String, dynamic> variant) {
-    final company = variant['company'] as String? ?? '';
-    
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => UnifiedRouteStatusPage(
-          route: widget.route,
-          companies: widget.companies,
-          initialCompany: _selectedCompany,
-          bound: variant['bound'] as String?,
-          serviceType: variant['serviceType'] as String?,
-          initialRouteId: variant['routeId'] as String?,
-          useUnifiedDb: true,
-        ),
-      ),
-    );
-  }
-
-  /// 构建路线变体卡片
-  Widget _buildRouteVariantCard(Map<String, dynamic> variant, bool isEnglish) {
-    final theme = Theme.of(context);
-    final bound = variant['bound'] as String?;
-    final serviceType = variant['serviceType'] as String?;
-    final orig = isEnglish 
-        ? (variant['orig_en'] ?? variant['orig_tc'] ?? '') 
-        : (variant['orig_tc'] ?? variant['orig_en'] ?? '');
-    final dest = isEnglish 
-        ? (variant['dest_en'] ?? variant['dest_tc'] ?? '') 
-        : (variant['dest_tc'] ?? variant['dest_en'] ?? '');
-    
-    // 方向标签
-    String directionLabel = bound == 'O'
-        ? (isEnglish ? 'Outbound' : '去程')
-        : (bound == 'I' 
-            ? (isEnglish ? 'Inbound' : '回程')
-            : (bound ?? ''));
-    
-    // 服务类型标签（徽章样式）
-    String serviceTypeLabel = '普通';
-    final company = variant['company'] as String? ?? '';
-    Color serviceTypeBgColor = theme.colorScheme.secondaryContainer;
-    Color serviceTypeTextColor = theme.colorScheme.onSecondaryContainer;
-    
-    if (company.toLowerCase() == 'gmb') {
-      // GMB: 显示地区名称
-      final gmbRegion = variant['gmbRegion'] as String?;
-      serviceTypeLabel = _getGmbRegionName(gmbRegion, isEnglish);
-      serviceTypeBgColor = theme.colorScheme.tertiaryContainer;
-      serviceTypeTextColor = theme.colorScheme.onTertiaryContainer;
-    } else {
-      // 其他公司: 显示服务类型
-      switch (serviceType) {
-        case '1': 
-          serviceTypeLabel = isEnglish ? 'Ordinary' : '普通';
-          serviceTypeBgColor = theme.colorScheme.secondaryContainer;
-          serviceTypeTextColor = theme.colorScheme.onSecondaryContainer;
-          break;
-        case '2': 
-          serviceTypeLabel = isEnglish ? 'Express' : '特快';
-          serviceTypeBgColor = theme.colorScheme.primaryContainer;
-          serviceTypeTextColor = theme.colorScheme.onPrimaryContainer;
-          break;
-        case '3': 
-          serviceTypeLabel = isEnglish ? 'Holiday' : '假日';
-          serviceTypeBgColor = theme.colorScheme.errorContainer;
-          serviceTypeTextColor = theme.colorScheme.onErrorContainer;
-          break;
-        case '4': 
-          serviceTypeLabel = isEnglish ? 'Night' : '通宵';
-          serviceTypeBgColor = theme.colorScheme.surfaceVariant;
-          serviceTypeTextColor = theme.colorScheme.onSurfaceVariant;
-          break;
-      }
-    }
-    
-    // 检查是否是当前选中的变体
-    final isSelected = variant['routeId'] == widget.initialRouteId ||
-                       (bound == widget.bound && serviceType == widget.serviceType);
-    
-    return GestureDetector(
-      onTap: () => _onRouteVariantSelected(variant),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isSelected 
-              ? theme.colorScheme.primaryContainer 
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected 
-                ? theme.colorScheme.primary 
-                : theme.colorScheme.outline.withValues(alpha: 0.2),
-            width: isSelected ? 2 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            // 方向指示器
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                directionLabel,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // 路线信息
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        orig,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Icon(
-                          Icons.arrow_forward,
-                          size: 14,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      Text(
-                        dest,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // 服务类型徽章
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: serviceTypeBgColor,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      serviceTypeLabel,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: serviceTypeTextColor,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 选中指示器
-            if (isSelected)
-              Icon(
-                Icons.check_circle,
-                color: theme.colorScheme.primary,
-                size: 20,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 判断是否应该显示路线变体切换器
-  bool _shouldShowVariantSwitcher() {
-    if (_routeVariants.isEmpty) return false;
-    
-    final firstCompany = _routeVariants.first['company'] as String? ?? '';
-    
-    if (firstCompany.toLowerCase() == 'gmb') {
-      // GMB: 检查是否有多个不同的地区
-      final regions = _routeVariants
-          .map((v) => v['gmbRegion'] as String?)
-          .whereType<String>()
-          .toSet();
-      return regions.length > 1;
-    } else {
-      // 其他公司: 检查是否有多个不同的方向或服务类型
-      final bounds = _routeVariants
-          .map((v) => v['bound'] as String?)
-          .whereType<String>()
-          .toSet();
-      final serviceTypes = _routeVariants
-          .map((v) => v['serviceType'] as String?)
-          .whereType<String>()
-          .toSet();
-      return bounds.length > 1 || serviceTypes.length > 1;
-    }
-  }
-
-  /// 获取 GMB 地区名称
-  String _getGmbRegionName(String? region, bool isEnglish) {
-    if (region == null) return 'GMB';
-    switch (region.toUpperCase()) {
-      case 'HKI':
-        return isEnglish ? 'Hong Kong Island' : '香港島';
-      case 'KLN':
-        return isEnglish ? 'Kowloon' : '九龍';
-      case 'NT':
-        return isEnglish ? 'New Territories' : '新界';
-      default:
-        return region;
-    }
-  }
-
 
   @override
   Widget build(BuildContext context) {
@@ -1668,10 +1572,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     debugPrint('🔍 _buildListView: stops length=${stops.length}, type=${stops.runtimeType}');
     if (stops.isNotEmpty) {
       debugPrint('🔍 _buildListView: first stop type=${stops.first.runtimeType}, value=${stops.first}');
-      if (stops.first is Map) {
-        debugPrint('🔍 _buildListView: first stop keys=${(stops.first as Map).keys.toList()}');
-      }
-    }
+      debugPrint('🔍 _buildListView: first stop keys=${(stops.first as Map).keys.toList()}');
+        }
 
     return CustomScrollView(
       controller: _scrollController,
@@ -1691,10 +1593,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
                 }
                 final stop = stops[index];
                 debugPrint('🔍 Accessed stop at index=$index: type=${stop.runtimeType}');
-                if (stop is! Map<String, dynamic>) {
-                  debugPrint('❌ Stop is not Map<String, dynamic>: ${stop.runtimeType} = $stop');
-                  return const SizedBox.shrink();
-                }
                 return _buildStopCard(stop, index.toString(), isEnglish);
               } catch (e, stackTrace) {
                 debugPrint('❌ Error accessing stops[$index]: $e');
@@ -1831,8 +1729,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     final fare = stop['fare']?.toString() ?? '';
 
     final name = isEnglish
-    ? (stop['name_en'].toString().toTitleCase() ?? stop['name_tc'] ?? stopId)
-    : (stop['name_tc'] ?? stop['name_en'].toString().toTitleCase() ?? stopId);
+    ? (stop['name_en']?.toString().toTitleCase() ?? stop['name_tc'] ?? stopId)
+    : (stop['name_tc'] ?? stop['name_en']?.toString().toTitleCase() ?? stopId);
 
 
     final etas = _etaByStopId[stopId] ?? <UnifiedEta>[];
@@ -2147,8 +2045,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     );
 
     // 添加 Material 3 弹跳效果
-    return content
-        .animate()
+    return content;
+        /**.animate()
         .slideY(
           begin: -0.1,
           end: 0,
@@ -2159,6 +2057,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           duration: MotionConstants.contentTransition * 0.6,
           curve: MotionConstants.fadeInEasing,
         );
+        **/
   }
 
   Widget _buildOperatorEtaRow({
@@ -2230,61 +2129,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         (_nearestDistanceM ?? double.infinity) < _nearbyBadgeRange;
   }
 
-  /// 跳轉到地圖位置
-  void _jumpToMapLocation(double latitude, double longitude, {String? stopId}) {
-    // 設置高亮站點
-    if (stopId != null) {
-      setState(() {
-        _highlightedStopId = stopId;
-      });
-      
-      // 3 秒後清除高亮
-      _highlightTimer?.cancel();
-      _highlightTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() {
-            _highlightedStopId = null;
-          });
-        }
-      });
-    }
-    
-    if (!_showMapView) {
-      // 如果地圖未顯示，啟用地图视图
-      setState(() {
-        _showMapView = true;
-      });
-      _saveMapViewPreference(true);
-      // 等待地图构建后移动位置
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted) {
-            _mapController.move(LatLng(latitude, longitude), 17.0);
-          }
-        });
-      });
-    } else {
-      // 地图已显示，直接移动
-      _mapController.move(LatLng(latitude, longitude), 17.0);
-    }
-  }
-
-  /// 格式化 ETA 显示，包含相对时间和绝对时间
-  /// 示例："5分鐘 (19:56)", "即將到達 (19:56)", "已離開"
-  String _formatEtaList(List<UnifiedEta> etas) {
-    if (etas.isEmpty) return '';
-
-    final lang = context.read<LanguageProvider>();
-    final isEnglish = lang.isEnglish;
-
-    final valid = _filterValidEtas(etas);
-    if (valid.isEmpty) {
-      return lang.endEta;
-    }
-
-    return valid.take(3).map((eta) => eta.formatDisplay(isEnglish)).join(' · ');
-  }
-
   /// 构建 ETA widget 列表（每行一个 ETA，remark 显示在同一行）
   List<Widget> _buildEtaList(List<UnifiedEta> etas, bool isEnglish) {
     if (etas.isEmpty) return [];
@@ -2306,7 +2150,11 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       ];
     }
 
-    return valid.take(3).map((eta) {
+    // 按 sequence 升序排序，確保班次順序正確
+    final sorted = List<UnifiedEta>.from(valid)
+      ..sort((a, b) => a.sequence.compareTo(b.sequence));
+
+    return sorted.take(10).map((eta) {
       // 获取本地化的 remark
       final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
       
@@ -2333,245 +2181,29 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   }
 
   Widget _buildFloatingBar() {
-    final theme = Theme.of(context);
     final lang = context.read<LanguageProvider>();
     final isEnglish = lang.isEnglish;
     final companyProv = context.read<CompanyProvider>();
 
     // Get route origin and destination
-    final orig = isEnglish
-        ? (data?['orig_en'] ?? data?['orig_tc'] ?? '')
-        : (data?['orig_tc'] ?? data?['orig_en'] ?? '');
-    final dest = isEnglish
-        ? (data?['dest_en'] ?? data?['dest_tc'] ?? '')
-        : (data?['dest_tc'] ?? data?['dest_en'] ?? '');
+    final origTc = data?['orig_tc'] ?? '';
+    final origEn = data?['orig_en'] ?? '';
+    final destTc = data?['dest_tc'] ?? '';
+    final destEn = data?['dest_en'] ?? '';
 
-    return DraggableScrollableSheet(
+    return DraggableRouteSheet(
       controller: _draggableController,
-      initialChildSize: 0.18,
-      minChildSize: 0.1,
-      maxChildSize: 0.5,
-      snap: true,
-      builder: (context, scrollController) {
-        return ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          child: FakeGlass(
-            shape: const LiquidRoundedSuperellipse(borderRadius: 20),
-            settings: LiquidGlassSettings(
-              blur: 10,
-              thickness: 20,
-              glassColor: theme.colorScheme.surface.withValues(alpha: 0.3),
-            ),
-            child: ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.all(16),
-              children: [
-                // 拖動指示器
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                
-                // 方向指示器（路线起点和终点）
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: theme.colorScheme.outline.withValues(alpha: 0.15),
-                          width: 1.0,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        child: Row(
-                          children: [
-                            // 路线号和公司
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
-                              child: Row(
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 6.0),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          widget.route,
-                                          style: TextStyle(
-                                            fontSize: 24,
-                                            fontWeight: FontWeight.bold,
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                        Text(
-                                          companyProv.getName(_selectedCompany, isEnglish),
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w500,
-                                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    width: 36,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.primary.withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Icon(
-                                      Icons.directions_bus,
-                                      color: theme.colorScheme.primary,
-                                      size: 20,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            // 路线起点和终点
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // 起点
-                                  if (orig.isNotEmpty) ...[
-                                    Row(
-                                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                                      textBaseline: TextBaseline.alphabetic,
-                                      children: [
-                                        Text(
-                                          '${isEnglish ? 'From' : '由'}:  ',
-                                          style: TextStyle(
-                                            letterSpacing: -0.05,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w400,
-                                            height: 1,
-                                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: Text(
-                                            orig,
-                                            style: TextStyle(
-                                              letterSpacing: -0.05,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              height: 1,
-                                              color: theme.colorScheme.onSurface,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                  // 终点
-                                  if (dest.isNotEmpty) ...[
-                                    Row(
-                                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                                      textBaseline: TextBaseline.alphabetic,
-                                      children: [
-                                        Text(
-                                          '${isEnglish ? 'To' : '往'}:  ',
-                                          style: TextStyle(
-                                            letterSpacing: -0.05,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w400,
-                                            height: 1,
-                                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: Text(
-                                            dest,
-                                            style: TextStyle(
-                                              letterSpacing: -0.05,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              height: 1,
-                                              color: theme.colorScheme.onSurface,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                
-                const SizedBox(height: 12),
-                
-                // 公司選擇器
-                Text(
-                  isEnglish ? 'Operators' : '營運商',
-                  style: theme.textTheme.labelMedium,
-                ),
-                const SizedBox(height: 8),
-                
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: widget.companies.map((co) {
-                      final isSel = co == _selectedCompany;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          selected: isSel,
-                          label: Text(
-                            companyProv.getName(co, isEnglish),
-                          ),
-                          onSelected: (_) => _onCompanyChanged(co),
-                          backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                          selectedColor: companyProv.getBadgeBgColor(co, context),
-                          checkmarkColor: companyProv.getBadgeTextColor(co, context),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                
-                // 路线变体列表（如果存在多个变体）
-                if (_shouldShowVariantSwitcher()) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    isEnglish ? 'Route Variants' : '路線變體',
-                    style: theme.textTheme.labelMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  ..._routeVariants.map((variant) => _buildRouteVariantCard(variant, isEnglish)),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
+      routeNumber: widget.route,
+      selectedCompany: _selectedCompany,
+      originTc: origTc,
+      originEn: origEn,
+      destTc: destTc,
+      destEn: destEn,
+      isEnglish: isEnglish,
+      companies: widget.companies,
+      routeVariants: _routeVariants,
+      getCompanyName: (co) => companyProv.getName(co, isEnglish),
+      onCompanyChanged: (company) => _onCompanyChanged(company!),
     );
   }
 }
