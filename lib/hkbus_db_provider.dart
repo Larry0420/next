@@ -57,7 +57,7 @@ class UnifiedBusRoute {
       case 'mtr': return isEnglish ? 'MTR' : '港鐵';
       case 'lrtfeeder':
       case 'lrt_feeder':
-      case 'lrt-feeder': return isEnglish ? 'LRT Feeder' : '港鐵接駁';
+      case 'lrt-feeder': return isEnglish ? 'MTR Feeder' : '港鐵巴士';
       case 'gmb':
       case 'greenminibus': return isEnglish ? 'GMB' : '專線小巴';
       // 鐵路服務
@@ -667,9 +667,10 @@ class HkbusDbProvider extends ChangeNotifier {
     List<String> ctbStops = _safeExtractStopList(stopsMap, 'ctb', routeId);
     List<String> gmbStops = _safeExtractStopList(stopsMap, 'gmb', routeId);
     List<String> nlbStops = _safeExtractStopList(stopsMap, 'nlb', routeId);
+    List<String> lrtfeederStops = _safeExtractStopList(stopsMap, 'lrtfeeder', routeId);
 
     // 驗證至少有一個公司有站點數據
-    if (kmbStops.isEmpty && ctbStops.isEmpty && gmbStops.isEmpty && nlbStops.isEmpty) {
+    if (kmbStops.isEmpty && ctbStops.isEmpty && gmbStops.isEmpty && nlbStops.isEmpty && lrtfeederStops.isEmpty) {
       debugPrint('⚠️ No stops found for route $routeId');
       return [];
     }
@@ -686,7 +687,7 @@ class HkbusDbProvider extends ChangeNotifier {
 
 
     // 以長度最長的陣列為基準跑迴圈
-    int maxLength = [kmbStops.length, ctbStops.length, gmbStops.length, nlbStops.length]
+    int maxLength = [kmbStops.length, ctbStops.length, gmbStops.length, nlbStops.length, lrtfeederStops.length]
         .reduce((a, b) => a > b ? a : b);
     
     final stopMap = _stopMap ?? {};
@@ -701,7 +702,8 @@ class HkbusDbProvider extends ChangeNotifier {
       String? cId = i < ctbStops.length ? ctbStops[i] : null;
       String? gId = i < gmbStops.length ? gmbStops[i] : null;
       String? nId = i < nlbStops.length ? nlbStops[i] : null;
-      
+      String? lId = i < lrtfeederStops.length ? lrtfeederStops[i] : null;
+
       // ✅ AFTER – iterate [operator, stopId] pairs correctly
       // Helper: resolve all operator IDs from a stopMap entry
       Map<String, String> _resolveFromStopMap(dynamic key, Map stopMap) {
@@ -739,9 +741,9 @@ class HkbusDbProvider extends ChangeNotifier {
         }
       }
 
-      // 選擇用於顯示站點名稱的 ID（優先順序：KMB > CTB > GMB > NLB）
-      String displayId = kId ?? cId ?? gId ?? nId ?? '';
-      
+      // 選擇用於顯示站點名稱的 ID（優先順序：KMB > CTB > GMB > NLB > lrtfeeder）
+      String displayId = kId ?? cId ?? gId ?? nId ?? lId ?? '';
+
       stopGroups.add({
         'seq': i,
         'kmb_stop_id': kId,
@@ -749,6 +751,7 @@ class HkbusDbProvider extends ChangeNotifier {
         'gmb_stop_id': gId,
         'gmb_stop_seq': gId != null ? (i + 1) : null,  // 1-based sequence for GMB ETA API
         'nlb_stop_id': nId,
+        'lrtfeeder_stop_id': lId,
         'name_tc': getStopName(displayId, isEnglish: false),
         'name_en': getStopName(displayId, isEnglish: true),
         'fare':         i < fares.length ? fares[i] : null,         // ✅

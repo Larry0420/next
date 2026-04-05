@@ -17,7 +17,9 @@ import '../gmb_route_status_page.dart';
 import '../kmb_route_status_page.dart';
 import '../main.dart' show LanguageProvider, EnhancedPageRoute;
 import '../nlb_route_status_page.dart';
+import '../providers/location_provider.dart';
 import '../route_status_page.dart';
+import 'package:geolocator/geolocator.dart';
 import 'api/citybus.dart';
 import 'api/gmb.dart';
 import 'api/kmb.dart';
@@ -1123,6 +1125,10 @@ class _KmbDialerState extends State<KmbDialer> {
             // 如果使用統一數據庫，導航到 UnifiedRouteStatusPage
             // 否則根據公司導航到原有頁面
             if (_useUnifiedDb) {
+              // ✅ OPTIMIZED: Read pre-fetched location from provider
+              final locationProvider = context.read<LocationProvider>();
+              final Position? userLocation = locationProvider.currentPosition;
+              
               Navigator.of(context).push(EnhancedPageRoute(
                 builder: (_) => UnifiedRouteStatusPage(
                   route: r,
@@ -1132,6 +1138,8 @@ class _KmbDialerState extends State<KmbDialer> {
                   serviceType: serviceType,
                   initialRouteId: v['routeId']?.toString(),
                   useUnifiedDb: true,
+                  // ✅ NEW: Pass pre-fetched location
+                  initialLocation: userLocation,
                 ),
               ));
             } else {

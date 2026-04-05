@@ -18,6 +18,7 @@ import 'package:implicitly_animated_reorderable_list_2/implicitly_animated_reord
 import 'package:implicitly_animated_reorderable_list_2/transitions.dart';
 import 'package:intl/intl.dart';
 import 'package:lrt_next_train/hkbus_db_provider.dart';
+import 'package:lrt_next_train/providers/location_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -768,6 +769,10 @@ class LrtApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MtrCatalogProvider()),
         ChangeNotifierProvider(create: (_) => MtrScheduleProvider()),
         ChangeNotifierProvider(create: (_) => CompanyProvider()), // Add here
+        ChangeNotifierProvider(
+          create: (_) => LocationProvider()..initialize(),
+          lazy: false, // ✅ Initialize immediately on app startup
+        ),
         ChangeNotifierProvider(
           create: (_) => HkbusDbProvider()..initDb(),
           lazy: false, // ✅ 關鍵：設為 false 代表 App 一開就馬上執行 initDb

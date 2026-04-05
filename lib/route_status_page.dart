@@ -6,9 +6,12 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:lrt_next_train/toTitleCase.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'providers/location_provider.dart';
+
+import 'kmb/api/mtr_bus.dart';
 
 import 'hkbus_db_provider.dart';
 import 'kmb/company_name.dart';
@@ -33,6 +36,8 @@ class UnifiedRouteStatusPage extends StatefulWidget {
   final String? autoExpandStopId;
   final String? autoExpandSeq;
   final bool useUnifiedDb;
+  /// ✅ NEW: Accept pre-fetched location from navigation
+  final Position? initialLocation;
 
   const UnifiedRouteStatusPage({
     super.key,
@@ -45,6 +50,7 @@ class UnifiedRouteStatusPage extends StatefulWidget {
     this.autoExpandStopId,
     this.autoExpandSeq,
     this.useUnifiedDb = true,
+    this.initialLocation,
   });
 
   @override
@@ -348,31 +354,45 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     await prefs.setBool(_mapViewPreferenceKey, show);
   }
 
+  /// Initialize location from LocationProvider
+  /// 
+  /// Uses pre-fetched location from global provider instead of fetching again
   Future<void> _initializeLocation() async {
     try {
-      final status = await Permission.location.status;
-      if (status.isGranted) {
-        final last = await Geolocator.getLastKnownPosition();
-        if (mounted && last != null) {
-          setState(() => _userPosition = last);
-        }
-        
-        final current = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best,
-            timeLimit: Duration(seconds: 5),
-          ),
-        );
-        if (mounted) {
-          setState(() => _userPosition = current);
+      // ✅ Use passed location first (fastest)
+      if (widget.initialLocation != null) {
+        setState(() => _userPosition = widget.initialLocation);
+        debugPrint('✅ Using passed location from navigation');
+        return;
+      }
+      
+      // Fallback to provider
+      final locationProvider = context.read<LocationProvider>();
+      
+      // Use pre-fetched location from provider
+      if (locationProvider.hasLocation) {
+        setState(() => _userPosition = locationProvider.currentPosition);
+        debugPrint('✅ Using pre-fetched location from LocationProvider');
+      }
+      
+      // If no location available, try to refresh
+      if (_userPosition == null && locationProvider.hasPermission) {
+        await locationProvider.refreshLocation();
+        if (locationProvider.hasLocation) {
+          setState(() => _userPosition = locationProvider.currentPosition);
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('❌ Error initializing location from provider: $e');
+    }
   }
 
   /// 獲取用戶位置，更新最近站點，並滾動到該站點
   /// 參考 hkbus/hk-independent-bus-eta RouteEtaPage.tsx 邏輯：
   /// 排序找距離最小者，而非固定閾值，Nearby badge 另外設 200m 範圍
+  /// 
+  /// ✅ OPTIMIZED: Uses pre-fetched location from LocationProvider
+  /// instead of fetching location again
   Future<void> _getUserLocationAndScrollToNearest(bool jump) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_nearbyPreferenceKey, jump);
@@ -380,24 +400,43 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     // 1. Handle the "Toggle Off" state immediately
     if (!jump) {
       setState(() {
-        _nearestStopId = null;     // Clear the nearby indicator
+        _nearestStopId = null;
         _nearestDistanceM = null;
-        _highlightedStopId = null; // Remove highlighting
+        _highlightedStopId = null;
         _locationLoading = false;
       });
-      return; // Stop here; don't fetch GPS or scroll
+      return;
     }
 
     if (!mounted) return;
     setState(() => _locationLoading = true);
 
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: Duration(seconds: 5),
-        ),
-      );
+      // ✅ OPTIMIZED: Use pre-fetched location from provider
+      final locationProvider = context.read<LocationProvider>();
+      Position? pos = locationProvider.currentPosition;
+      
+      // If no location available, try to refresh
+      if (pos == null && locationProvider.hasPermission) {
+        await locationProvider.refreshLocation();
+        pos = locationProvider.currentPosition;
+      }
+      
+      // Handle permission denied
+      if (pos == null && locationProvider.permissionDenied) {
+        if (mounted) {
+          setState(() => _locationLoading = false);
+        }
+        // Optionally show permission request dialog
+        return;
+      }
+      
+      if (pos == null) {
+        if (mounted) {
+          setState(() => _locationLoading = false);
+        }
+        return;
+      }
       
       if (!mounted) return;
       setState(() => _userPosition = pos);
@@ -413,8 +452,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
             final lat = double.tryParse(s['lat'].toString());
             final lng = double.tryParse((s['long'] ?? s['lng']).toString());
             if (lat == null || lng == null) return null;
+            // pos is guaranteed to be non-null at this point
             final dist = Geolocator.distanceBetween(
-              pos.latitude, pos.longitude, lat, lng,
+              pos!.latitude, pos!.longitude, lat, lng,
             );
             return (stopId: s['stop'].toString(), distance: dist);
           })
@@ -437,7 +477,6 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         if (mounted) setState(() => _highlightedStopId = null);
       });
 
-      // Only scroll if the toggle is still active
       await _scrollToStop(nearest.stopId);
 
     } catch (e) {
@@ -642,8 +681,16 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   Future<void> _fetchFromCompanyApi() async {
     final company = _selectedCompany.toLowerCase();
     
+    // ✅ FIX: Redirect lrtfeeder to MTR Bus API for MTR Bus routes
+    // This handles the data integrity issue where MTR Bus routes are incorrectly marked as lrtfeeder
+    String effectiveCompany = company;
+    if (company == 'lrtfeeder' && MtrBus.isMtrBusRoute(widget.route)) {
+      effectiveCompany = 'lrtfeeder';
+      debugPrint('✅ Redirecting lrtfeeder route ${widget.route} to MTR Bus API');
+    }
+    
     try {
-      switch (company) {
+      switch (effectiveCompany) {
         case 'kmb':
           await _fetchKmbData();
           break;
@@ -654,13 +701,16 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           await _fetchNlbData();
           break;
         case 'gmb':
-          await _fetchGmbData();   // ← 新增
+          await _fetchGmbData();
+          break;
+        case 'lrtfeeder':
+          await _fetchFromUnifiedDb();
           break;
         default:
-          throw Exception('Unsupported company: $company');
+          throw Exception('Unsupported company: $effectiveCompany');
       }
     } catch (e) {
-      debugPrint('Error fetching from $company API: $e');
+      debugPrint('Error fetching from $effectiveCompany API: $e');
       rethrow;
     }
   }
@@ -864,6 +914,90 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     }).toList();
 
     await _processStopEntries(entries, 'gmb');
+  }
+
+  Future<void> _fetchMtrData() async {
+    // MTR Bus API returns all stops for a route in one response
+    // We need to fetch the schedule and extract stop data
+    
+    debugPrint('🔍 _fetchMtrData: route=${widget.route}');
+    
+    // Determine language (default to Traditional Chinese)
+    final isEnglish = context.read<LanguageProvider>().isEnglish;
+    final language = isEnglish ? 'en' : 'zh';
+    
+    try {
+      // Fetch schedule from MTR Bus API
+      final schedule = await MtrBus.fetchSchedule(widget.route, language);
+      
+      // Extract all stops from the schedule
+      final allStops = MtrBus.extractStops(schedule);
+      
+      if (allStops.isEmpty) {
+        throw Exception('No MTR Bus stops found for route ${widget.route}');
+      }
+      
+      debugPrint('🔍 MTR Bus: found ${allStops.length} stops');
+      
+      // Convert to standard format
+      final stops = allStops.map((stop) {
+        final stopId = stop['busStopId']?.toString() ?? '';
+        final stopSeq = MtrBus.getStopSequence(stopId);
+        
+        // Extract direction from stop ID (D=downbound, U=upbound)
+        final direction = stopId.contains('-D') ? 'O' : 'I';
+        
+        return {
+          'seq': stopSeq,
+          'stop': stopId,
+          'name_tc': stop['busStopName_tc']?.toString(),
+          'name_en': stop['busStopName_en']?.toString(),
+          'lrtfeeder_stop_id': stopId,
+          'lat': stop['latitude']?.toString(),
+          'lng': stop['longitude']?.toString(),
+          'long': stop['longitude']?.toString(),
+          'fare': stop['fare']?.toString(),
+        };
+      }).toList();
+      
+      // Get route info from the schedule
+      final routeName = schedule['routeName']?.toString() ?? widget.route;
+      final routeStatus = schedule['routeStatus']?.toString() ?? '0';
+      
+      // Build origin/destination from first/last stop
+      String? origTc, origEn, destTc, destEn;
+      if (stops.isNotEmpty) {
+        final firstStop = stops.first;
+        final lastStop = stops.last;
+        
+        origTc = firstStop['name_tc']?.toString();
+        origEn = firstStop['name_en']?.toString();
+        destTc = lastStop['name_tc']?.toString();
+        destEn = lastStop['name_en']?.toString();
+      }
+      
+      if (mounted) {
+        setState(() {
+          _allStops = stops;
+          data = {
+            'route': widget.route,
+            'stops': stops,
+            'companies': ['lrtfeeder'],
+            'orig_tc': origTc,
+            'orig_en': origEn,
+            'dest_tc': destTc,
+            'dest_en': destEn,
+            'routeStatus': routeStatus,
+          };
+          loading = false;
+        });
+        _preFillStopKeys();
+        debugPrint('✅ MTR Bus data loaded: ${stops.length} stops');
+      }
+    } catch (e) {
+      debugPrint('❌ Error fetching MTR Bus data: $e');
+      rethrow;
+    }
   }
 
 
@@ -2020,7 +2154,11 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       ];
     }
 
-    return valid.take(3).map((eta) {
+    // 按 sequence 升序排序，確保班次順序正確
+    final sorted = List<UnifiedEta>.from(valid)
+      ..sort((a, b) => a.sequence.compareTo(b.sequence));
+
+    return sorted.take(3).map((eta) {
       // 获取本地化的 remark
       final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
       
