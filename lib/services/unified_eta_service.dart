@@ -108,6 +108,11 @@ class RouteContext {
   final String? gmbRegion;   // GMB region (HKI/KLN/NT)
   final int? gmbRouteSeq;    // GMB route direction (1 or 2)
   final int? gmbStopSeq;     // GMB stop sequence within the route (1-based)
+  // MTR Heavy Rail specific
+  final String? mtrLineCode;   // MTR line code (e.g., 'TML', 'TKL', 'EAL')
+  final String? mtrStationCode; // MTR station code (e.g., 'HOM', 'TKO')
+  // LRT specific
+  final int? lrtStationId;     // LRT station ID (integer)
 
   RouteContext({
     required this.routeNumber,
@@ -118,6 +123,9 @@ class RouteContext {
     this.gmbRegion,
     this.gmbRouteSeq = 1,
     this.gmbStopSeq,         // nullable — only set per-stop during ETA fetch
+    this.mtrLineCode,
+    this.mtrStationCode,
+    this.lrtStationId,
   });
 
   /// 建立一個只改部分欄位的副本，方便 per-stop ETA context override
@@ -130,6 +138,9 @@ class RouteContext {
     String? gmbRegion,
     int? gmbRouteSeq,
     int? gmbStopSeq,
+    String? mtrLineCode,
+    String? mtrStationCode,
+    int? lrtStationId,
   }) {
     return RouteContext(
       routeNumber: routeNumber ?? this.routeNumber,
@@ -140,13 +151,17 @@ class RouteContext {
       gmbRegion: gmbRegion ?? this.gmbRegion,
       gmbRouteSeq: gmbRouteSeq ?? this.gmbRouteSeq,
       gmbStopSeq: gmbStopSeq ?? this.gmbStopSeq,
+      mtrLineCode: mtrLineCode ?? this.mtrLineCode,
+      mtrStationCode: mtrStationCode ?? this.mtrStationCode,
+      lrtStationId: lrtStationId ?? this.lrtStationId,
     );
   }
 
   @override
   String toString() {
     return 'RouteContext(route: $routeNumber, bound: $bound, svc: $serviceType, '
-        'nlb: $nlbRouteId, gmb: $gmbRouteId/$gmbRegion seq=$gmbRouteSeq stopSeq=$gmbStopSeq)';
+        'nlb: $nlbRouteId, gmb: $gmbRouteId/$gmbRegion seq=$gmbRouteSeq stopSeq=$gmbStopSeq, '
+        'mtr: $mtrLineCode/$mtrStationCode, lrt: $lrtStationId)';
   }
 }
 
