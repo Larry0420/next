@@ -537,6 +537,10 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   /// 獲取路線數據
   Future<void> _fetchData() async {
     if (!mounted) return;
+    
+    // Clear stale caches when fetching new data to prevent wrong ETA being shown
+    _resetExpandedEtaTracking(clearEtaCache: true);
+    
     setState(() {
       loading = true;
       error = null;
@@ -914,7 +918,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
     // MTR Bus API returns all stops for a route in one response
     // We need to fetch the schedule and extract stop data
     
-    debugPrint('🔍 _fetchMtrData: route=${widget.route}');
+    debugPrint('🔍 _fetchMtrData: route=${widget.route}, bound=${widget.bound}');
     
     // Determine language (default to Traditional Chinese)
     final isEnglish = context.read<LanguageProvider>().isEnglish;
@@ -931,17 +935,28 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
         throw Exception('No MTR Bus stops found for route ${widget.route}');
       }
       
-      debugPrint('🔍 MTR Bus: found ${allStops.length} stops');
+      debugPrint('🔍 MTR Bus: found ${allStops.length} stops (all directions)');
       
-      // Convert to standard format
-      final stops = allStops.map((stop) {
+      // ✅ Determine target direction: D=downbound=O, U=upbound=I
+      final targetBound = widget.bound?.toUpperCase() ?? 'O';
+      final targetDirection = targetBound == 'I' ? 'U' : 'D';
+      
+      // Convert to standard format and filter by direction
+      final stops = <Map<String, dynamic>>[];
+      for (final stop in allStops) {
         final stopId = stop['busStopId']?.toString() ?? '';
         final stopSeq = MtrBus.getStopSequence(stopId);
         
-        // Extract direction from stop ID (D=downbound, U=upbound)
-        final direction = stopId.contains('-D') ? 'O' : 'I';
+        // ✅ Extract direction from stop ID (D=downbound, U=upbound)
+        final stopDirection = MtrBus.getDirectionFromStopId(stopId);
+        final directionChar = stopId.contains('-D') ? 'D' : (stopId.contains('-U') ? 'U' : '');
         
-        return {
+        // ✅ Filter: Only include stops matching target direction
+        if (directionChar.isNotEmpty && directionChar != targetDirection) {
+          continue;  // Skip stops from wrong direction
+        }
+        
+        stops.add({
           'seq': stopSeq,
           'stop': stopId,
           'name_tc': stop['busStopName_tc']?.toString(),
@@ -951,8 +966,11 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           'lng': stop['longitude']?.toString(),
           'long': stop['longitude']?.toString(),
           'fare': stop['fare']?.toString(),
-        };
-      }).toList();
+          'bound': stopDirection,  // ✅ Add bound to stop data
+        });
+      }
+      
+      debugPrint('🔍 MTR Bus: ${stops.length} stops after direction filter (target=$targetDirection)');
       
       // Get route info from the schedule
       final routeName = schedule['routeName']?.toString() ?? widget.route;
@@ -1116,11 +1134,15 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
     _etaRefreshInFlight = true;
     try {
-      final expandedStops = _expandedStopsById.values.toList(growable: false);
-
-      for (final stop in expandedStops) {
+      // Use fresh stop data from _allStops, not stale cached stop map
+      // This ensures ETA is fetched with correct stop IDs after route/company changes
+      for (final stopId in _expandedStopsById.keys.toList()) {
+        final freshStop = _allStops.firstWhere(
+          (s) => s['stop']?.toString() == stopId,
+          orElse: () => _expandedStopsById[stopId]!,  // fallback to cached if not found
+        );
         await _fetchEtaForSingleStop(
-          stop,
+          freshStop,
           force: true,
           showLoading: false,
         );
@@ -1274,7 +1296,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       List<UnifiedEta> etas = [];
 
       if (widget.companies.length > 1 && widget.useUnifiedDb) {
-        etas = await _fetchJointOperationEtas(stop);
+        etas = await _fetchJointOperationEtas(stop, force: force);
       } else {
         final co = _selectedCompany.toLowerCase();
         final companyStopId =
@@ -1300,6 +1322,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           routeNumber: widget.route,
           stopId: companyStopId,
           routeContext: effectiveContext,  // ← 用 effectiveContext 而非 _routeContext
+          useCache: !force,  // ← Bypass cache when force refresh is requested
         );
       }
 
@@ -1319,8 +1342,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
   /// 獲取聯營路線的所有公司 ETA
   Future<List<UnifiedEta>> _fetchJointOperationEtas(
-    Map<String, dynamic> stop,
-  ) async {
+    Map<String, dynamic> stop, {
+    bool force = false,
+  }) async {
     final companyEtasMap = <String, List<UnifiedEta>>{};
     final futures = <Future<void>>[];
 
@@ -1343,6 +1367,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           stopId: companyStopId,
           routeContext:
               _routeContext ?? RouteContext(routeNumber: widget.route),
+          useCache: !force,  // ← Bypass cache when force refresh is requested
         )
             .then((companyEtas) {
           companyEtasMap[company] = companyEtas
@@ -1562,11 +1587,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   }
 
   Widget _buildListView(DeveloperSettingsProvider devSettings, bool isEnglish) {
-    // ✅ 直接用 _normalizeStops，完全消除 List<dynamic> 和 runtime cast
-    final List<Map<String, dynamic>> stops = _normalizeStops(
-      data?['stops'],
-      company: _selectedCompany,
-    );
+    // Use _allStops directly - already normalized in _fetchFromUnifiedDb/_processStopEntries
+    // Avoid redundant _normalizeStops call which can cause stop ID mapping issues
+    final List<Map<String, dynamic>> stops = _allStops;
 
     // 🔍 DEBUG: Track stops data
     debugPrint('🔍 _buildListView: stops length=${stops.length}, type=${stops.runtimeType}');
@@ -2150,11 +2173,24 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       ];
     }
 
-    // 按 sequence 升序排序，確保班次順序正確
-    final sorted = List<UnifiedEta>.from(valid)
-      ..sort((a, b) => a.sequence.compareTo(b.sequence));
+    // Sort by ETA time (not sequence - unreliable for MTR Bus where all sequences are equal)
+    // This ensures correct chronological order for all companies
+    valid.sort((a, b) => a.eta.compareTo(b.eta));
 
-    return sorted.take(3).map((eta) {
+    // Deduplicate by ETA time (within 60 seconds tolerance)
+    // Prevents duplicate buses from showing (API may return duplicates)
+    final deduplicated = <UnifiedEta>[];
+    for (final eta in valid) {
+      final isDuplicate = deduplicated.any((existing) {
+        final timeDiff = (eta.eta.difference(existing.eta)).abs();
+        return timeDiff.inSeconds < 60;
+      });
+      if (!isDuplicate) {
+        deduplicated.add(eta);
+      }
+    }
+
+    return deduplicated.take(3).map((eta) {
       // 获取本地化的 remark
       final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
       

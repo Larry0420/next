@@ -186,7 +186,7 @@ class UnifiedEtaService {
     bool useCache = true,
     Duration ttl = _defaultCacheTtl,
   }) async {
-    final cacheKey = _buildCacheKey(company, routeNumber, stopId);
+    final cacheKey = _buildCacheKey(company, routeNumber, stopId, routeContext.bound);
 
     // 檢查內存緩存
     if (useCache && _isCacheValid(cacheKey)) {
@@ -291,8 +291,8 @@ class UnifiedEtaService {
   }
 
   /// 清除指定站點的緩存
-  void clearCache(String company, String routeNumber, String stopId) {
-    final cacheKey = _buildCacheKey(company, routeNumber, stopId);
+  void clearCache(String company, String routeNumber, String stopId, [String? bound]) {
+    final cacheKey = _buildCacheKey(company, routeNumber, stopId, bound);
     _etaCache.remove(cacheKey);
     _removeFromPrefs(cacheKey);
   }
@@ -317,6 +317,7 @@ class UnifiedEtaService {
     RouteContext context,
   ) async {
     final serviceType = context.serviceType ?? '1';
+    final bound = context.bound;
 
     final rawEtas = await Kmb.fetchStopRouteEta(
       stopId.toUpperCase(),
@@ -324,7 +325,22 @@ class UnifiedEtaService {
       serviceType,
     );
 
-    return rawEtas.map((eta) {
+    // ✅ Filter by direction (bound) to prevent showing ETAs from wrong direction
+    // Some stops serve multiple directions, API returns ETAs for all directions
+    final filteredEtas = rawEtas.where((eta) {
+      if (bound != null && bound.isNotEmpty) {
+        final boundChar = bound[0].toUpperCase();
+        final etaDir = eta['dir']?.toString().trim().toUpperCase() ??
+                       eta['bound']?.toString().trim().toUpperCase() ?? '';
+        // Skip ETAs from different direction
+        if (etaDir.isNotEmpty && etaDir[0] != boundChar) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+
+    return filteredEtas.map((eta) {
       final etaTime = _parseTimestamp(eta['eta']?.toString());
       final diff = _calculateDiffMinutes(etaTime);
 
@@ -350,13 +366,30 @@ class UnifiedEtaService {
     String routeNumber,
     RouteContext context,
   ) async {
+    final bound = context.bound;
+
     final rawEtas = await Citybus.fetchEta(
       stopId.padLeft(6, '0'),
       routeNumber.toUpperCase(),
       companyId: 'ctb',
     );
 
-    return rawEtas.map((eta) {
+    // ✅ Filter by direction (bound) to prevent showing ETAs from wrong direction
+    // Some stops serve multiple directions, API returns ETAs for all directions
+    final filteredEtas = rawEtas.where((eta) {
+      if (bound != null && bound.isNotEmpty) {
+        final boundChar = bound[0].toUpperCase();
+        final etaDir = eta['dir']?.toString().trim().toUpperCase() ??
+                       eta['bound']?.toString().trim().toUpperCase() ?? '';
+        // Skip ETAs from different direction
+        if (etaDir.isNotEmpty && etaDir[0] != boundChar) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+
+    return filteredEtas.map((eta) {
       final etaTime = _parseTimestamp(eta['eta']?.toString());
       final diff = _calculateDiffMinutes(etaTime);
 
@@ -596,10 +629,9 @@ class UnifiedEtaService {
       return [];
     }
     
-    // Get stop sequence
-    final stopSeq = MtrBus.getStopSequence(stopId);
-    
     // Convert to UnifiedEta with proper validation
+    // Note: We don't use stopSeq for sequence because all buses at the same stop
+    // would have the same sequence. We'll assign proper arrival order after sorting.
     final validEtas = <UnifiedEta>[];
     
     for (final bus in buses.cast<Map<String, dynamic>>()) {
@@ -610,18 +642,35 @@ class UnifiedEtaService {
       // Determine valid time to use
       int? validSeconds;
       
-      // Prefer arrival time if valid (allow 0 for "Arriving / Departed" per MTR API spec)
-      if (arrivalSeconds != null && arrivalSeconds >= 0) {
-        validSeconds = arrivalSeconds;  // ✅ 修改：允許 0（Arriving / Departed）
-      } 
-      // Fallback to departure time if valid
-      //else if (departureSeconds != null && departureSeconds > 0) {
-      //  validSeconds = departureSeconds;
-      //}
+      // ✅ MTR Bus ETA time logic:
+      // - For FIRST STOP (terminus): arrivalTimeInSecond is "next bus arrival at terminus" (could be hours)
+      //   Use departureTimeInSecond for actual departure time
+      // - For INTERMEDIATE stops: arrivalTimeInSecond is arrival time (what passengers want)
+      //   departureTimeInSecond is departure time (after door opens/closes)
+      // - arrivalTimeInSecond = 0 means "Arriving"
+      // - departureTimeInSecond < 0 means "Departed"
+      
+      // Check if this is a terminus stop (arrival time >= 24 hours indicates scheduled bus)
+      final isTerminusStop = arrivalSeconds != null && arrivalSeconds >= 86400;
+      
+      if (isTerminusStop) {
+        // First stop/terminus: use departure time
+        if (departureSeconds != null && departureSeconds >= 0) {
+          validSeconds = departureSeconds;
+        }
+      } else {
+        // Intermediate stops: prefer arrival time (what passengers want to know)
+        if (arrivalSeconds != null && arrivalSeconds >= 0) {
+          validSeconds = arrivalSeconds;
+        } else if (departureSeconds != null && departureSeconds >= 0) {
+          // Fallback to departure if arrival invalid
+          validSeconds = departureSeconds;
+        }
+      }
       
       // Skip this bus if no valid time found
       if (validSeconds == null) {
-        debugPrint('⚠️ MTR Bus: Skipping bus ${bus['busId']} - no valid ETA time');
+        debugPrint('⚠️ MTR Bus: Skipping bus ${bus['busId']} - no valid ETA time (arrival=$arrivalSeconds, departure=$departureSeconds)');
         continue;
       }
       
@@ -638,14 +687,11 @@ class UnifiedEtaService {
       // Extract remarks
       final busRemark = bus['busRemark']?.toString();
       
-      // Use stop sequence for ordering (not busId!)
-      // ⚠️ Fix: busId is vehicle number (e.g., 804, 807, 819), not time order
-      final sequence = stopSeq;  // ✅ 修正：使用站點序號而非巴士編號
-      
+      // Use 0 as placeholder for sequence - will be assigned proper arrival order after sorting
       validEtas.add(UnifiedEta(
         company: 'lrtfeeder',
         eta: etaTime,
-        sequence: sequence,
+        sequence: 0,  // Placeholder - assigned below after sorting
         remarkTc: busRemark,
         remarkEn: busRemark,
         remarkSc: busRemark,
@@ -653,12 +699,39 @@ class UnifiedEtaService {
       ));
     }
 
-    // lrtfeeder 的 sequence 是 busId（車輛 ID），不是時間順序
-    // 需要按 eta 時間排序才能得到正確的班次順序
-    validEtas.sort((a, b) => a.eta.compareTo(b.eta));
+    // ✅ Deduplicate by ETA time (within 60 seconds tolerance) to prevent duplicate buses
+    final deduplicatedEtas = <UnifiedEta>[];
+    for (final eta in validEtas) {
+      final isDuplicate = deduplicatedEtas.any((existing) {
+        final timeDiff = (eta.eta.difference(existing.eta)).abs();
+        return timeDiff.inSeconds < 60;  // Same bus if within 60 seconds
+      });
+      if (!isDuplicate) {
+        deduplicatedEtas.add(eta);
+      }
+    }
 
-    debugPrint('✅ MTR Bus: Found ${validEtas.length} valid ETAs for stop $stopId');
-    return validEtas;
+    // Sort by ETA time to get correct arrival order
+    deduplicatedEtas.sort((a, b) => a.eta.compareTo(b.eta));
+    
+    // ✅ Assign proper sequence based on arrival order (1, 2, 3...)
+    for (int i = 0; i < deduplicatedEtas.length; i++) {
+      deduplicatedEtas[i] = UnifiedEta(
+        company: deduplicatedEtas[i].company,
+        eta: deduplicatedEtas[i].eta,
+        diffMinutes: deduplicatedEtas[i].diffMinutes,
+        sequence: i + 1,  // ✅ Proper arrival order sequence
+        remarkTc: deduplicatedEtas[i].remarkTc,
+        remarkEn: deduplicatedEtas[i].remarkEn,
+        remarkSc: deduplicatedEtas[i].remarkSc,
+        isRealtime: deduplicatedEtas[i].isRealtime,
+        isWheelchairAccessible: deduplicatedEtas[i].isWheelchairAccessible,
+        routeVariant: deduplicatedEtas[i].routeVariant,
+      );
+    }
+
+    debugPrint('✅ MTR Bus: Found ${validEtas.length} ETAs, ${deduplicatedEtas.length} after dedup for stop $stopId');
+    return deduplicatedEtas;
   }
 
   // ===========================================================================
@@ -666,8 +739,11 @@ class UnifiedEtaService {
   // ===========================================================================
 
   /// 構建緩存鍵
-  String _buildCacheKey(String company, String routeNumber, String stopId) {
-    return '${company}_${routeNumber}_$stopId'.toLowerCase();
+  String _buildCacheKey(String company, String routeNumber, String stopId, [String? bound]) {
+    // Include bound in cache key to prevent direction collision
+    // Same stop can serve multiple directions (e.g., circular routes, terminus)
+    final boundPart = (bound != null && bound.isNotEmpty) ? '_${bound[0].toUpperCase()}' : '';
+    return '${company}_${routeNumber}_${stopId}$boundPart'.toLowerCase();
   }
 
   /// 檢查緩存是否有效
