@@ -116,10 +116,12 @@ class RouteIdResolver {
   /// - hkbusRouteId: 如 "101+1+KENNEDY TOWN+KWUN TONG"
   /// - routeNumber: 路線號碼（如 "101"）
   /// - companies: 運營公司列表（如 ["kmb", "ctb"]）
+  /// - bound: 方向（'I' 或 'O'），用於 NLB 方向匹配
   Future<ResolvedRouteIds> resolveRouteIds({
     required String hkbusRouteId,
     required String routeNumber,
     required List<String> companies,
+    String? bound,
   }) async {
     await initialize();
 
@@ -136,7 +138,7 @@ class RouteIdResolver {
     String? gmbRegion;
 
     if (companies.any((c) => c.toLowerCase() == 'nlb')) {
-      nlbRouteId = await _resolveNlbRouteId(routeNumber);
+      nlbRouteId = await _resolveNlbRouteId(routeNumber, bound: bound, origin: origin, destination: destination);
     }
 
     if (companies.any((c) => c.toLowerCase() == 'gmb' || c.toLowerCase() == 'greenminibus')) {
@@ -329,7 +331,13 @@ class RouteIdResolver {
   /// 解析 NLB routeId
   ///
   /// 從 NLB route-stops 數據中查找 route number 對應的 routeId
-  Future<String?> _resolveNlbRouteId(String routeNumber) async {
+  /// 支持根據方向（bound）和起點/終點匹配選擇正確的變體
+  Future<String?> _resolveNlbRouteId(
+    String routeNumber, {
+    String? bound,
+    String? origin,
+    String? destination,
+  }) async {
     if (_nlbRouteStopsCache == null) return null;
 
     final routeData = _nlbRouteStopsCache![routeNumber];
@@ -340,10 +348,43 @@ class RouteIdResolver {
 
     // NLB routeData 格式: { "routeId": { "orig_en": ..., "stops": [...] }, ... }
     if (routeData is Map) {
-      // 返回第一個變體的 routeId（通常只有一個）
-      final firstKey = routeData.keys.firstOrNull?.toString();
-      if (firstKey != null) {
-        debugPrint('✅ NLB routeId resolved: $routeNumber -> $firstKey');
+      // 如果沒有方向信息，返回第一個變體
+      if (bound == null || origin == null || destination == null) {
+        final firstKey = routeData.keys.firstOrNull?.toString();
+        if (firstKey != null) {
+          debugPrint('✅ NLB routeId resolved (no direction info): $routeNumber -> $firstKey');
+          return firstKey;
+        }
+      } else {
+        // 標準化輸入的 origin 和 destination（在 else 塊開始處定義，使整個塊可見）
+        final inputOrig = origin.toUpperCase();
+        final inputDest = destination.toUpperCase();
+        
+        // 根據方向匹配選擇正確的 routeId
+        for (final entry in routeData.entries) {
+          final routeId = entry.key.toString();
+          final variantData = entry.value;
+          
+          if (variantData is Map) {
+            final variantOrigEn = variantData['orig_en']?.toString().toUpperCase();
+            final variantDestEn = variantData['dest_en']?.toString().toUpperCase();
+            final variantOrigTc = variantData['orig_tc']?.toString().toUpperCase();
+            final variantDestTc = variantData['dest_tc']?.toString().toUpperCase();
+            
+            // 檢查是否匹配（支持英文和中文）
+            final matchesOrig = variantOrigEn == inputOrig || variantOrigTc == inputOrig;
+            final matchesDest = variantDestEn == inputDest || variantDestTc == inputDest;
+            
+            if (matchesOrig && matchesDest) {
+              debugPrint('✅ NLB routeId resolved with direction match: $routeNumber ($bound: $inputOrig → $inputDest) -> $routeId');
+              return routeId;
+            }
+          }
+        }
+        
+        // 如果沒有找到匹配的，返回第一個變體
+        debugPrint('⚠️ NLB routeId: no direction match found for $routeNumber ($bound: $inputOrig → $inputDest), using first variant');
+        final firstKey = routeData.keys.firstOrNull?.toString();
         return firstKey;
       }
     }

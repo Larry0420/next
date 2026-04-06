@@ -9,14 +9,18 @@
 // - ETA: 不同響應格式統一轉換
 
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../kmb/api/kmb.dart';
 import '../kmb/api/citybus.dart';
-import '../kmb/api/nlb.dart';
 import '../kmb/api/gmb.dart';
+import '../kmb/api/kmb.dart';
 import '../kmb/api/mtr_bus.dart';
+import '../kmb/api/nlb.dart';
+import '../main.dart' show LrtApiService;
+import '../mtr/mtr_schedule_page.dart' show MtrScheduleResponse, MtrTrainInfo;
 
 /// 統一 ETA 數據模型
 /// 所有公司的 ETA 數據都會被轉換為此格式
@@ -201,6 +205,42 @@ class UnifiedEtaService {
     bool useCache = true,
     Duration ttl = _defaultCacheTtl,
   }) async {
+    // ✅ Wrap with timeout for 10 seconds
+    try {
+      return await _doFetchEta(company, routeNumber, stopId, routeContext, useCache, ttl).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint('⏰ ETA fetch timeout for $company $routeNumber stopId=$stopId');
+          // Return stale cache if available (graceful degradation)
+          final cacheKey = _buildCacheKey(company, routeNumber, stopId, routeContext.bound);
+          if (_etaCache.containsKey(cacheKey)) {
+            debugPrint('⚠️ Returning stale cache for timeout: $cacheKey');
+            return _etaCache[cacheKey]!.etas;
+          }
+          return <UnifiedEta>[];
+        },
+      );
+    } catch (e) {
+      // Handle timeout exceptions
+      debugPrint('❌ ETA fetch error (likely timeout): $e');
+      final cacheKey = _buildCacheKey(company, routeNumber, stopId, routeContext.bound);
+      if (_etaCache.containsKey(cacheKey)) {
+        debugPrint('⚠️ Returning stale cache for error: $cacheKey');
+        return _etaCache[cacheKey]!.etas;
+      }
+      return <UnifiedEta>[];
+    }
+  }
+  
+  /// 內部方法：實際執行 ETA 獲取
+  Future<List<UnifiedEta>> _doFetchEta(
+    String company,
+    String routeNumber,
+    String stopId,
+    RouteContext routeContext,
+    bool useCache,
+    Duration ttl,
+  ) async {
     final cacheKey = _buildCacheKey(company, routeNumber, stopId, routeContext.bound);
 
     // 檢查內存緩存
@@ -242,7 +282,10 @@ class UnifiedEtaService {
           etas = await _fetchMtrBusEta(stopId, routeNumber, routeContext);
           break;
         case 'mtr':
-          throw Exception('MTR heavy rail not yet supported');
+          etas = await _fetchMtrEta(stopId, routeContext);
+          break;
+        case 'lightrail':
+          etas = await _fetchLrtEta(stopId, routeContext);
           break;
         default:
           throw Exception('Unsupported company: $company');
@@ -749,6 +792,181 @@ class UnifiedEtaService {
     return deduplicatedEtas;
   }
 
+  /// MTR Heavy Rail ETA 獲取
+  ///
+  /// API: GET https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line={lineCode}&sta={stationCode}
+  /// Stop ID: stationCode (e.g., 'TKO')
+  /// Route ID: lineCode (e.g., 'TKL')
+  Future<List<UnifiedEta>> _fetchMtrEta(
+    String stopId,
+    RouteContext context,
+  ) async {
+    debugPrint('🚆 _fetchMtrEta called with stopId="$stopId", routeNumber="${context.routeNumber}"');
+    
+    // ✅ Use mtrLineCode from context (3-letter code like 'TML', 'TKL')
+    final mtrLineCode = context.mtrLineCode;
+    final mtrStationCode = context.mtrStationCode;
+
+    debugPrint('🚆 mtrLineCode="$mtrLineCode", mtrStationCode="$mtrStationCode"');
+
+    // ✅ Validate mtrLineCode format (must be 3-letter uppercase)
+    if (mtrLineCode == null || mtrLineCode.isEmpty) {
+      throw Exception('MTR lineCode not provided in context. MTR Heavy Rail requires 3-letter line code (e.g., "TML", "TKL", "EAL"), not routeNumber (e.g., "276B", "K12"). If you see this error, check if company code should be "lrtfeeder" (MTR Bus) instead of "mtr" (MTR Heavy Rail).');
+    }
+    
+    // ✅ Additional validation: lineCode must be 3-letter uppercase
+    if (mtrLineCode.length != 3 || mtrLineCode.toUpperCase() != mtrLineCode || RegExp(r'[^A-Z]').hasMatch(mtrLineCode)) {
+      throw Exception('Invalid MTR lineCode format: "$mtrLineCode". MTR Heavy Rail requires 3-letter uppercase code (e.g., "AEL", "DRL", "EAL", "ISL", "KTL", "SIL", "TWL", "TML"). Got "$mtrLineCode" which is not valid. If you are trying to access MTR Bus (routes like 276B, K12, K14), use company code "lrtfeeder" instead of "mtr".');
+    }
+    
+    if (mtrStationCode == null || mtrStationCode.isEmpty) {
+      throw Exception('MTR stationCode not provided in context. MTR Heavy Rail requires 3-letter station code (e.g., "TKO", "HOM")');
+    }
+
+    // Fetch schedule from MTR API
+    final url = Uri.parse('https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=$mtrLineCode&sta=$mtrStationCode');
+    final response = await http.get(url).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception('MTR API Error: HTTP ${response.statusCode}');
+    }
+
+    // Parse response
+    final decoded = json.decode(response.body) as Map<String, dynamic>;
+    final schedule = _parseMtrScheduleResponse(decoded);
+
+    // Check for service alerts (status = 0)
+    if (schedule.status != 1) {
+      debugPrint('⚠️ MTR Service Alert: ${schedule.message}');
+      // Still try to return available data, but add alert as remark
+    }
+
+    // Check for delays
+    final delayWarning = schedule.isDelay ? ' [Delay]' : '';
+
+    // Convert to UnifiedEta
+    final etas = <UnifiedEta>[];
+    int sequence = 1;
+
+    for (final direction in schedule.directionTrains.values) {
+      for (final train in direction) {
+        // ✅ Priority: Use ttnt first, then calculate from time field
+        final diffMinutes = train.timeInMinutes ?? _calculateMinutesFromTime(train.time, schedule.currentTime);
+        final etaTime = _parseMtrEtaTime(train.time, schedule.currentTime);
+        
+        if (etaTime != null) {
+          final remark = '往 ${train.destination}$delayWarning';
+          
+          etas.add(UnifiedEta(
+            company: 'mtr',
+            eta: etaTime,
+            diffMinutes: diffMinutes,
+            sequence: sequence++,
+            remarkTc: remark,
+            remarkEn: 'to ${train.destination}$delayWarning',
+            isRealtime: true, // MTR heavy rail is real-time
+          ));
+        }
+      }
+    }
+
+    // Sort by ETA time
+    etas.sort((a, b) => a.eta.compareTo(b.eta));
+    
+    // Re-assign sequence after sorting
+    for (int i = 0; i < etas.length; i++) {
+      etas[i] = UnifiedEta(
+        company: etas[i].company,
+        eta: etas[i].eta,
+        diffMinutes: etas[i].diffMinutes,
+        sequence: i + 1,
+        remarkTc: etas[i].remarkTc,
+        remarkEn: etas[i].remarkEn,
+        remarkSc: etas[i].remarkSc,
+        isRealtime: etas[i].isRealtime,
+        isWheelchairAccessible: etas[i].isWheelchairAccessible,
+        routeVariant: etas[i].routeVariant,
+      );
+    }
+
+    debugPrint('✅ MTR: Found ${etas.length} ETAs for station $mtrStationCode ${delayWarning.isNotEmpty ? '(DELAY)' : ''}');
+    return etas;
+  }
+
+  /// LRT ETA 獲取
+  ///
+  /// API: GET https://rt.data.gov.hk/v1/transport/mtr/lrt/getSchedule?station_id={stationId}
+  /// Stop ID: stationId (integer, e.g., 123) - stopId parameter may be "LRxxx" format
+  Future<List<UnifiedEta>> _fetchLrtEta(
+    String stopId,
+    RouteContext context,
+  ) async {
+    // ✅ Extract station ID from RouteContext or parse from stopId ("LRxxx" format)
+    int? lrtStationId = context.lrtStationId;
+    
+    if (lrtStationId == null) {
+      // Try to extract from stopId (format: "LRxxx")
+      final match = RegExp(r'LR(\d+)').firstMatch(stopId);
+      if (match != null) {
+        lrtStationId = int.tryParse(match.group(1) ?? '');
+      }
+    }
+
+    if (lrtStationId == null) {
+      throw Exception('LRT stationId not provided in context or invalid stopId format: $stopId');
+    }
+
+    // Fetch schedule from LRT API
+    final schedule = await LrtApiService().fetch(lrtStationId, useCache: false);
+
+    // Convert to UnifiedEta
+    final etas = <UnifiedEta>[];
+    int sequence = 1;
+
+    for (final platform in schedule.platforms) {
+      for (final train in platform.trains) {
+        // Parse time from "3 min" or "12 min" format
+        final minutes = _parseLrtTimeMinutes(train.timeEn);
+        
+        if (minutes != null) {
+          final etaTime = DateTime.now().add(Duration(minutes: minutes));
+          
+          etas.add(UnifiedEta(
+            company: 'lrt',
+            eta: etaTime,
+            diffMinutes: minutes,
+            sequence: sequence++,
+            remarkTc: '${train.routeNo} 往 ${train.destCh}',
+            remarkEn: '${train.routeNo} to ${train.destEn}',
+            isRealtime: true, // LRT is real-time
+          ));
+        }
+      }
+    }
+
+    // Sort by ETA time
+    etas.sort((a, b) => a.eta.compareTo(b.eta));
+    
+    // Re-assign sequence after sorting
+    for (int i = 0; i < etas.length; i++) {
+      etas[i] = UnifiedEta(
+        company: etas[i].company,
+        eta: etas[i].eta,
+        diffMinutes: etas[i].diffMinutes,
+        sequence: i + 1,
+        remarkTc: etas[i].remarkTc,
+        remarkEn: etas[i].remarkEn,
+        remarkSc: etas[i].remarkSc,
+        isRealtime: etas[i].isRealtime,
+        isWheelchairAccessible: etas[i].isWheelchairAccessible,
+        routeVariant: etas[i].routeVariant,
+      );
+    }
+
+    debugPrint('✅ LRT: Found ${etas.length} ETAs for station $lrtStationId');
+    return etas;
+  }
+
   // ===========================================================================
   // 輔助方法
   // ===========================================================================
@@ -758,7 +976,7 @@ class UnifiedEtaService {
     // Include bound in cache key to prevent direction collision
     // Same stop can serve multiple directions (e.g., circular routes, terminus)
     final boundPart = (bound != null && bound.isNotEmpty) ? '_${bound[0].toUpperCase()}' : '';
-    return '${company}_${routeNumber}_${stopId}$boundPart'.toLowerCase();
+    return '${company}_${routeNumber}_$stopId$boundPart'.toLowerCase();
   }
 
   /// 檢查緩存是否有效
@@ -880,6 +1098,147 @@ class UnifiedEtaService {
     if (etaTime == null) return null;
     final diff = etaTime.difference(DateTime.now());
     return diff.inMinutes;
+  }
+
+  /// 解析 MTR schedule response
+  MtrScheduleResponse _parseMtrScheduleResponse(Map<String, dynamic> json) {
+    final statusRaw = json['status'];
+    final status = statusRaw is int ? statusRaw : int.tryParse('$statusRaw') ?? 0;
+    final message = json['message']?.toString() ?? '';
+    String? lineStationKey;
+    DateTime? parsedTime;
+    DateTime? parsedSysTime;
+    final directionTrains = <String, List<MtrTrainInfo>>{};
+    bool isDelay = false;
+
+    final data = json['data'];
+    if (data is Map<String, dynamic>) {
+      for (final entry in data.entries) {
+        lineStationKey ??= entry.key;
+        final stationData = entry.value;
+        if (stationData is Map<String, dynamic>) {
+          final currTime = stationData['curr_time']?.toString();
+          parsedTime ??= _parseMtrTime(currTime);
+          final sysTime = stationData['sys_time']?.toString();
+          parsedSysTime ??= _parseMtrTime(sysTime);
+          final delayRaw = stationData['isdelay']?.toString();
+          if (delayRaw != null && delayRaw.toUpperCase() == 'Y') {
+            isDelay = true;
+          }
+          for (final dirEntry in stationData.entries) {
+            final dirKey = dirEntry.key;
+            if (dirKey == 'curr_time' || dirKey == 'sys_time' || dirKey == 'tcg') {
+              continue;
+            }
+            final trainListRaw = dirEntry.value;
+            if (trainListRaw is List) {
+              final trains = <MtrTrainInfo>[];
+              for (final train in trainListRaw) {
+                if (train is Map) {
+                  trains.add(MtrTrainInfo(
+                    destination: train['dest'] as String? ?? '',
+                    platform: train['plat'] as String? ?? '',
+                    time: train['time'] as String? ?? '',
+                    timeInMinutes: train['ttnt'] is int ? train['ttnt'] as int : (train['ttnt'] != null ? int.tryParse(train['ttnt'].toString()) : null),
+                    sequence: train['seq'] is int ? train['seq'] as int : (train['seq'] != null ? int.tryParse(train['seq'].toString()) : null),
+                    timeType: train['timetype'] as String?,
+                    route: train['route'] as String?,
+                  ));
+                }
+              }
+              if (trains.isNotEmpty) {
+                directionTrains[dirKey] = trains;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return MtrScheduleResponse(
+      status: status,
+      message: message,
+      lineStationKey: lineStationKey,
+      currentTime: parsedTime,
+      systemTime: parsedSysTime,
+      directionTrains: directionTrains,
+      isDelay: isDelay,
+    );
+  }
+
+  /// 解析 MTR 時間戳（格式: "2018-01-01 08:05:00"）
+  DateTime? _parseMtrTime(String? timestamp) {
+    if (timestamp == null || timestamp.isEmpty) return null;
+    try {
+      return DateTime.parse('${timestamp.replaceAll(' ', 'T')}+08:00').toLocal();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 解析 MTR ETA 時間
+  /// 
+  /// MTR time format: "2018-01-01 08:05:00" or "08:05"
+  /// If time is HH:MM format, use current date
+  DateTime? _parseMtrEtaTime(String? timeStr, DateTime? currentTime) {
+    if (timeStr == null || timeStr.isEmpty) return null;
+    
+    try {
+      // Check if timeStr contains date (YYYY-MM-DD HH:MM:SS)
+      if (timeStr.contains('-')) {
+        return _parseMtrTime(timeStr);
+      }
+      
+      // Otherwise, assume HH:MM format
+      final parts = timeStr.split(':');
+      if (parts.length >= 2) {
+        final hour = int.tryParse(parts[0]);
+        final minute = int.tryParse(parts[1]);
+        
+        if (hour != null && minute != null) {
+          final now = currentTime ?? DateTime.now();
+          var etaTime = DateTime(now.year, now.month, now.day, hour, minute);
+          
+          // If ETA is in the past, assume it's tomorrow
+          if (etaTime.isBefore(now)) {
+            etaTime = etaTime.add(const Duration(days: 1));
+          }
+          
+          return etaTime;
+        }
+      }
+    } catch (_) {}
+    
+    return null;
+  }
+
+  /// 從時間戳字符串計算分鐘數（當 ttnt 字段不可用時的回退方案）
+  int? _calculateMinutesFromTime(String? timeStr, DateTime? currentTime) {
+    if (timeStr == null || currentTime == null) return null;
+    
+    try {
+      final etaTime = _parseMtrTime(timeStr);
+      if (etaTime != null) {
+        return etaTime.difference(currentTime).inMinutes;
+      }
+    } catch (_) {}
+    
+    return null;
+  }
+
+  /// 解析 LRT 時間（格式: "3 min" 或 "12 min"）
+  int? _parseLrtTimeMinutes(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return null;
+    
+    try {
+      // Extract number from "3 min" or "12 min" format
+      final match = RegExp(r'(\d+)\s*min').firstMatch(timeStr.toLowerCase());
+      if (match != null) {
+        return int.tryParse(match.group(1) ?? '');
+      }
+    } catch (_) {}
+    
+    return null;
   }
 }
 

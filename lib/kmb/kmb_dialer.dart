@@ -658,7 +658,8 @@ class _KmbDialerState extends State<KmbDialer> {
       (isEnglish ? 'KMB' : '九巴', 'kmb', Colors.red),
       (isEnglish ? 'CityBus' : '城巴', 'ctb', Colors.amber),
       (isEnglish ? 'NLB' : '嶼巴', 'nlb', Colors.lightGreen),
-      (isEnglish ? 'GMB' : '專線小巴', 'gmb', Colors.green),
+      (isEnglish ? 'GMB' : '小巴', 'gmb', Colors.green),
+      (isEnglish ? 'MTRBus' : '港鐵巴士', 'lrtfeeder', Colors.teal),
     ];
 
     return Row(
@@ -666,6 +667,7 @@ class _KmbDialerState extends State<KmbDialer> {
       children: [
         // Data Source Toggle Button
         Tooltip(
+          triggerMode: TooltipTriggerMode.tap,
           message: useUnifiedDb
               ? (isEnglish ? 'Using Unified DB (tap to use API)' : '使用統一數據庫（點擊切換到API）')
               : (isEnglish ? 'Using Official API (tap to use Unified DB)' : '使用官方API（點擊切換到統一數據庫）'),
@@ -722,7 +724,7 @@ class _KmbDialerState extends State<KmbDialer> {
         ),
         // Company Filter Buttons
         ...filters.expand((filter) => [
-          const SizedBox(width: 8),
+          const SizedBox(width: 3),
           _buildFilterButton(filter.$1, filter.$2, filter.$3),
         ]),
       ],

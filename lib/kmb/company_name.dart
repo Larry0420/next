@@ -6,7 +6,7 @@ enum CompanyType {
   ctb,      // 城巴
   lwb,      // 龍運
   nlb,      // 嶼巴
-  mtr,      // 港鐵巴士
+  mtr,      // 港鐵
   lrtfeeder,// 輕鐵接駁巴士
   lightRail,// 輕鐵
   gmb,      // 綠色小巴

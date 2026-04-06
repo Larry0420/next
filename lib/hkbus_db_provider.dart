@@ -14,6 +14,7 @@ class UnifiedBusRoute {
   final String destTc;
   final String destEn;       // 新增：英文終點
   final String? serviceType; // 新增：服務類型
+  final String? nlbId;       // NLB routeId (用於導航到 NLB 路線狀態頁面)
   final Map<String, dynamic> stopsByCompany; // {"kmb": ["stop1",...], "ctb": ["stop2",...]}
   final Map<String, dynamic> boundsByCompany; // {"kmb": "I", "ctb": "I"}
 
@@ -26,6 +27,7 @@ class UnifiedBusRoute {
     required this.destTc,
     this.destEn = '',
     this.serviceType,
+    this.nlbId,
     required this.stopsByCompany,
     required this.boundsByCompany,
   });
@@ -294,6 +296,9 @@ class HkbusDbProvider extends ChangeNotifier {
       final stopsByCompany = _normalizeStopsMap(data['stops'], coList, routeId.toString());
       final boundsByCompany = _normalizeBoundsMap(data['bound'], coList, routeId.toString());
 
+      // 提取 NLB routeId (用於導航到 NLB 路線狀態頁面)
+      final String? nlbRouteId = data['nlbId']?.toString();
+
       list.add(UnifiedBusRoute(
         routeId: routeId,
         routeNumber: data['route']?.toString() ?? '',
@@ -303,6 +308,7 @@ class HkbusDbProvider extends ChangeNotifier {
         destTc: _extractStringFromField(data['dest'], 'zh') ?? '',
         destEn: _extractStringFromField(data['dest'], 'en') ?? '',
         serviceType: serviceType,
+        nlbId: nlbRouteId,
         stopsByCompany: stopsByCompany,
         boundsByCompany: boundsByCompany,
       ));
@@ -505,6 +511,7 @@ class HkbusDbProvider extends ChangeNotifier {
     if (matches.isEmpty) return null;
     if (matches.length == 1) return matches.first;
 
+    // 第一轮：尝试使用 bound 匹配（现有逻辑）
     for (final route in matches) {
       bool matchesDir = direction == null;
       bool matchesSvc = serviceType == null;
@@ -533,9 +540,75 @@ class HkbusDbProvider extends ChangeNotifier {
 
       if (matchesDir && matchesSvc && matchesCo) return route;   // ← 加 matchesCo
     }
+
+    // 第二轮：如果 bound 匹配失败，使用 origin/destination 匹配
+    // 这主要解决 NLB 路线两个方向 bound 都是 "O" 的问题
+    // 当所有路线的 bound 都相同，无法通过 bound 区分方向时，
+    // 调用方（route_status_page.dart）会使用 origin/destination 来选择正确的 NLB routeId
+    // 因此我们只需要返回第一个匹配 company 和 serviceType 的路线
+    if (direction != null && direction.isNotEmpty) {
+      for (final route in matches) {
+        bool matchesSvc = serviceType == null || route.serviceType == serviceType;
+        bool matchesCo = company == null || route.companies.any(
+          (c) => c.toString().toLowerCase() == company.toLowerCase()
+        );
+        
+        if (matchesSvc && matchesCo) {
+          return route;
+        }
+      }
+    }
+
     return matches.first;
   }
 
+  /// 根據 NLB routeId 獲取路線（用於從撥號器導航時查找對應的完整路線信息）
+  /// 
+  /// 當撥號器傳入 NLB routeId（如 "34"）時，需要找到對應的完整路線信息
+  /// 以便正確解析 origin/destination 進行方向匹配
+  UnifiedBusRoute? getRouteByNlbId(String nlbId) {
+    if (!_isReady || _routeList == null) return null;
+    
+    for (final entry in _routeList!.entries) {
+      final routeId = entry.key;
+      final data = entry.value;
+      
+      // 檢查是否為 NLB 路線
+      final coList = List<String>.from(data['co'] ?? []);
+      if (!coList.any((c) => c.toLowerCase() == 'nlb')) continue;
+      
+      // 檢查 nlbId 是否匹配
+      final routeNlbId = data['nlbId']?.toString();
+      if (routeNlbId == nlbId) {
+        // 找到匹配的路線，構建 UnifiedBusRoute 對象
+        final stopsByCompany = _normalizeStopsMap(data['stops'], coList, routeId.toString());
+        final boundsByCompany = _normalizeBoundsMap(data['bound'], coList, routeId.toString());
+        
+        // 解析 service type
+        String? serviceType;
+        final idParts = routeId.toString().split('+');
+        if (idParts.length >= 2) {
+          serviceType = idParts[1];
+        }
+        
+        return UnifiedBusRoute(
+          routeId: routeId,
+          routeNumber: data['route']?.toString() ?? '',
+          companies: coList,
+          origTc: _extractStringFromField(data['orig'], 'zh') ?? '',
+          origEn: _extractStringFromField(data['orig'], 'en') ?? '',
+          destTc: _extractStringFromField(data['dest'], 'zh') ?? '',
+          destEn: _extractStringFromField(data['dest'], 'en') ?? '',
+          serviceType: serviceType,
+          nlbId: routeNlbId,
+          stopsByCompany: stopsByCompany,
+          boundsByCompany: boundsByCompany,
+        );
+      }
+    }
+    
+    return null;
+  }
 
   /// 透過 StopId 查站點名稱
   String getStopName(String stopId, {bool isEnglish = false}) {
@@ -784,7 +857,17 @@ class HkbusDbProvider extends ChangeNotifier {
       route.destEn,
       route.destTc,
     ].where((s) => s.isNotEmpty).join(' ').toLowerCase();
-    
+
+    // ✅ 對於 NLB 路線，使用 nlbId 作為 routeId (用於導航到 NlbRouteStatusPage)
+    // NlbRouteStatusPage 期望的 routeId 是 NLB API 的 routeId (如 "33", "34")
+    // 而不是統一數據庫的 JSON key (如 "B2P+1+Shenzhen Bay Port+Tin Shui Wai (Tin Tsz Estate)")
+    final String effectiveRouteId;
+    if (route.primaryCompany == 'nlb' && route.nlbId != null) {
+      effectiveRouteId = route.nlbId!;
+    } else {
+      effectiveRouteId = route.routeId;
+    }
+
     return {
       'route': route.routeNumber,
       'companyid': route.primaryCompany,
@@ -798,7 +881,7 @@ class HkbusDbProvider extends ChangeNotifier {
       'direction': bound == 'I' ? 'inbound' : 'outbound',
       'service_type': route.serviceType ?? '1',
       'isJointOperation': route.isJointOperation,
-      'routeId': route.routeId,
+      'routeId': effectiveRouteId,
       'search_text': searchText,
       // 原始數據保留
       'stopsByCompany': route.stopsByCompany,

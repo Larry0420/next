@@ -15,7 +15,7 @@ import 'kmb/api/mtr_bus.dart';
 
 import 'hkbus_db_provider.dart';
 import 'kmb/company_name.dart';
-import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, MotionConstants;
+import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, MotionConstants, ConnectivityProvider;
 import 'optionalMarquee.dart';
 import 'services/route_id_resolver.dart';
 import 'services/unified_eta_service.dart';
@@ -57,7 +57,8 @@ class UnifiedRouteStatusPage extends StatefulWidget {
   State<UnifiedRouteStatusPage> createState() => _UnifiedRouteStatusPageState();
 }
 
-class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
+class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> 
+    with WidgetsBindingObserver {
   static const String _mapViewPreferenceKey = 'unified_route_status_map_view_enabled';
   static const String _nearbyPreferenceKey = 'unified_route_status_nearby_enabled';
   final DraggableScrollableController _draggableController = DraggableScrollableController();
@@ -112,15 +113,28 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   RouteContext? _routeContext;
   ResolvedRouteIds? _resolvedRouteIds;
 
+  // ✅ Connectivity provider for network state checking
+  late final ConnectivityProvider _connectivity;
+
   @override
   void initState() {
     super.initState();
+    // ✅ Add WidgetsBindingObserver for lifecycle management
+    WidgetsBinding.instance.addObserver(this);
+    
     // 確保是單一公司代碼（避免 "kmb+ctb" 這樣的組合值）
     _selectedCompany = (widget.initialCompany ?? widget.companies.first).toLowerCase().split('+').first;  // ✅ fixed: ensure lowercase
     _loadPreferences(); // Combined preference loader
     _initializeLocation();
     _initializeRouteContext();
     _fetchData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // ✅ Watch ConnectivityProvider for network state changes
+    _connectivity = context.watch<ConnectivityProvider>();
   }
 
   /// 初始化路線上下文（解析各公司 route ID）
@@ -131,33 +145,57 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
       if (!mounted) return;
 
       final hkbusDb = context.read<HkbusDbProvider>();
-      final routeData = widget.initialRouteId != null
-          ? hkbusDb.getRouteById(widget.initialRouteId!)
-          : hkbusDb.getRouteByNumber(
-              widget.route,
-              direction: widget.bound,
-              serviceType: widget.serviceType,
-              company: _selectedCompany,
-            );
+      
+      UnifiedBusRoute? routeData;
+      
+      // ✅ 如果 initialRouteId 看起來像 NLB routeId（不包含 "+"），使用 getRouteByNlbId 查找
+      if (widget.initialRouteId != null && !widget.initialRouteId!.contains('+')) {
+        routeData = hkbusDb.getRouteByNlbId(widget.initialRouteId!);
+        debugPrint('🔍 Using getRouteByNlbId for ${widget.initialRouteId}: ${routeData != null ? "found" : "not found"}');
+      }
+      
+      // ✅ 如果找不到或不是 NLB routeId，使用原始邏輯
+      if (routeData == null && widget.initialRouteId != null) {
+        routeData = hkbusDb.getRouteById(widget.initialRouteId!);
+      }
+      
+      // ✅ 最後回退到 getRouteByNumber
+      routeData ??= hkbusDb.getRouteByNumber(
+        widget.route,
+        direction: widget.bound,
+        serviceType: widget.serviceType,
+        company: _selectedCompany,
+      );
 
       if (routeData != null) {
+        final bound = _getBoundFromRouteData(routeData);
+        
         _resolvedRouteIds = await _routeIdResolver.resolveRouteIds(
           hkbusRouteId: routeData.routeId,
           routeNumber: widget.route,
           companies: widget.companies,
+          bound: bound, // ✅ 传递 bound 参数用于 NLB 方向匹配
         );
 
         if (!mounted) return;
 
+        // ✅ For MTR Heavy Rail: routeNumber IS the lineCode (e.g., "TML", "TKL")
+        String? mtrLineCode;
+        if (_selectedCompany.toLowerCase() == 'mtr') {
+          mtrLineCode = widget.route; // routeNumber is the 3-letter line code
+          debugPrint('🚆 MTR Heavy Rail detected: routeNumber="$widget.route" → mtrLineCode="$mtrLineCode"');
+        }
+
         // 構建 RouteContext
         _routeContext = RouteContext(
           routeNumber: widget.route,
-          bound: _getBoundFromRouteData(routeData),
+          bound: bound,
           serviceType: widget.serviceType ?? '1',
           nlbRouteId: _resolvedRouteIds?.nlbRouteId,
           gmbRouteId: _resolvedRouteIds?.gmbRouteId,
           gmbRegion: _resolvedRouteIds?.gmbRegion,
           gmbRouteSeq: 1, // 默認第一個方向
+          mtrLineCode: mtrLineCode, // ✅ Set mtrLineCode for MTR Heavy Rail
         );
 
         debugPrint('✅ Route context initialized: $_routeContext');
@@ -324,11 +362,51 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
   @override
   void dispose() {
+    // ✅ Remove WidgetsBindingObserver
+    WidgetsBinding.instance.removeObserver(this);
+    
+    // ✅ Stop ETA refresh loop before disposing
+    _stopEtaRefreshLoop();
+    
     _etaRefreshTimer?.cancel();
     _scrollController.dispose();
     _highlightTimer?.cancel();
     _draggableController.dispose();
     super.dispose();
+  }
+
+  /// ✅ Handle app lifecycle state changes (background/foreground)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // ✅ App returned to foreground: resume refresh and fetch visible stops immediately
+        if (_expandedStopsById.isNotEmpty) {
+          debugPrint('📱 App resumed, starting ETA refresh loop');
+          _startEtaRefreshLoopIfNeeded();
+          _refreshExpandedStops(); // Immediate refresh for visible stops
+        }
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        // ✅ App went to background: stop refresh to save battery and network
+        debugPrint('📱 App went to background, stopping ETA refresh loop');
+        _stopEtaRefreshLoop();
+        break;
+      case AppLifecycleState.hidden:
+        // App is hidden but still running
+        break;
+    }
+  }
+  
+  /// ✅ Stop ETA refresh loop (called on background/hidden/dispose)
+  void _stopEtaRefreshLoop() {
+    if (_etaRefreshTimer != null) {
+      _etaRefreshTimer!.cancel();
+      _etaRefreshTimer = null;
+      debugPrint('⏸️ ETA refresh loop stopped');
+    }
   }
 
   Future<void> _loadPreferences() async {
@@ -580,9 +658,18 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
     // 優先用 initialRouteId（從 dialer 傳入）精確匹配，否則用路線號＋方向＋服務類型
     UnifiedBusRoute? routeData;
-    if (widget.initialRouteId != null && widget.initialRouteId!.isNotEmpty) {
+    
+    // ✅ 如果 initialRouteId 看起來像 NLB routeId（不包含 "+"），使用 getRouteByNlbId 查找
+    if (widget.initialRouteId != null && !widget.initialRouteId!.contains('+')) {
+      routeData = hkbusDb.getRouteByNlbId(widget.initialRouteId!);
+    }
+    
+    // ✅ 如果找不到或不是 NLB routeId，使用原始邏輯
+    if (routeData == null && widget.initialRouteId != null && widget.initialRouteId!.isNotEmpty) {
       routeData = hkbusDb.getRouteById(widget.initialRouteId!);
     }
+    
+    // ✅ 最後回退到 getRouteByNumber
     routeData ??= hkbusDb.getRouteByNumber(
       widget.route,
       direction: widget.bound,
@@ -1117,6 +1204,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
   void _startEtaRefreshLoopIfNeeded() {
     if (_etaRefreshTimer != null || _expandedStopsById.isEmpty) return;
 
+    debugPrint('▶️ Starting ETA refresh loop (interval: ${_etaRefreshInterval.inSeconds}s, stops: ${_expandedStopsById.length})');
     _etaRefreshTimer = Timer.periodic(_etaRefreshInterval, (_) {
       _refreshExpandedStops();
     });
@@ -1131,12 +1219,17 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
 
   Future<void> _refreshExpandedStops() async {
     if (!mounted || _expandedStopsById.isEmpty || _etaRefreshInFlight) return;
+    
+    // ✅ Check network state before fetching
+    if (_connectivity.isOffline) {
+      debugPrint('📡 Network offline, skipping ETA refresh');
+      return;
+    }
 
     _etaRefreshInFlight = true;
     try {
-      // Use fresh stop data from _allStops, not stale cached stop map
-      // This ensures ETA is fetched with correct stop IDs after route/company changes
-      for (final stopId in _expandedStopsById.keys.toList()) {
+      // ✅ Parallel ETA requests for better performance
+      final futures = _expandedStopsById.keys.map((stopId) async {
         final freshStop = _allStops.firstWhere(
           (s) => s['stop']?.toString() == stopId,
           orElse: () => _expandedStopsById[stopId]!,  // fallback to cached if not found
@@ -1146,7 +1239,11 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
           force: true,
           showLoading: false,
         );
-      }
+      });
+      
+      await Future.wait(futures, eagerError: false);
+    } catch (e) {
+      debugPrint('❌ Error refreshing ETAs: $e');
     } finally {
       _etaRefreshInFlight = false;
     }
@@ -1313,6 +1410,9 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage> {
               : int.tryParse(rawSeq?.toString() ?? '') ?? 0;
 
           effectiveContext = effectiveContext.copyWith(gmbStopSeq: stopSeq);
+        } else if (co == 'mtr') {
+          // ✅ For MTR Heavy Rail: stopId IS the stationCode (e.g., "TKO", "HOM")
+          effectiveContext = effectiveContext.copyWith(mtrStationCode: companyStopId);
         }
 
 
