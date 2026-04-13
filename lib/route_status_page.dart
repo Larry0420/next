@@ -196,6 +196,11 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
           gmbRegion: _resolvedRouteIds?.gmbRegion,
           gmbRouteSeq: 1, // 默認第一個方向
           mtrLineCode: mtrLineCode, // ✅ Set mtrLineCode for MTR Heavy Rail
+          // ✅ Add LRT origin/destination for direction filtering
+          lrtOrigTc: _selectedCompany.toLowerCase() == 'lightrail' ? routeData.origTc : null,
+          lrtOrigEn: _selectedCompany.toLowerCase() == 'lightrail' ? routeData.origEn : null,
+          lrtDestTc: _selectedCompany.toLowerCase() == 'lightrail' ? routeData.destTc : null,
+          lrtDestEn: _selectedCompany.toLowerCase() == 'lightrail' ? routeData.destEn : null,
         );
 
         debugPrint('✅ Route context initialized: $_routeContext');
@@ -207,6 +212,13 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
 
   /// 從路線數據獲取方向
   String? _getBoundFromRouteData(UnifiedBusRoute routeData) {
+    // ✅ For MTR and Light Rail, use widget.bound from tapped route variant
+    final company = _selectedCompany.toLowerCase();
+    if (company == 'mtr' || company == 'lightrail') {
+      return widget.bound;  // Preserve user's selection
+    }
+    
+    // ✅ For bus routes, use boundsByCompany if available
     if (routeData.boundsByCompany.isNotEmpty) {
       return routeData.boundsByCompany.values.first?.toString();
     }
@@ -2273,14 +2285,25 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
       ];
     }
 
-    // Sort by ETA time (not sequence - unreliable for MTR Bus where all sequences are equal)
-    // This ensures correct chronological order for all companies
-    valid.sort((a, b) => a.eta.compareTo(b.eta));
+    // ✅ Check if company is MTR Heavy Rail or Light Rail
+    final company = valid.first.company;
+    if (company == 'mtr' || company == 'lrt') {
+      // MTR/LRT: Display in direction groups (3 rows or dynamic)
+      return _buildMtrDirectionRows(valid, isEnglish, lang, theme, colorScheme);
+    } else {
+      // Other companies: Simple list (current behavior)
+      return _buildSimpleEtaList(valid, isEnglish, theme, colorScheme);
+    }
+  }
+
+  /// Build simple ETA list for non-MTR companies (KMB/CTB/NLB/GMB/LRT)
+  List<Widget> _buildSimpleEtaList(List<UnifiedEta> etas, bool isEnglish, ThemeData theme, ColorScheme colorScheme) {
+    // Sort by ETA time
+    etas.sort((a, b) => a.eta.compareTo(b.eta));
 
     // Deduplicate by ETA time (within 60 seconds tolerance)
-    // Prevents duplicate buses from showing (API may return duplicates)
     final deduplicated = <UnifiedEta>[];
-    for (final eta in valid) {
+    for (final eta in etas) {
       final isDuplicate = deduplicated.any((existing) {
         final timeDiff = (eta.eta.difference(existing.eta)).abs();
         return timeDiff.inSeconds < 60;
@@ -2290,10 +2313,8 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
       }
     }
 
-    return deduplicated.take(3).map((eta) {
-      // 获取本地化的 remark
+    return deduplicated.take(6).map((eta) {
       final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
-      
       return Text(
         eta.formatDisplay(isEnglish, remark: remark),
         style: theme.textTheme.bodyMedium?.copyWith(
@@ -2302,6 +2323,139 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
         ),
       );
     }).toList();
+  }
+
+  /// Build MTR ETA list with direction grouping (similar to MTR schedule page)
+  List<Widget> _buildMtrDirectionRows(List<UnifiedEta> etas, bool isEnglish, LanguageProvider lang, ThemeData theme, ColorScheme colorScheme) {
+    // Group ETAs by direction
+    final byDirection = <String, List<UnifiedEta>>{};
+    for (final eta in etas) {
+      if (eta.direction != null) {
+        byDirection.putIfAbsent(eta.direction!, () => []).add(eta);
+      }
+    }
+
+    // Build widget for each direction
+    final widgets = <Widget>[];
+
+    for (final entry in byDirection.entries) {
+      final directionCode = entry.key;
+      final directionEtas = entry.value;
+
+      // Get direction label
+      final directionLabel = _getMtrDirectionLabel(directionCode, isEnglish);
+
+      // Deduplicate within this direction (within 60 seconds tolerance)
+      final deduplicated = <UnifiedEta>[];
+      for (final eta in directionEtas) {
+        final isDuplicate = deduplicated.any((existing) {
+          final timeDiff = (eta.eta.difference(existing.eta)).abs();
+          return timeDiff.inSeconds < 60;
+        });
+        if (!isDuplicate) {
+          deduplicated.add(eta);
+        }
+      }
+
+      // Direction header
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: colorScheme.primary.withValues(alpha: 0.2),
+                    width: 0.5,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.train,
+                      size: 14,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      directionLabel,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // ETA items for this direction (show up to 3 per direction)
+      widgets.addAll(
+        deduplicated.take(3).map((eta) {
+          final remark = isEnglish ? eta.remarkEn : eta.remarkTc;
+          return Padding(
+            padding: const EdgeInsets.only(left: 8.0, top: 2.0, bottom: 2.0),
+            child: Text(
+              eta.formatDisplay(isEnglish, remark: remark),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
+              ),
+            ),
+          );
+        }),
+      );
+    }
+
+    return widgets;
+  }
+
+  /// Get localized MTR direction label
+  /// Converts direction codes like "UP", "DOWN", "1", "2" to localized text
+  String _getMtrDirectionLabel(String directionCode, bool isEnglish) {
+    final upper = directionCode.toUpperCase();
+    if (isEnglish) {
+      switch (upper) {
+        case 'UP':
+          return 'Upbound';
+        case 'DOWN':
+          return 'Downbound';
+        case 'IN':
+          return 'Inbound';
+        case 'OUT':
+          return 'Outbound';
+        case 'O':
+          return 'Outbound'; // Light Rail Outbound
+        case 'I':
+          return 'Inbound'; // Light Rail Inbound
+        default:
+          return upper;
+      }
+    } else {
+      switch (upper) {
+        case 'UP':
+          return '上行';
+        case 'DOWN':
+          return '下行';
+        case 'IN':
+          return '入站';
+        case 'OUT':
+          return '出站';
+        case 'O':
+          return '去程'; // Light Rail Outbound
+        case 'I':
+          return '回程'; // Light Rail Inbound
+        default:
+          return upper;
+      }
+    }
   }
 
 

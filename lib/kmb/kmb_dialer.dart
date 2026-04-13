@@ -117,7 +117,11 @@ class _KmbDialerState extends State<KmbDialer> {
   List<Map<String, dynamic>> searchResults = [];
   
   // Filter State: null = All, 'kmb' = KMB, 'ctb' = Citybus
-  String? _companyFilter; 
+  String? _companyFilter;
+  
+  // Direction Filter: null = All, 'O' = Outbound, 'I' = Inbound
+  // Only applies to MTR and Light Rail
+  String? _directionFilter;
   
   bool loading = false;
   String? error;
@@ -377,7 +381,13 @@ class _KmbDialerState extends State<KmbDialer> {
       // Filter by query matches start AND company filter
       final matchesQuery = r.toLowerCase().startsWith(lowerQ);
       final matchesCompany = _companyFilter == null || (data['companyid'] == _companyFilter);
-      return matchesQuery && matchesCompany;
+      
+      // Direction filter ONLY applies to MTR and Light Rail
+      final matchesDirection = _directionFilter == null ||
+        (_companyFilter == 'mtr' || _companyFilter == 'lightrail') &&
+        data['bound']?.toString().toUpperCase() == _directionFilter;
+      
+      return matchesQuery && matchesCompany && matchesDirection;
     }).toList();
 
     // Deduplicate logic（統一 DB 用 companyid，API 用 company_id）
@@ -413,11 +423,47 @@ class _KmbDialerState extends State<KmbDialer> {
       } else {
         _companyFilter = company;
       }
+      
+      // Reset direction filter when switching away from MTR/Light Rail
+      // Direction filter only applies to MTR and Light Rail
+      if (company != 'mtr' && company != 'lightrail') {
+        _directionFilter = null;
+      }
+      
       // Re-run search/filter with new setting
       if (input.isNotEmpty) {
         _performSearch(input);
       }
     });
+  }
+
+  void _toggleDirectionFilter(String? direction) {
+    setState(() {
+      if (_directionFilter == direction) {
+        _directionFilter = null; // Toggle off if same selected
+      } else {
+        _directionFilter = direction;
+      }
+      // Re-run search/filter with new setting
+      if (input.isNotEmpty) {
+        _performSearch(input);
+      }
+    });
+  }
+
+  /// Check if there are multiple directions available in the route list
+  /// Used to determine whether to show direction filter chips
+  bool _hasMultipleDirections(String? companyFilter, List<Map<String, dynamic>> routes) {
+    // Filter routes by company first (only for MTR and Light Rail)
+    final filteredRoutes = (companyFilter == 'mtr' || companyFilter == 'lightrail')
+        ? routes.where((r) => r['companyid'] == companyFilter).toList()
+        : routes;
+    
+    final directions = filteredRoutes
+        .map((r) => r['bound']?.toString().toUpperCase())
+        .where((b) => b != null && b!.isNotEmpty)
+        .toSet();
+    return directions.length > 1;
   }
 
   @override
@@ -449,10 +495,19 @@ class _KmbDialerState extends State<KmbDialer> {
     // Apply filter to the main list if no search query
     List<Map<String, dynamic>> displayList;
     if (input.isEmpty) {
-      if (_companyFilter == null) {
+      if (_companyFilter == null && _directionFilter == null) {
         displayList = allRoutesData;
       } else {
-        displayList = allRoutesData.where((d) => d['companyid'] == _companyFilter).toList();
+        displayList = allRoutesData.where((d) {
+          final matchesCompany = _companyFilter == null || d['companyid'] == _companyFilter;
+          
+          // Direction filter ONLY applies to MTR and Light Rail
+          final matchesDirection = _directionFilter == null ||
+            (_companyFilter == 'mtr' || _companyFilter == 'lightrail') &&
+            d['bound']?.toString().toUpperCase() == _directionFilter;
+          
+          return matchesCompany && matchesDirection;
+        }).toList();
       }
     } else {
       displayList = searchResults;
@@ -499,6 +554,9 @@ class _KmbDialerState extends State<KmbDialer> {
                     companyFilter: _companyFilter,
                     onToggleFilter: _toggleCompanyFilter,
                     isEnglish: isEnglish,
+                    currentRoutes: displayList,
+                    directionFilter: _directionFilter,
+                    onToggleDirection: _toggleDirectionFilter,
                   ),
                 ],
               ),
@@ -612,6 +670,53 @@ class _KmbDialerState extends State<KmbDialer> {
     );
   }
 
+  // Direction Filter Chip Widget - ONLY for MTR and Light Rail
+  Widget _buildDirectionFilterChip(
+    String label,
+    String direction,
+    MaterialColor color,
+    bool isEnglish,
+    String? selectedDirection,
+    Function(String?) onToggle,
+  ) {
+    final isSelected = selectedDirection == direction;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => onToggle(direction),
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? color.shade100 : Theme.of(context).colorScheme.surfaceContainerHighest,
+            border: Border.all(color: isSelected ? color.shade700 : Colors.transparent, width: 1.5),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                direction == 'O' ? Icons.arrow_circle_right : Icons.arrow_circle_left,
+                size: 14,
+                color: isSelected ? color.shade900 : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                isEnglish ? label : (direction == 'O' ? '去程' : '回程'),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: isSelected ? color.shade900 : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // Input Display Widget
   Widget _InputDisplay({
     required String input,
@@ -652,6 +757,9 @@ class _KmbDialerState extends State<KmbDialer> {
     required String? companyFilter,
     required Function(String?) onToggleFilter,
     required bool isEnglish,
+    required List<Map<String, dynamic>> currentRoutes,
+    required String? directionFilter,
+    required Function(String?) onToggleDirection,
   }) {
     final theme = Theme.of(context);
     final filters = [
@@ -661,6 +769,9 @@ class _KmbDialerState extends State<KmbDialer> {
       (isEnglish ? 'GMB' : '小巴', 'gmb', Colors.green),
       (isEnglish ? 'MTRBus' : '港鐵巴士', 'lrtfeeder', Colors.teal),
     ];
+    final shouldShowDirectionFilter =
+        (companyFilter == 'mtr' || companyFilter == 'lightrail') &&
+            _hasMultipleDirections(companyFilter, currentRoutes);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -727,6 +838,13 @@ class _KmbDialerState extends State<KmbDialer> {
           const SizedBox(width: 3),
           _buildFilterButton(filter.$1, filter.$2, filter.$3),
         ]),
+        // Direction Filter Chips - ONLY for MTR and Light Rail when multiple directions exist
+        if (shouldShowDirectionFilter) ...[
+          const SizedBox(width: 3),
+          _buildDirectionFilterChip('Outbound', 'O', Colors.red, isEnglish, directionFilter, onToggleDirection),
+          const SizedBox(width: 3),
+          _buildDirectionFilterChip('Inbound', 'I', Colors.blue, isEnglish, directionFilter, onToggleDirection),
+        ],
       ],
     );
   }

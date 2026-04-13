@@ -20,7 +20,8 @@ import '../kmb/api/kmb.dart';
 import '../kmb/api/mtr_bus.dart';
 import '../kmb/api/nlb.dart';
 import '../main.dart' show LrtApiService;
-import '../mtr/mtr_schedule_page.dart' show MtrScheduleResponse, MtrTrainInfo;
+import '../mtr/mtr_schedule_page.dart'
+    show MtrScheduleResponse, MtrTrainInfo, StationNameResolver, stationNameResolver;
 
 /// 統一 ETA 數據模型
 /// 所有公司的 ETA 數據都會被轉換為此格式
@@ -35,6 +36,8 @@ class UnifiedEta {
   final bool isRealtime; // 是否 GPS 實時數據
   final bool isWheelchairAccessible; // 輪椅可達（僅 NLB 提供）
   final String? routeVariant; // 路線變體描述（僅 NLB 提供）
+  final String? direction; // MTR 方向代碼 (如 "UP", "DOWN", "1", "2")
+  final String? destination; // MTR 目的地站點代碼 (如 "TST", "ADM")
 
   UnifiedEta({
     required this.company,
@@ -47,6 +50,8 @@ class UnifiedEta {
     this.isRealtime = true,
     this.isWheelchairAccessible = false,
     this.routeVariant,
+    this.direction,
+    this.destination,
   });
 
   /// 獲取相對分鐘數（如果沒有預設值，則計算）
@@ -86,7 +91,7 @@ class UnifiedEta {
 
   @override
   String toString() {
-    return 'UnifiedEta(company: $company, eta: $eta, seq: $sequence, mins: $relativeMinutes)';
+    return 'UnifiedEta(company: $company, eta: $eta, seq: $sequence, mins: $relativeMinutes, direction: $direction, dest: $destination)';
   }
 }
 
@@ -117,6 +122,10 @@ class RouteContext {
   final String? mtrStationCode; // MTR station code (e.g., 'HOM', 'TKO')
   // LRT specific
   final int? lrtStationId;     // LRT station ID (integer)
+  final String? lrtOrigTc;     // LRT origin in Chinese
+  final String? lrtOrigEn;     // LRT origin in English
+  final String? lrtDestTc;     // LRT destination in Chinese
+  final String? lrtDestEn;     // LRT destination in English
 
   RouteContext({
     required this.routeNumber,
@@ -130,6 +139,10 @@ class RouteContext {
     this.mtrLineCode,
     this.mtrStationCode,
     this.lrtStationId,
+    this.lrtOrigTc,
+    this.lrtOrigEn,
+    this.lrtDestTc,
+    this.lrtDestEn,
   });
 
   /// 建立一個只改部分欄位的副本，方便 per-stop ETA context override
@@ -145,6 +158,10 @@ class RouteContext {
     String? mtrLineCode,
     String? mtrStationCode,
     int? lrtStationId,
+    String? lrtOrigTc,
+    String? lrtOrigEn,
+    String? lrtDestTc,
+    String? lrtDestEn,
   }) {
     return RouteContext(
       routeNumber: routeNumber ?? this.routeNumber,
@@ -158,6 +175,10 @@ class RouteContext {
       mtrLineCode: mtrLineCode ?? this.mtrLineCode,
       mtrStationCode: mtrStationCode ?? this.mtrStationCode,
       lrtStationId: lrtStationId ?? this.lrtStationId,
+      lrtOrigTc: lrtOrigTc ?? this.lrtOrigTc,
+      lrtOrigEn: lrtOrigEn ?? this.lrtOrigEn,
+      lrtDestTc: lrtDestTc ?? this.lrtDestTc,
+      lrtDestEn: lrtDestEn ?? this.lrtDestEn,
     );
   }
 
@@ -842,54 +863,108 @@ class UnifiedEtaService {
     }
 
     // Check for delays
-    final delayWarning = schedule.isDelay ? ' [Delay]' : '';
+    final delayWarningTc = schedule.isDelay ? ' [服務延誤]' : '';
+    final delayWarningEn = schedule.isDelay ? ' [Delay]' : '';
 
     // Convert to UnifiedEta
     final etas = <UnifiedEta>[];
-    int sequence = 1;
 
-    for (final direction in schedule.directionTrains.values) {
-      for (final train in direction) {
-        // ✅ Priority: Use ttnt first, then calculate from time field
-        final diffMinutes = train.timeInMinutes ?? _calculateMinutesFromTime(train.time, schedule.currentTime);
-        final etaTime = _parseMtrEtaTime(train.time, schedule.currentTime);
+    // ✅ Preserve direction grouping by iterating through entries (not values)
+    // ✅ Filter by bound using MTR UP/DOWN direction semantics
+    for (final entry in schedule.directionTrains.entries) {
+      final directionKey = entry.key;
+      final trains = entry.value;
+      
+      // Filter by bound if provided
+      final bound = context.bound?.toUpperCase();
+      if (bound != null && bound.isNotEmpty) {
+        // ✅ MTR API uses UP/DOWN direction semantics
+        // Bound 'O' (Outbound) → Show UP direction trains
+        // Bound 'I' (Inbound) → Show DOWN direction trains
+        final upper = directionKey.toUpperCase();
+        final shouldInclude = (bound == 'O' && (upper == 'UP' || upper.contains('UP'))) ||
+                          (bound == 'I' && (upper == 'DOWN' || upper.contains('DOWN')));
         
+        debugPrint('🚆 MTR filtering: directionKey=$directionKey, bound=$bound, shouldInclude=$shouldInclude');
+        
+        if (!shouldInclude) {
+          // Skip this direction if it doesn't match the selected bound
+          continue;
+        }
+      }
+      
+      int sequence = 1;
+
+      for (final train in trains) {
+        final diffMinutes =
+            train.timeInMinutes ?? _calculateMinutesFromTime(train.time, schedule.currentTime);
+        final etaTime = _parseMtrEtaTime(train.time, schedule.currentTime);
+
         if (etaTime != null) {
-          final remark = '往 ${train.destination}$delayWarning';
+          final destinationTc =
+              train.displayDestination(stationNameResolver, isEnglish: false);
+          final destinationEn =
+              train.displayDestination(stationNameResolver, isEnglish: true);
           
+          debugPrint('🚆 MTR train: direction=$directionKey, dest=$destinationEn');
+
           etas.add(UnifiedEta(
             company: 'mtr',
             eta: etaTime,
             diffMinutes: diffMinutes,
-            sequence: sequence++,
-            remarkTc: remark,
-            remarkEn: 'to ${train.destination}$delayWarning',
-            isRealtime: true, // MTR heavy rail is real-time
+            sequence: sequence++, // ✅ Keep within-direction sequence
+            remarkTc: '往 $destinationTc$delayWarningTc',
+            remarkEn: 'to $destinationEn$delayWarningEn',
+            isRealtime: true,
+            direction: directionKey, // ✅ Preserve direction code (UP/DOWN/IN/OUT/1/2)
+            destination: train.destination, // ✅ Preserve destination code
           ));
         }
       }
     }
 
-    // Sort by ETA time
-    etas.sort((a, b) => a.eta.compareTo(b.eta));
+    // ✅ Do NOT sort across directions - keep direction grouping intact
+    // Each direction's trains remain in their original order
     
-    // Re-assign sequence after sorting
-    for (int i = 0; i < etas.length; i++) {
-      etas[i] = UnifiedEta(
-        company: etas[i].company,
-        eta: etas[i].eta,
-        diffMinutes: etas[i].diffMinutes,
-        sequence: i + 1,
-        remarkTc: etas[i].remarkTc,
-        remarkEn: etas[i].remarkEn,
-        remarkSc: etas[i].remarkSc,
-        isRealtime: etas[i].isRealtime,
-        isWheelchairAccessible: etas[i].isWheelchairAccessible,
-        routeVariant: etas[i].routeVariant,
-      );
+    // ✅ Fallback: If filtering resulted in no trains, fetch again without filtering
+    // This handles cases where bound matching might not work perfectly
+    final bound = context.bound?.toUpperCase();
+    if (bound != null && bound.isNotEmpty && etas.isEmpty) {
+      debugPrint('⚠️ MTR: No trains found after filtering by bound=$bound, fetching all trains');
+      // Re-fetch without filtering
+      for (final entry in schedule.directionTrains.entries) {
+        final directionKey = entry.key;
+        final trains = entry.value;
+        int sequence = 1;
+        
+        for (final train in trains) {
+          final diffMinutes =
+              train.timeInMinutes ?? _calculateMinutesFromTime(train.time, schedule.currentTime);
+          final etaTime = _parseMtrEtaTime(train.time, schedule.currentTime);
+
+          if (etaTime != null) {
+            final destinationTc =
+                train.displayDestination(stationNameResolver, isEnglish: false);
+            final destinationEn =
+                train.displayDestination(stationNameResolver, isEnglish: true);
+
+            etas.add(UnifiedEta(
+              company: 'mtr',
+              eta: etaTime,
+              diffMinutes: diffMinutes,
+              sequence: sequence++,
+              remarkTc: '往 $destinationTc$delayWarningTc',
+              remarkEn: 'to $destinationEn$delayWarningEn',
+              isRealtime: true,
+              direction: directionKey,
+              destination: train.destination,
+            ));
+          }
+        }
+      }
     }
 
-    debugPrint('✅ MTR: Found ${etas.length} ETAs for station $mtrStationCode ${delayWarning.isNotEmpty ? '(DELAY)' : ''}');
+    debugPrint('✅ MTR: Found ${etas.length} ETAs for station $mtrStationCode ${delayWarningEn.isNotEmpty ? '(DELAY)' : ''}');
     return etas;
   }
 
@@ -925,11 +1000,92 @@ class UnifiedEtaService {
 
     for (final platform in schedule.platforms) {
       for (final train in platform.trains) {
+        // ✅ For loop routes 705/706, filter by route number instead of destination
+        // These routes have same origin/destination (Tin Shui Wai) but different directions
+        if (context.routeNumber == '705' || context.routeNumber == '706') {
+          if (train.routeNo != context.routeNumber) {
+            debugPrint('⚠️ LRT: Filtered train - routeNo="${train.routeNo}" does not match requested route="${context.routeNumber}"');
+            continue; // Skip trains from different loop direction
+          }
+        }
+        
+        // Filter by bound if provided
+        final bound = context.bound?.toUpperCase();
+        if (bound != null && bound.isNotEmpty) {
+          // For LRT, filter by destination
+          // Bound 'O' = Outbound = show trains going to route destination
+          // Bound 'I' = Inbound = show trains going to route origin
+          
+          // ✅ Simplified string normalization
+          final destTc = context.lrtDestTc?.trim();
+          final destEn = context.lrtDestEn?.trim();
+          final origTc = context.lrtOrigTc?.trim();
+          final origEn = context.lrtOrigEn?.trim();
+          
+          final trainDestTc = train.destCh?.trim() ?? '';
+          final trainDestEn = train.destEn?.trim() ?? '';
+          
+          // ✅ Use English for comparison (API returns English dest_en)
+          // Use single normalized value for comparison
+          final normalizedTrainDest = trainDestEn.isNotEmpty ? trainDestEn.toLowerCase().trim() : trainDestTc;
+          final normalizedDest = destEn?.toLowerCase().trim() ?? '';
+          final normalizedOrig = origEn?.toLowerCase().trim() ?? '';
+          
+          if (bound == 'O') {
+            // Outbound: show trains going to route destination
+            if (normalizedDest.isNotEmpty && !normalizedTrainDest.contains(normalizedDest)) {
+              debugPrint('⚠️ LRT: Filtered Outbound train - train dest="$normalizedTrainDest" does not match route dest="$normalizedDest"');
+              continue; // Skip this train
+            }
+          } else if (bound == 'I') {
+            // Inbound: show trains going to route origin
+            if (normalizedOrig.isNotEmpty && !normalizedTrainDest.contains(normalizedOrig)) {
+              debugPrint('⚠️ LRT: Filtered Inbound train - train dest="$normalizedTrainDest" does not match route orig="$normalizedOrig"');
+              continue; // Skip this train
+            }
+          }
+        }
+        
         // Parse time from "3 min" or "12 min" format
         final minutes = _parseLrtTimeMinutes(train.timeEn);
         
         if (minutes != null) {
           final etaTime = DateTime.now().add(Duration(minutes: minutes));
+          
+          // ✅ Store direction and destination metadata in UnifiedEta
+          // Determine direction based on destination vs route origin/destination
+          String? trainDirection;
+          String? trainDestCode;
+          
+          final bound = context.bound?.toUpperCase();
+          if (bound == 'O') {
+            trainDirection = 'O'; // Outbound
+            trainDestCode = train.destEn; // Use English destination as code
+          } else if (bound == 'I') {
+            trainDirection = 'I'; // Inbound
+            trainDestCode = train.destEn;
+          } else {
+            // No bound filter, determine direction automatically
+            final destTc = context.lrtDestTc?.trim();
+            final destEn = context.lrtDestEn?.trim();
+            final origTc = context.lrtOrigTc?.trim();
+            final origEn = context.lrtOrigEn?.trim();
+            
+            final trainDestTc = train.destCh?.trim() ?? '';
+            final trainDestEn = train.destEn?.trim() ?? '';
+            final normalizedTrainDest = trainDestTc.isNotEmpty ? trainDestTc : trainDestEn;
+            
+            final normalizedDest = destTc?.isNotEmpty == true ? destTc! : destEn;
+            if (normalizedDest != null && normalizedDest.isNotEmpty &&
+                (normalizedTrainDest.contains(normalizedDest) || normalizedDest.contains(normalizedTrainDest))) {
+              trainDirection = 'O'; // Going to destination = Outbound
+            } else {
+              trainDirection = 'I'; // Going to origin = Inbound
+            }
+            trainDestCode = trainDestEn;
+          }
+          
+          debugPrint('🚋 LRT train: route=${train.routeNo}, direction=$trainDirection, dest=${train.destEn}');
           
           etas.add(UnifiedEta(
             company: 'lrt',
@@ -939,6 +1095,8 @@ class UnifiedEtaService {
             remarkTc: '${train.routeNo} 往 ${train.destCh}',
             remarkEn: '${train.routeNo} to ${train.destEn}',
             isRealtime: true, // LRT is real-time
+            direction: trainDirection, // ✅ Store direction metadata (O/I)
+            destination: trainDestCode, // ✅ Store destination code metadata
           ));
         }
       }
@@ -946,6 +1104,56 @@ class UnifiedEtaService {
 
     // Sort by ETA time
     etas.sort((a, b) => a.eta.compareTo(b.eta));
+    
+    // ✅ Fallback: If filtering resulted in no trains, fetch again without filtering
+    final bound = context.bound?.toUpperCase();
+    if (bound != null && bound.isNotEmpty && etas.isEmpty) {
+      debugPrint('⚠️ LRT: No trains found after filtering by bound=$bound, fetching all trains');
+      // Re-fetch without filtering
+      etas.clear();
+      sequence = 1;
+      for (final platform in schedule.platforms) {
+        for (final train in platform.trains) {
+          final minutes = _parseLrtTimeMinutes(train.timeEn);
+          if (minutes != null) {
+            final etaTime = DateTime.now().add(Duration(minutes: minutes));
+            
+            // ✅ Determine direction automatically (no bound filter)
+            final destTc = context.lrtDestTc?.trim();
+            final destEn = context.lrtDestEn?.trim();
+            final origTc = context.lrtOrigTc?.trim();
+            final origEn = context.lrtOrigEn?.trim();
+            
+            final trainDestTc = train.destCh?.trim() ?? '';
+            final trainDestEn = train.destEn?.trim() ?? '';
+            final normalizedTrainDest = trainDestTc.isNotEmpty ? trainDestTc : trainDestEn;
+            
+            final normalizedDest = destTc?.isNotEmpty == true ? destTc! : destEn;
+            
+            String trainDirection;
+            if (normalizedDest != null && normalizedDest.isNotEmpty &&
+                (normalizedTrainDest.contains(normalizedDest) || normalizedDest.contains(normalizedTrainDest))) {
+              trainDirection = 'O'; // Going to destination = Outbound
+            } else {
+              trainDirection = 'I'; // Going to origin = Inbound
+            }
+            
+            etas.add(UnifiedEta(
+              company: 'lrt',
+              eta: etaTime,
+              diffMinutes: minutes,
+              sequence: sequence++,
+              remarkTc: '${train.routeNo} 往 ${train.destCh}',
+              remarkEn: '${train.routeNo} to ${train.destEn}',
+              isRealtime: true,
+              direction: trainDirection, // Auto-determined direction
+              destination: trainDestEn,
+            ));
+          }
+        }
+      }
+      etas.sort((a, b) => a.eta.compareTo(b.eta));
+    }
     
     // Re-assign sequence after sorting
     for (int i = 0; i < etas.length; i++) {
@@ -960,6 +1168,8 @@ class UnifiedEtaService {
         isRealtime: etas[i].isRealtime,
         isWheelchairAccessible: etas[i].isWheelchairAccessible,
         routeVariant: etas[i].routeVariant,
+        direction: etas[i].direction, // ✅ Preserve direction metadata
+        destination: etas[i].destination, // ✅ Preserve destination metadata
       );
     }
 
@@ -1053,6 +1263,8 @@ class UnifiedEtaService {
       'isRealtime': eta.isRealtime,
       'isWheelchairAccessible': eta.isWheelchairAccessible,
       'routeVariant': eta.routeVariant,
+      'direction': eta.direction, // ✅ MTR direction code
+      'destination': eta.destination, // ✅ MTR destination code
     };
   }
 
@@ -1069,6 +1281,8 @@ class UnifiedEtaService {
       isRealtime: json['isRealtime'] as bool? ?? true,
       isWheelchairAccessible: json['isWheelchairAccessible'] as bool? ?? false,
       routeVariant: json['routeVariant']?.toString(),
+      direction: json['direction']?.toString(), // ✅ MTR direction code
+      destination: json['destination']?.toString(), // ✅ MTR destination code
     );
   }
 

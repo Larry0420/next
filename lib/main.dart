@@ -988,9 +988,9 @@ class MotionConstants {
   static const Duration modalTransition = slow;                 // 600ms
   
   // 內容與局部過場：M3 建議使用 Medium Duration 搭配 Standard
-  static const Duration contentTransition = fast;               // 300ms
-  static const Duration listItemAnimation = fast;               // 300ms
-  static const Duration microInteraction = ultraFast;           // 200ms
+  static const Duration contentTransition = medium;               // 300ms
+  static const Duration listItemAnimation = medium;               // 300ms
+  static const Duration microInteraction = fast;           // 200ms
   static const Duration staggerDelay = Durations.short1;        // 50ms
   
   // Scroll-specific 動畫時間
