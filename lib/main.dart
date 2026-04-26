@@ -1982,6 +1982,7 @@ class ThemeProvider extends ChangeNotifier {
     static const String _showKmbInNavKey = 'show_kmb_in_nav';
     static const String _showSubNavKey = 'show_sub_nav';
     static const String _useFloatingRouteTogglesKey = 'use_floating_route_toggles';
+    static const String _useUnifiedRouteStatusNavigationKey = 'use_unified_route_status_navigation';
     static const String _showRankBadgeKey = 'use_show_rank_badge';
 
     bool _showStationId = false;
@@ -1992,6 +1993,7 @@ class ThemeProvider extends ChangeNotifier {
     bool _showKmbInNav = true; // Default to visible
     bool _showSubNav = true; // Default to visible
     bool _useFloatingRouteToggles = true; // Default to new floating UI
+    bool _useUnifiedRouteStatusNavigation = true; // Default to unified route status page
     bool _showRankBadge = false;
     SharedPreferences? _prefs;
 
@@ -2003,6 +2005,7 @@ class ThemeProvider extends ChangeNotifier {
     bool get showKmbInNav => _showKmbInNav;
     bool get showSubNav => _showSubNav;
     bool get useFloatingRouteToggles => _useFloatingRouteToggles;
+    bool get useUnifiedRouteStatusNavigation => _useUnifiedRouteStatusNavigation;
 
     bool get showRankBadge => _showRankBadge;
 
@@ -2016,6 +2019,7 @@ class ThemeProvider extends ChangeNotifier {
       _showKmbInNav = _prefs!.getBool(_showKmbInNavKey) ?? true;
       _showSubNav = _prefs!.getBool(_showSubNavKey) ?? true;
       _useFloatingRouteToggles = _prefs!.getBool(_useFloatingRouteTogglesKey) ?? true;
+      _useUnifiedRouteStatusNavigation = _prefs!.getBool(_useUnifiedRouteStatusNavigationKey) ?? true;
       _showRankBadge = _prefs!.getBool(_showRankBadgeKey) ?? false;
       notifyListeners();
     }
@@ -2081,6 +2085,13 @@ class ThemeProvider extends ChangeNotifier {
       _useFloatingRouteToggles = use;
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool(_useFloatingRouteTogglesKey, use);
+      notifyListeners();
+    }
+
+    Future<void> setUseUnifiedRouteStatusNavigation(bool use) async {
+      _useUnifiedRouteStatusNavigation = use;
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool(_useUnifiedRouteStatusNavigationKey, use);
       notifyListeners();
     }
   }
@@ -9103,6 +9114,25 @@ class _SettingsPage extends StatelessWidget {
               value: devSettings.useFloatingRouteToggles,
               onChanged: (value) {
                 devSettings.setUseFloatingRouteToggles(value);
+              },
+            ),
+          ),
+        ),
+
+        const SizedBox(height: UIConstants.spacingXS),
+
+        Consumer<DeveloperSettingsProvider>(
+          builder: (context, devSettings, _) => _buildCompactCard(
+            context,
+            icon: Icons.route,
+            title: lang.isEnglish ? 'Pinned Uses Unified Route Page' : '已釘選項目使用統一路線頁',
+            subtitle: devSettings.useUnifiedRouteStatusNavigation
+                ? (lang.isEnglish ? 'Open pinned routes/stops in UnifiedRouteStatusPage' : '已釘選路線/站點會打開統一路線狀態頁')
+                : (lang.isEnglish ? 'Use legacy company-specific route pages' : '使用舊版公司專屬路線頁面'),
+            trailing: Switch(
+              value: devSettings.useUnifiedRouteStatusNavigation,
+              onChanged: (value) {
+                devSettings.setUseUnifiedRouteStatusNavigation(value);
               },
             ),
           ),

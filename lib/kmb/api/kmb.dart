@@ -899,11 +899,14 @@ class Kmb {
     final prefs = await SharedPreferences.getInstance();
     final pinnedJson = prefs.getString(_pinnedStopsKey) ?? '[]';
     final List<dynamic> pinned = json.decode(pinnedJson);
+    final r = route.trim().toUpperCase();
+    final s = stopId.trim();
+    final q = seq.toString().trim();
     
     pinned.removeWhere((item) => 
-      item['route'] == route && 
-      item['stopId'] == stopId && 
-      item['seq'] == seq
+      (item['route']?.toString().trim().toUpperCase() ?? '') == r && 
+      (item['stopId']?.toString().trim() ?? '') == s && 
+      (item['seq']?.toString().trim() ?? '') == q
     );
     
     await prefs.setString(_pinnedStopsKey, json.encode(pinned));

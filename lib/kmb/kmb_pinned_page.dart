@@ -5,18 +5,21 @@ import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
-import 'package:lrt_next_train/ctb_route_status_page.dart';
 import 'package:lrt_next_train/optionalMarquee.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../kmb_route_status_page.dart';
 import '../ctb_route_status_page.dart';
-import '../main.dart' show LanguageProvider, EnhancedPageRoute;
+import '../route_status_page.dart';
+import '../main.dart' show LanguageProvider, EnhancedPageRoute, DeveloperSettingsProvider;
+import '../services/unified_pinned_storage.dart';
 import '../toTitleCase.dart';
 import 'api/citybus.dart';
+import 'api/gmb.dart';
 import 'api/kmb.dart';
-import 'company_name.dart';   // ← 只保留一個
+import 'api/nlb.dart';
+import 'company_name.dart';
 
 
 
@@ -90,14 +93,31 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
       final ctbPinnedStops = await Citybus.getPinnedStops();
       final ctbHistory = await Citybus.getRouteHistory();
 
+      // Load GMB/NLB + unified storage
+      final gmbPinned = await GMB.getPinnedRoutes();
+      final gmbPinnedStops = await GMB.getPinnedStops();
+      final nlbPinned = await Nlb.getPinnedRoutes();
+      final unifiedPinnedRoutes = await UnifiedPinnedStorage.getPinnedRoutes();
+      final unifiedPinnedStops = await UnifiedPinnedStorage.getPinnedStops();
 
       // Merge and enrich
-      final allPinned = [...kmbPinned, ...ctbPinned.map((e) => Map<String, dynamic>.from(e)),];
-      final allPinnedStops = [...kmbPinnedStops, ...ctbPinnedStops.map((e) => Map<String, dynamic>.from(e)),];
+      final allPinned = [
+        ...kmbPinned.map((e) => Map<String, dynamic>.from(e)),
+        ...ctbPinned.map((e) => Map<String, dynamic>.from(e)),
+        ...gmbPinned.map(_normalizeGmbPinnedRoute),
+        ...nlbPinned.map(_normalizeNlbPinnedRoute),
+        ...unifiedPinnedRoutes.map((e) => Map<String, dynamic>.from(e)),
+      ];
+      final allPinnedStops = [
+        ...kmbPinnedStops.map((e) => Map<String, dynamic>.from(e)),
+        ...ctbPinnedStops.map((e) => Map<String, dynamic>.from(e)),
+        ...gmbPinnedStops.map(_normalizeGmbPinnedStop),
+        ...unifiedPinnedStops.map((e) => Map<String, dynamic>.from(e)),
+      ];
     
       final allHistory = [
-      ...kmbHistory.map((e) => Map<String, dynamic>.from(e)),
-      ...ctbHistory.map((e) => Map<String, dynamic>.from(e)),
+        ...kmbHistory.map((e) => Map<String, dynamic>.from(e)),
+        ...ctbHistory.map((e) => Map<String, dynamic>.from(e)),
       ];
 
       // Sort by timestamp (newest first)
@@ -125,6 +145,54 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     } catch (e) {
       setState(() => _loading = false);
     }
+  }
+
+  Map<String, dynamic> _normalizeNlbPinnedRoute(Map<String, dynamic> item) {
+    return {
+      'source': 'nlb',
+      'co': 'nlb',
+      'route': item['routeNo']?.toString() ?? '',
+      'direction': item['direction']?.toString() ?? '',
+      'serviceType': item['serviceType']?.toString() ?? '1',
+      'label': item['label']?.toString() ?? (item['routeNo']?.toString() ?? ''),
+      'initialRouteId': item['routeId']?.toString(),
+      'routeId': item['routeId']?.toString(),
+      'pinnedAt': item['pinnedAt'],
+    };
+  }
+
+  Map<String, dynamic> _normalizeGmbPinnedRoute(Map<String, dynamic> item) {
+    final routeSeq = item['routeSeq']?.toString() ?? '1';
+    return {
+      'source': 'gmb',
+      'co': 'gmb',
+      'route': item['routeCode']?.toString() ?? '',
+      'direction': routeSeq == '2' ? 'I' : 'O',
+      'serviceType': item['serviceType']?.toString() ?? '1',
+      'label': item['label']?.toString() ?? (item['routeCode']?.toString() ?? ''),
+      'gmbRouteId': item['routeId'],
+      'gmbRouteSeq': item['routeSeq'],
+      'gmbRegion': item['region']?.toString(),
+      'pinnedAt': item['pinnedAt'],
+    };
+  }
+
+  Map<String, dynamic> _normalizeGmbPinnedStop(Map<String, dynamic> item) {
+    return {
+      'source': 'gmb',
+      'co': 'gmb',
+      'route': item['routeCode']?.toString() ?? '',
+      'stopId': item['stopId']?.toString() ?? '',
+      'seq': item['routeSeq']?.toString() ?? '1',
+      'stopName': item['stopName']?.toString() ?? '',
+      'stopNameEn': item['stopName']?.toString() ?? '',
+      'stopNameTc': item['stopName']?.toString() ?? '',
+      'direction': (item['routeSeq']?.toString() == '2') ? 'I' : 'O',
+      'serviceType': '1',
+      'gmbRouteId': item['routeId'],
+      'gmbRouteSeq': item['routeSeq'],
+      'pinnedAt': item['pinnedAt'],
+    };
   }
 
   Future<List<Map<String, dynamic>>> _enrichWithDestination(List<Map<String, dynamic>> items) async {
@@ -448,6 +516,41 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                   route['route'],
                   companyId: companyId,
                 );
+              } else if (companyId == 'nlb') {
+                final routeId = route['routeId']?.toString() ?? route['initialRouteId']?.toString() ?? '';
+                if (routeId.isNotEmpty) {
+                  await Nlb.unpinRoute(routeId);
+                } else {
+                  await UnifiedPinnedStorage.unpinRoute(
+                    company: companyId,
+                    route: route['route']?.toString() ?? '',
+                    bound: route['direction']?.toString(),
+                    serviceType: route['serviceType']?.toString(),
+                    initialRouteId: route['initialRouteId']?.toString(),
+                  );
+                }
+              } else if (companyId == 'gmb' && route['source'] == 'gmb') {
+                final routeId = route['gmbRouteId'];
+                final routeSeq = route['gmbRouteSeq'];
+                if (routeId is int && routeSeq is int) {
+                  await GMB.unpinRoute(routeId, routeSeq);
+                } else {
+                  await UnifiedPinnedStorage.unpinRoute(
+                    company: companyId,
+                    route: route['route']?.toString() ?? '',
+                    bound: route['direction']?.toString(),
+                    serviceType: route['serviceType']?.toString(),
+                    initialRouteId: route['initialRouteId']?.toString(),
+                  );
+                }
+              } else if (route['source'] == 'unified' || companyId == 'mtr' || companyId == 'lrt') {
+                await UnifiedPinnedStorage.unpinRoute(
+                  company: companyId,
+                  route: route['route']?.toString() ?? '',
+                  bound: route['direction']?.toString(),
+                  serviceType: route['serviceType']?.toString(),
+                  initialRouteId: route['initialRouteId']?.toString(),
+                );
               } else {
                 await Kmb.unpinRoute(
                   route['route'],
@@ -582,6 +685,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
     }
 
     final cs = Theme.of(context).colorScheme;
+    final useUnifiedNav = context.watch<DeveloperSettingsProvider>().useUnifiedRouteStatusNavigation;
     Color dirColor = cs.secondary;
     IconData dirIcon = Icons.arrow_forward;
     if (direction.toUpperCase().startsWith('O')) {
@@ -605,23 +709,62 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
           child: InkWell(
             onTap: () {
               final companyId = route['co']?.toString().toLowerCase() ?? 'kmb';
-              if (companyId == 'ctb' || companyId == 'nwfb') {
+              if (useUnifiedNav) {
+                final unifiedCompany = companyId == 'lrt' ? 'lightrail' : companyId;
                 Navigator.push(
                   context,
                   EnhancedPageRoute(
-                    builder: (context) => CtbRouteStatusPage(
+                    builder: (context) => UnifiedRouteStatusPage(
                       route: routeNum,
-                      bound: direction,
-                      serviceType: null,  // CTB doesn't use service type
-                      companyId: companyId,
+                      companies: [unifiedCompany],
+                      initialCompany: unifiedCompany,
+                      bound: direction.isEmpty ? null : direction,
+                      serviceType: serviceType,
+                      initialRouteId: route['initialRouteId']?.toString() ?? route['routeId']?.toString(),
                     ),
                   ),
                 ).then((_) => _loadData());
               } else {
-              Navigator.push(
-                context,
-                EnhancedPageRoute(builder: (context) => KmbRouteStatusPage(route: routeNum, bound: direction, serviceType: serviceType, companyId: null,)),
-              ).then((_) => _loadData());
+                if (companyId == 'ctb' || companyId == 'nwfb') {
+                  Navigator.push(
+                    context,
+                    EnhancedPageRoute(
+                      builder: (context) => CtbRouteStatusPage(
+                        route: routeNum,
+                        bound: direction,
+                        serviceType: null,  // CTB doesn't use service type
+                        companyId: companyId,
+                      ),
+                    ),
+                  ).then((_) => _loadData());
+                } else if (companyId == 'kmb') {
+                  Navigator.push(
+                    context,
+                    EnhancedPageRoute(
+                      builder: (context) => KmbRouteStatusPage(
+                        route: routeNum,
+                        bound: direction,
+                        serviceType: serviceType,
+                        companyId: null,
+                      ),
+                    ),
+                  ).then((_) => _loadData());
+                } else {
+                  final unifiedCompany = companyId == 'lrt' ? 'lightrail' : companyId;
+                  Navigator.push(
+                    context,
+                    EnhancedPageRoute(
+                      builder: (context) => UnifiedRouteStatusPage(
+                        route: routeNum,
+                        companies: [unifiedCompany],
+                        initialCompany: unifiedCompany,
+                        bound: direction.isEmpty ? null : direction,
+                        serviceType: serviceType,
+                        initialRouteId: route['initialRouteId']?.toString() ?? route['routeId']?.toString(),
+                      ),
+                    ),
+                  ).then((_) => _loadData());
+                }
               }
             },
             borderRadius: BorderRadius.circular(14),
@@ -752,6 +895,19 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
             stop: stop,
             lang: lang,
             onUnpin: () async {
+              final route = stop['route']?.toString() ?? '';
+              final stopId = stop['stopId']?.toString() ?? '';
+              final seq = stop['seq']?.toString() ?? '';
+              // Optimistic UI update to avoid stale card lingering
+              if (mounted) {
+                setState(() {
+                  _pinnedStops.removeWhere((s) =>
+                      (s['route']?.toString() ?? '') == route &&
+                      (s['stopId']?.toString() ?? '') == stopId &&
+                      (s['seq']?.toString() ?? '') == seq);
+                });
+              }
+
               // ✅ Check company ID and call correct API
               final companyId = stop['co']?.toString().toLowerCase() ?? 'kmb';
               
@@ -762,15 +918,28 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                   stop['seq'],
                   companyId: companyId,
                 );
-              } else {
+              } else if (companyId == 'kmb') {
                 await Kmb.unpinStop(
                   stop['route'],
                   stop['stopId'],
                   stop['seq'],
                 );
+              } else if (companyId == 'gmb' && stop['source'] == 'gmb') {
+                final gmbStopId = int.tryParse(stop['stopId']?.toString() ?? '');
+                final routeCode = stop['route']?.toString() ?? '';
+                if (gmbStopId != null && routeCode.isNotEmpty) {
+                  await GMB.unpinStop(gmbStopId, routeCode);
+                }
+              } else {
+                await UnifiedPinnedStorage.unpinStop(
+                  company: companyId,
+                  route: stop['route']?.toString() ?? '',
+                  stopId: stop['stopId']?.toString() ?? '',
+                  seq: stop['seq']?.toString() ?? '',
+                );
               }
               
-              _loadData();
+              await _loadData();
             },
 
           );
@@ -852,7 +1021,6 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
       final route = widget.stop['route']?.toString().trim().toUpperCase() ?? '';
       final serviceType = widget.stop['serviceType']?.toString() ?? '1';
       final stopId = widget.stop['stopId']?.toString() ?? '';
-      final seq = widget.stop['seq']?.toString() ?? '';
       final direction = widget.stop['direction']?.toString().trim().toUpperCase() ?? '';
       final companyId = widget.stop['co']?.toString().toLowerCase() ?? 'kmb';
 
@@ -875,10 +1043,12 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
           companyId: companyId,
         );
         entries = rawEntries.map((e) => Map<String, dynamic>.from(e)).toList();
-      } else {
+      } else if (companyId == 'kmb') {
         // KMB: Use fetchStopRouteEta(stopId, route, serviceType)
         final rawEntries = await Kmb.fetchStopRouteEta(stopId, route, serviceType);
         entries = rawEntries.map((e) => Map<String, dynamic>.from(e)).toList();
+      } else {
+        entries = <Map<String, dynamic>>[];
       }
       
       if (!mounted) return;
@@ -1080,24 +1250,48 @@ class _PinnedStopCardState extends State<PinnedStopCard> {
     final serviceType = widget.stop['serviceType']?.toString() ?? '1';
     final seq = widget.stop['seq']?.toString();
     final stopId = widget.stop['stopId']?.toString();
+    final initialRouteId = widget.stop['initialRouteId']?.toString();
 
-    final page = (companyId == 'ctb' || companyId == 'nwfb')
-        ? CtbRouteStatusPage(
+    final useUnifiedNav = context.read<DeveloperSettingsProvider>().useUnifiedRouteStatusNavigation;
+    final page = useUnifiedNav
+        ? UnifiedRouteStatusPage(
             route: route,
+            companies: [companyId == 'lrt' ? 'lightrail' : companyId],
+            initialCompany: companyId == 'lrt' ? 'lightrail' : companyId,
             bound: direction,
-            serviceType: null,
-            companyId: companyId,
+            serviceType: serviceType,
+            initialRouteId: initialRouteId,
             autoExpandSeq: seq,
             autoExpandStopId: stopId,
           )
-        : KmbRouteStatusPage(
-            route: route,
-            bound: direction,
-            serviceType: serviceType,
-            companyId: null,
-            autoExpandSeq: seq,
-            autoExpandStopId: stopId,
-          );
+        : (companyId == 'ctb' || companyId == 'nwfb')
+            ? CtbRouteStatusPage(
+                route: route,
+                bound: direction,
+                serviceType: null,
+                companyId: companyId,
+                autoExpandSeq: seq,
+                autoExpandStopId: stopId,
+              )
+            : (companyId == 'kmb')
+                ? KmbRouteStatusPage(
+                    route: route,
+                    bound: direction,
+                    serviceType: serviceType,
+                    companyId: null,
+                    autoExpandSeq: seq,
+                    autoExpandStopId: stopId,
+                  )
+                : UnifiedRouteStatusPage(
+                    route: route,
+                    companies: [companyId == 'lrt' ? 'lightrail' : companyId],
+                    initialCompany: companyId == 'lrt' ? 'lightrail' : companyId,
+                    bound: direction,
+                    serviceType: serviceType,
+                    initialRouteId: initialRouteId,
+                    autoExpandSeq: seq,
+                    autoExpandStopId: stopId,
+                  );
 
     Navigator.push(context, EnhancedPageRoute(builder: (_) => page));
   }

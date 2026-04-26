@@ -11,13 +11,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'providers/location_provider.dart';
 
+import 'kmb/api/citybus.dart';
+import 'kmb/api/gmb.dart';
+import 'kmb/api/kmb.dart';
 import 'kmb/api/mtr_bus.dart';
+import 'kmb/api/nlb.dart';
 
 import 'hkbus_db_provider.dart';
 import 'kmb/company_name.dart';
 import 'main.dart' show LanguageProvider, DeveloperSettingsProvider, MotionConstants, ConnectivityProvider;
 import 'optionalMarquee.dart';
 import 'services/route_id_resolver.dart';
+import 'services/unified_pinned_storage.dart';
 import 'services/unified_eta_service.dart';
 import 'widgets/route_sheet/draggable_route_sheet.dart';
 
@@ -1542,6 +1547,210 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
     _fetchData();
   }
 
+  String _normalizedCompanyId() {
+    final company = _selectedCompany.toLowerCase();
+    if (company == 'lightrail') return 'lrt';
+    return company;
+  }
+
+  String _buildRouteLabel(bool isEnglish) {
+    final orig = isEnglish
+        ? (data?['orig_en'] ?? data?['orig_tc'] ?? '')
+        : (data?['orig_tc'] ?? data?['orig_en'] ?? '');
+    final dest = isEnglish
+        ? (data?['dest_en'] ?? data?['dest_tc'] ?? '')
+        : (data?['dest_tc'] ?? data?['dest_en'] ?? '');
+    if (orig.toString().isNotEmpty && dest.toString().isNotEmpty) {
+      return '${widget.route}: $orig -> $dest';
+    }
+    return widget.route;
+  }
+
+  Future<void> _pinCurrentRoute() async {
+    final isEnglish = context.read<LanguageProvider>().isEnglish;
+    final co = _normalizedCompanyId();
+    final label = _buildRouteLabel(isEnglish);
+    final direction = _routeContext?.bound ?? widget.bound ?? 'O';
+    final serviceType = _routeContext?.serviceType ?? widget.serviceType ?? '1';
+
+    try {
+      switch (co) {
+        case 'kmb':
+          await Kmb.pinRoute(widget.route, direction, serviceType, label);
+          break;
+        case 'ctb':
+        case 'nwfb':
+          await Citybus.pinRoute(widget.route, label, companyId: co);
+          break;
+        case 'gmb':
+          final routeId = _resolvedRouteIds?.gmbRouteId;
+          final routeCode = _resolvedRouteIds?.gmbRouteCode ?? widget.route;
+          final region = _resolvedRouteIds?.gmbRegion ?? 'NT';
+          final routeSeq = direction.toUpperCase().startsWith('I') ? 2 : 1;
+          if (routeId != null) {
+            await GMB.pinRoute(routeId, routeSeq, routeCode, region, label);
+          } else {
+            await UnifiedPinnedStorage.pinRoute(
+              company: co,
+              route: widget.route,
+              bound: direction,
+              serviceType: serviceType,
+              label: label,
+              initialRouteId: widget.initialRouteId,
+            );
+          }
+          break;
+        case 'nlb':
+          final routeId = _resolvedRouteIds?.nlbRouteId ?? widget.initialRouteId;
+          if (routeId != null && routeId.isNotEmpty) {
+            await Nlb.pinRoute(widget.route, routeId, label);
+          } else {
+            await UnifiedPinnedStorage.pinRoute(
+              company: co,
+              route: widget.route,
+              bound: direction,
+              serviceType: serviceType,
+              label: label,
+              initialRouteId: widget.initialRouteId,
+            );
+          }
+          break;
+        default:
+          await UnifiedPinnedStorage.pinRoute(
+            company: co,
+            route: widget.route,
+            bound: direction,
+            serviceType: serviceType,
+            label: label,
+            initialRouteId: widget.initialRouteId,
+          );
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isEnglish ? 'Pinned route ${widget.route}' : '已釘選路線 ${widget.route}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isEnglish ? 'Failed to pin route: $e' : '釘選路線失敗: $e'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _pinStop(Map<String, dynamic> stop) async {
+    final isEnglish = context.read<LanguageProvider>().isEnglish;
+    final co = _normalizedCompanyId();
+    final stopId = stop['stop']?.toString() ?? '';
+    final seq = stop['seq']?.toString() ?? '';
+    if (stopId.isEmpty || seq.isEmpty) return;
+
+    final stopNameEn = stop['name_en']?.toString() ?? stopId;
+    final stopNameTc = stop['name_tc']?.toString() ?? stopNameEn;
+    final displayName = isEnglish ? stopNameEn.toTitleCase() : stopNameTc;
+    final direction = _routeContext?.bound ?? widget.bound ?? stop['bound']?.toString();
+    final serviceType = _routeContext?.serviceType ?? widget.serviceType ?? '1';
+
+    try {
+      switch (co) {
+        case 'kmb':
+          await Kmb.pinStop(
+            route: widget.route,
+            stopId: stopId,
+            seq: seq,
+            stopName: displayName,
+            stopNameEn: stopNameEn,
+            stopNameTc: stopNameTc,
+            latitude: stop['lat']?.toString(),
+            longitude: stop['long']?.toString(),
+            direction: direction,
+            serviceType: serviceType,
+            destEn: data?['dest_en']?.toString(),
+            destTc: data?['dest_tc']?.toString(),
+          );
+          break;
+        case 'ctb':
+        case 'nwfb':
+          await Citybus.pinStop(
+            route: widget.route,
+            stopId: stopId,
+            seq: seq,
+            stopName: displayName,
+            stopNameEn: stopNameEn,
+            stopNameTc: stopNameTc,
+            latitude: stop['lat']?.toString(),
+            longitude: stop['long']?.toString(),
+            direction: direction,
+            serviceType: serviceType,
+            companyId: co,
+            destEn: data?['dest_en']?.toString(),
+            destTc: data?['dest_tc']?.toString(),
+          );
+          break;
+        case 'gmb':
+          final gmbStopId = int.tryParse(stopId);
+          if (gmbStopId != null) {
+            await GMB.pinStop(
+              stopId: gmbStopId,
+              stopName: displayName,
+              routeCode: widget.route,
+              routeId: _resolvedRouteIds?.gmbRouteId,
+              routeSeq: direction?.toUpperCase().startsWith('I') == true ? 2 : 1,
+            );
+          } else {
+            await UnifiedPinnedStorage.pinStop(
+              company: co,
+              route: widget.route,
+              stopId: stopId,
+              seq: seq,
+              stopName: displayName,
+              stopNameEn: stopNameEn,
+              stopNameTc: stopNameTc,
+              direction: direction,
+              serviceType: serviceType,
+              initialRouteId: widget.initialRouteId,
+            );
+          }
+          break;
+        default:
+          await UnifiedPinnedStorage.pinStop(
+            company: co,
+            route: widget.route,
+            stopId: stopId,
+            seq: seq,
+            stopName: displayName,
+            stopNameEn: stopNameEn,
+            stopNameTc: stopNameTc,
+            direction: direction,
+            serviceType: serviceType,
+            initialRouteId: widget.initialRouteId,
+          );
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isEnglish ? 'Pinned stop: $displayName' : '已釘選站點: $displayName'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isEnglish ? 'Failed to pin stop: $e' : '釘選站點失敗: $e'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
@@ -1635,6 +1844,11 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
               setState(() => _showMapView = !_showMapView);
               _saveMapViewPreference(_showMapView);
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.push_pin_rounded),
+            tooltip: isEnglish ? 'Pin route' : '釘選路線',
+            onPressed: _pinCurrentRoute,
           ),
         ],
       ),
@@ -1957,6 +2171,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
             ),
             children: [
               _buildExpandedStopContent(
+                stop: stop,
                 stopId: stopId,
                 isEnglish: isEnglish,
                 etaLoading: etaLoading,
@@ -2097,6 +2312,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
   }
 
   Widget _buildExpandedStopContent({
+    required Map<String, dynamic> stop,
     required String stopId,
     required bool isEnglish,
     required bool etaLoading,
@@ -2173,6 +2389,46 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
             '${isEnglish ? 'Stop ID' : '站點 ID'}: $stopId',
             style: theme.textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+            child: Container(
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainer,
+                border: Border(
+                  top: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.2)),
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _pinStop(stop),
+                    icon: const Icon(Icons.push_pin_rounded, size: 18),
+                    label: Text(isEnglish ? 'Pin' : '釘選'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: colorScheme.secondary,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  if (stop['lat'] != null && stop['long'] != null)
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() => _showMapView = true);
+                      },
+                      icon: const Icon(Icons.map_rounded, size: 18),
+                      label: Text(isEnglish ? 'Map' : '地圖'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: colorScheme.secondary,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],
