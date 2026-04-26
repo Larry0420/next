@@ -1580,7 +1580,7 @@ class _UnifiedRouteStatusPageState extends State<UnifiedRouteStatusPage>
           break;
         case 'ctb':
         case 'nwfb':
-          await Citybus.pinRoute(widget.route, label, companyId: co);
+          await Citybus.pinRoute(widget.route, label, companyId: co.toLowerCase());
           break;
         case 'gmb':
           final routeId = _resolvedRouteIds?.gmbRouteId;

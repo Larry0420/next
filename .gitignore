@@ -63,3 +63,6 @@ windows/build/
 #Unused Library
 lib/backup
 /*.pdf
+linux/*
+macos/*
+windows/*

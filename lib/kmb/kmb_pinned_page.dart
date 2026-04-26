@@ -510,17 +510,23 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
             isPinned: true,
             onUnpin: () async {
               final companyId = route['co']?.toString().toLowerCase() ?? 'kmb';
-  
-              if (companyId == 'ctb' || companyId == 'nwfb') {
-                await Citybus.unpinRoute(
-                  route['route'],
-                  companyId: companyId,
+              final source = route['source']?.toString();
+              // ✅ Check storage SOURCE first — before company-specific checks
+              if (source == 'unified' || companyId == 'mtr' || companyId == 'lrt') {
+                await UnifiedPinnedStorage.unpinRoute(
+                  company: companyId,
+                  route: route['route']?.toString() ?? '',
+                  bound: route['direction']?.toString(),
+                  serviceType: route['serviceType']?.toString(),
+                  initialRouteId: route['initialRouteId']?.toString(),
                 );
+              } else if (companyId == 'ctb') {
+                await Citybus.unpinRoute(route['route'], companyId: companyId.toLowerCase());
               } else if (companyId == 'nlb') {
                 final routeId = route['routeId']?.toString() ?? route['initialRouteId']?.toString() ?? '';
-                if (routeId.isNotEmpty) {
+                if (routeId.isNotEmpty)
                   await Nlb.unpinRoute(routeId);
-                } else {
+                else
                   await UnifiedPinnedStorage.unpinRoute(
                     company: companyId,
                     route: route['route']?.toString() ?? '',
@@ -528,21 +534,7 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                     serviceType: route['serviceType']?.toString(),
                     initialRouteId: route['initialRouteId']?.toString(),
                   );
-                }
-              } else if (companyId == 'gmb' && route['source'] == 'gmb') {
-                final routeId = route['gmbRouteId'];
-                final routeSeq = route['gmbRouteSeq'];
-                if (routeId is int && routeSeq is int) {
-                  await GMB.unpinRoute(routeId, routeSeq);
-                } else {
-                  await UnifiedPinnedStorage.unpinRoute(
-                    company: companyId,
-                    route: route['route']?.toString() ?? '',
-                    bound: route['direction']?.toString(),
-                    serviceType: route['serviceType']?.toString(),
-                    initialRouteId: route['initialRouteId']?.toString(),
-                  );
-                }
+                
               } else if (route['source'] == 'unified' || companyId == 'mtr' || companyId == 'lrt') {
                 await UnifiedPinnedStorage.unpinRoute(
                   company: companyId,
@@ -558,8 +550,9 @@ class _KmbPinnedPageState extends State<KmbPinnedPage> with SingleTickerProvider
                   route['serviceType'],
                 );
               }
-              _loadData();
+              await _loadData();
             },
+          
           );
         },
       ),

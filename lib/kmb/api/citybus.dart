@@ -406,7 +406,7 @@ class Citybus {
 
     pinned.add({
       'route': r,
-      'co': co,
+      'co': co.toLowerCase(),
       'label': label,
       'pinnedAt': DateTime.now().toIso8601String(),
     });
@@ -492,7 +492,7 @@ class Citybus {
 
     final r = route.trim().toUpperCase();
     final s = stopId.trim();
-    final co = _normalizeCompanyIdForEta(companyId).toLowerCase();
+    final co = _normalizeCompanyIdForEta(companyId);
 
     // ✅ DEBUG: Print what we're trying to remove
     debugPrint('🔍 Trying to unpin: route=$r, stopId=$s, seq=$seq, co=$co');
